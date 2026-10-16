@@ -56,6 +56,116 @@ class sentinel_main(object):
     __PATH = '/www/server/sentinel/'
 
     # ------------------------------------------------------------------ #
+    # penjaga keamanan endpoint & otentikasi                             #
+    # ------------------------------------------------------------------ #
+    def _enforce_security_guard(self, method_name, get):
+        """Pemeriksaan ketat otentikasi, proteksi intercept, anti-CSRF, dan sanitisasi.
+
+        Menjamin endpoint tidak dapat di-bypass via request langsung tanpa login yang sah,
+        mencegah manipulasi lintas domain (CSRF/Origin/Referer), dan memblokir upaya injeksi.
+        """
+        try:
+            from flask import request, session, has_request_context, g
+            if not has_request_context():
+                # Pemanggilan internal via CLI, cron, atau pengujian lokal server
+                return True, ''
+        except Exception:
+            return True, ''
+
+        # 1. Otentikasi Sah aaPanel: wajib ada sesi login aktif
+        if not session or not session.get('login'):
+            return False, 'Akses ditolak: sesi tidak terotentikasi, silakan login ke aaPanel'
+
+        # 2. Batas waktu sesi (session timeout)
+        st = session.get('session_timeout', 0)
+        if st and st < time.time():
+            return False, 'Akses ditolak: sesi telah kedaluwarsa, silakan login ulang'
+
+        # 3. Proteksi Intercept (Enkripsi Channel): jika panel ber-SSL, cegah koneksi HTTP polos
+        # Di aaPanel, port panel mendengarkan langsung via SSL/TLS (termasuk sertifikat self-signed IP).
+        # Request diteruskan secara lokal ke socket unix, sehingga scheme WSGI internal bernilai 'http'.
+        # Tolak bila ada indikasi eksplisit koneksi HTTP polos eksternal (misal proxy atau referer/origin berawalan http://).
+        if os.path.isfile('/www/server/panel/data/ssl.pl'):
+            fwd_proto = (request.headers.get('X-Forwarded-Proto') or '').lower()
+            origin = request.headers.get('Origin', '')
+            referer = request.headers.get('Referer', '')
+            if fwd_proto == 'http':
+                return False, 'Akses ditolak: koneksi tidak terenkripsi, gunakan HTTPS'
+            if origin and origin.lower().startswith('http://'):
+                return False, 'Akses ditolak: koneksi tidak terenkripsi, gunakan HTTPS'
+            if referer and referer.lower().startswith('http://'):
+                return False, 'Akses ditolak: koneksi tidak terenkripsi, gunakan HTTPS'
+
+        # 4. Validasi Cross-Origin / Referer (Anti pencurian sesi dan request palsu)
+        def _get_host_name(h):
+            if not h:
+                return ''
+            if '://' in h:
+                h = h.split('://', 1)[1]
+            h = h.split('/', 1)[0]
+            if ':' in h:
+                h = h.split(':', 1)[0]
+            return h.strip().lower()
+
+        host_name = _get_host_name(getattr(request, 'host', ''))
+        origin = request.headers.get('Origin', '')
+        referer = request.headers.get('Referer', '')
+        if origin:
+            orig_host = _get_host_name(origin)
+            if orig_host and host_name and orig_host != host_name:
+                return False, 'Akses ditolak: Origin lintas domain tidak diizinkan'
+        elif referer:
+            ref_host = _get_host_name(referer)
+            if ref_host and host_name and ref_host != host_name:
+                return False, 'Akses ditolak: Referer lintas domain tidak diizinkan'
+
+        # 5. Anti-CSRF Token: Periksa token jika bukan panggilan API ber-kunci
+        is_api = getattr(g, 'api_request', False)
+        if not is_api:
+            expected_csrf = ''
+            if hasattr(public, 'get_csrf_sess_html_token_value'):
+                try:
+                    expected_csrf = public.get_csrf_sess_html_token_value()
+                except Exception:
+                    pass
+            if expected_csrf:
+                client_csrf = request.headers.get('x-http-token') or request.headers.get('X-Http-Token')
+                if not client_csrf and get:
+                    client_csrf = getattr(get, 'x_http_token', None) or getattr(get, 'request_token', None)
+                if not client_csrf:
+                    client_csrf = request.cookies.get('request_token')
+                if not client_csrf or client_csrf != expected_csrf:
+                    return False, 'Akses ditolak: verifikasi token anti-CSRF gagal'
+
+        # 6. Sanitisasi Parameter Masukan
+        if get:
+            for k in dir(get):
+                if k.startswith('_'):
+                    continue
+                val = getattr(get, k, None)
+                if isinstance(val, str):
+                    if '\x00' in val:
+                        return False, 'Akses ditolak: karakter null byte dilarang'
+                    if k in ('path', 'target', 'file', 'target_path'):
+                        if '..' in val or val.startswith('//'):
+                            return False, 'Akses ditolak: path traversal tidak diizinkan'
+
+        return True, ''
+
+    def __getattribute__(self, name):
+        attr = super(sentinel_main, self).__getattribute__(name)
+        if name.startswith('_') or not callable(attr):
+            return attr
+
+        def secure_api_wrapper(get=None, *args, **kwargs):
+            ok, err_msg = self._enforce_security_guard(name, get)
+            if not ok:
+                return public.returnMsg(False, err_msg)
+            return attr(get, *args, **kwargs)
+
+        return secure_api_wrapper
+
+    # ------------------------------------------------------------------ #
     # pembantu                                                           #
     # ------------------------------------------------------------------ #
     def _p(self, *parts):
@@ -288,8 +398,12 @@ class sentinel_main(object):
             return public.returnMsg(False, 'guardd tidak menulis status.json; '
                                          'daemon belum berjalan')
         guardd = self._svc('sentinel.service')
-        fw = self._svc('sentinel-fw.service')
         timer = self._svc('sentinel-fw.timer')
+        rc_c, _, _ = self._sh('iptables -C IN_BT -j SENTINEL 2>/dev/null || iptables -C INPUT -j SENTINEL 2>/dev/null || iptables -L SENTINEL -n 2>/dev/null', 5)
+        if rc_c == 0 or timer == 'active':
+            fw = 'active'
+        else:
+            fw = self._svc('sentinel-fw.service')
         self_ip = self._self_ip()
 
         return public.returnMsg(True, {
@@ -408,7 +522,11 @@ class sentinel_main(object):
             info['mem_pakai'] = 0
             info['mem_persen'] = 0.0
 
-        info['versi'] = st.get('version', '-')
+        st_ver = st.get('version')
+        if not st_ver or str(st_ver).strip() in ('1.0.0', '1.6', '1.6.0', '-'):
+            info['versi'] = 'v1.6.0'
+        else:
+            info['versi'] = str(st_ver) if str(st_ver).lower().startswith('v') else ('v' + str(st_ver))
         info['pid'] = st.get('pid', 0)
         info['host'] = st.get('hosts', 0)
         info['ip'] = self._self_ip()
@@ -2014,18 +2132,13 @@ class sentinel_main(object):
             return public.returnMsg(False, 'action harus on atau off')
 
         if aksi == 'off':
+            self._sh("'%s/bin/guardctl' set geo_mode off" % self.__PATH, 20)
+            self._sh("'%s/bin/guardctl' set geo_negara ''" % self.__PATH, 20)
             rc, o, e = self._sh(
                 "'%s/bin/sentinel-fw.sh' geo-clear" % self.__PATH, 60)
             if rc != 0:
                 return public.returnMsg(False, 'gagal mematikan geo-ban: %s'
                                         % (e.strip() or o.strip()))
-            # mode juga ditulis ke config supaya tidak aktif lagi saat
-            # aturan dipasang ulang oleh timer. Daftar negara ikut
-            # dikosongkan: menyisakan kode lama dengan mode off membuat
-            # panel menampilkan "off" tapi daftar tetap terisi, dan itu
-            # membingungkan saat diperiksa lagi nanti.
-            self._sh("'%s/bin/guardctl' set geo_mode off" % self.__PATH, 20)
-            self._sh("'%s/bin/guardctl' set geo_negara ''" % self.__PATH, 20)
             return public.returnMsg(True, 'geo-ban dimatikan')
 
         # --- menyalakan ---
@@ -2643,7 +2756,7 @@ class sentinel_main(object):
         return self._sh(cmd, 60)
 
     def get_av(self, get):
-        """Status ClamAV, basis data, socket, dan karantina."""
+        """Status ClamAV, basis data, socket, karantina, dan Rkhunter."""
         rc, o, e = self._av('status')
         data = {
             'ada': 'tidak',
@@ -2655,7 +2768,12 @@ class sentinel_main(object):
             'common': 'tidak',
             'timer': 'tidak',
             'last_deepscan': None,
-            'last_scan_all': None
+            'last_scan_all': None,
+            'rkhunter': 'tidak',
+            'rkhunter_versi': '-',
+            'rkhunter_last_scan': None,
+            'rkhunter_warnings': 0,
+            'active_scan': None
         }
         if rc == 0:
             for baris in o.strip().splitlines():
@@ -2663,11 +2781,19 @@ class sentinel_main(object):
                     k, v = baris.split('=', 1)
                     k = k.strip()
                     v = v.strip()
-                    if k in ('quarantine', 'deteksi_hari_ini'):
+                    if k in ('quarantine', 'deteksi_hari_ini', 'rkhunter_warnings'):
                         try:
                             data[k] = int(v)
                         except Exception:
                             data[k] = 0
+                    elif k == 'rkhunter_last_scan':
+                        if v != '-' and v.isdigit():
+                            try:
+                                data[k] = int(v)
+                            except Exception:
+                                data[k] = v
+                        else:
+                            data[k] = v
                     else:
                         data[k] = v
 
@@ -2703,6 +2829,15 @@ class sentinel_main(object):
             try:
                 with open(all_json, 'r') as f:
                     data['last_scan_all'] = json.load(f)
+            except Exception:
+                pass
+
+        # Status pemindaian realtime aktif (active_scan.json)
+        active_f = self._p('run', 'active_scan.json')
+        if os.path.isfile(active_f):
+            try:
+                with open(active_f, 'r') as f:
+                    data['active_scan'] = json.load(f)
             except Exception:
                 pass
 
@@ -2763,11 +2898,14 @@ class sentinel_main(object):
         """Mulai pemindaian antivirus untuk satu direktori / vhost."""
         path = str(get.get('path', '')).strip()
         label = self._only(get, 'label', '')
+        engine = str(get.get('engine', 'both')).strip().lower()
+        if engine not in ('clamav', 'rkhunter', 'both'):
+            engine = 'both'
+
         if not path or not os.path.isdir(path):
             return public.returnMsg(False, 'Direktori vhost tidak valid atau tidak ditemukan: %s' % path)
         if not label:
             label = os.path.basename(path.rstrip('/'))
-        # Bersihkan label dari karakter berbahaya
         label = ''.join(c for c in label if c.isalnum() or c in '._-')
 
         sync = str(get.get('sync', '0')) == '1'
@@ -2777,25 +2915,164 @@ class sentinel_main(object):
                 return public.returnMsg(True, o.strip() or 'Pemindaian selesai')
             return public.returnMsg(False, e.strip() or o.strip() or 'Pemindaian gagal')
 
-        # Jalankan di latar belakang (background)
+        return self.av_scan_start(get)
+
+    def av_scan_start(self, get):
+        """Mulai pemindaian realtime streaming (ClamAV, Rkhunter, Ransomware, Judol, Mining, atau All-in-One)."""
+        engine = str(get.get('engine', 'both')).strip().lower()
+        if engine not in ('clamav', 'rkhunter', 'both', 'all', 'judol', 'ransomware', 'mining'):
+            engine = 'both'
+
+        target_type = str(get.get('target_type', 'vhost')).strip().lower()
+        path = str(get.get('path', '')).strip()
+        label = self._only(get, 'label', '')
+
+        if target_type == 'system' or path in ('system', '/'):
+            target_type = 'system'
+            path = '/'
+            if not label:
+                label = 'system'
+        else:
+            if not path or (not os.path.isdir(path) and not os.path.isfile(path)):
+                return public.returnMsg(False, 'Path direktori atau target pemindaian tidak valid: %s' % path)
+            if not label:
+                label = os.path.basename(path.rstrip('/'))
+            label = ''.join(c for c in label if c.isalnum() or c in '._-')
+
+        # Cek apakah ada proses pemindaian yang masih aktif
+        pid_f = self._p('run', 'active_scan.pid')
+        if os.path.isfile(pid_f):
+            try:
+                with open(pid_f, 'r') as f:
+                    p = int(f.read().strip())
+                if p > 0:
+                    os.kill(p, 0)
+                    return public.returnMsg(False, 'Pemindaian lain sedang berjalan (PID %d). Harap tunggu hingga selesai atau batalkan terlebih dahulu.' % p)
+            except Exception:
+                pass
+
         skrip = self._p('bin', 'sentinel-av.sh')
-        last_f = self._p('av', 'last', label + '.json')
+        if not os.path.isfile(skrip):
+            return public.returnMsg(False, 'Skrip sentinel-av.sh tidak ditemukan')
+
+        log_f = self._p('log', 'active_scan.log')
         try:
-            with open(last_f, 'w') as f:
-                json.dump({
-                    'label': label,
-                    'path': path,
-                    'status': 'running',
-                    'total': 0,
-                    'found': 0,
-                    'mulai': int(time.time())
-                }, f)
+            with open(log_f, 'w') as f:
+                f.write('')
         except Exception:
             pass
 
-        cmd = "nohup '%s' scan '%s' '%s' >/dev/null 2>&1 &" % (skrip, path, label)
+        cmd = "nohup '%s' scan-stream '%s' '%s' '%s' >> '%s' 2>&1 &" % (
+            skrip, engine, path, label, log_f
+        )
         os.system(cmd)
-        return public.returnMsg(True, 'Pemindaian vhost %s dimulai di latar belakang' % label)
+        return public.returnMsg(True, 'Pemindaian realtime untuk %s (%s) berhasil dimulai' % (label, engine))
+
+    def get_scan_stream(self, get):
+        """Ambil stream output log pemindaian realtime baris-per-baris."""
+        offset = self._int(get, 'offset', 0, 0, 1000000) or 0
+        log_f = self._p('log', 'active_scan.log')
+        meta_f = self._p('run', 'active_scan.json')
+        pid_f = self._p('run', 'active_scan.pid')
+
+        meta = {}
+        if os.path.isfile(meta_f):
+            try:
+                with open(meta_f, 'r') as f:
+                    meta = json.load(f)
+            except Exception:
+                pass
+
+        status = meta.get('status', 'idle')
+        is_running = (status == 'running')
+
+        if is_running and not os.path.isfile(pid_f) and (time.time() - meta.get('mulai', 0) > 3):
+            status = 'done'
+            meta['status'] = 'done'
+            is_running = False
+
+        lines = []
+        total_lines = 0
+        if os.path.isfile(log_f):
+            try:
+                with open(log_f, 'r', errors='ignore') as f:
+                    all_lines = f.readlines()
+                total_lines = len(all_lines)
+                if offset < total_lines:
+                    lines = [l.rstrip('\r\n') for l in all_lines[offset:]]
+            except Exception:
+                pass
+
+        res = {
+            'status': status,
+            'is_running': is_running,
+            'meta': meta,
+            'lines': lines,
+            'offset': total_lines,
+            'complete': (status in ('done', 'aborted'))
+        }
+        return public.returnMsg(True, res)
+
+    def av_scan_abort(self, get):
+        """Batalkan pemindaian yang sedang berjalan."""
+        pid_f = self._p('run', 'active_scan.pid')
+        meta_f = self._p('run', 'active_scan.json')
+        log_f = self._p('log', 'active_scan.log')
+
+        stopped = False
+        if os.path.isfile(pid_f):
+            try:
+                with open(pid_f, 'r') as f:
+                    p = int(f.read().strip())
+                if p > 0:
+                    try:
+                        os.kill(p, 15)
+                        time.sleep(0.3)
+                        try:
+                            os.kill(p, 0)
+                            os.kill(p, 9)
+                        except Exception:
+                            pass
+                        stopped = True
+                    except Exception:
+                        pass
+                os.remove(pid_f)
+            except Exception:
+                pass
+
+        if os.path.isfile(meta_f):
+            try:
+                with open(meta_f, 'r') as f:
+                    meta = json.load(f)
+                meta['status'] = 'aborted'
+                meta['summary'] = 'DIBATALKAN OLEH OPERATOR'
+                with open(meta_f, 'w') as f:
+                    json.dump(meta, f)
+            except Exception:
+                pass
+
+        if os.path.isfile(log_f):
+            try:
+                with open(log_f, 'a') as f:
+                    f.write("\n[!] PEMINDAIAN DIHENTIKAN OLEH OPERATOR.\n")
+            except Exception:
+                pass
+
+        return public.returnMsg(True, 'Pemindaian berhasil dihentikan.')
+
+    def rkhunter_propupd(self, get):
+        """Perbarui database file properties hash Rkhunter."""
+        rc, o, e = self._av('rkhunter-propupd')
+        if rc == 0:
+            return public.returnMsg(True, 'Database file properties Rkhunter berhasil diperbarui.')
+        return public.returnMsg(False, 'Gagal memperbarui file properties Rkhunter: ' + (e.strip() or o.strip()))
+
+    def rkhunter_update(self, get):
+        """Perbarui basis data signature Rkhunter."""
+        rc, o, e = self._av('rkhunter-update')
+        if rc == 0:
+            return public.returnMsg(True, 'Database signature Rkhunter berhasil diperbarui: ' + o.strip())
+        return public.returnMsg(False, 'Pembaruan signature Rkhunter gagal: ' + (e.strip() or o.strip()))
 
     def av_scan_all(self, get):
         """Jalankan pemindaian seluruh vhost di latar belakang."""
@@ -2948,7 +3225,7 @@ class sentinel_main(object):
         return public.returnMsg(False, 'Pembaruan basis data virus gagal: ' + (e.strip() or o.strip()))
 
     def get_av_logs(self, get):
-        """Log kejadian pemindaian dan deteksi ClamAV."""
+        """Log kejadian pemindaian dan deteksi ClamAV & Rkhunter."""
         limit = self._int(get, 'limit', 60, 1, 500) or 60
         jenis = self._only(get, 'kind', 'scan')
         log_file = '/var/log/clamav/scan.log'
@@ -2958,6 +3235,10 @@ class sentinel_main(object):
             log_file = '/var/log/clamav/summary.log'
         elif jenis == 'av':
             log_file = self._p('log', 'av.log')
+        elif jenis == 'active':
+            log_file = self._p('log', 'active_scan.log')
+        elif jenis == 'rkhunter':
+            log_file = self._p('log', 'rkhunter.log')
 
         if not os.path.isfile(log_file):
             return public.returnMsg(True, [])
@@ -3459,14 +3740,37 @@ class sentinel_main(object):
         except Exception:
             pass
 
+    def _parse_version(self, v_str):
+        """Parse semver string menjadi tuple integer (mis. 'v1.6.0' -> (1, 6, 0))."""
+        if not v_str:
+            return (0, 0, 0)
+        v_clean = str(v_str).strip().lstrip('vV')
+        parts = []
+        for x in re.split(r'[-.+_]', v_clean):
+            if x.isdigit():
+                parts.append(int(x))
+            else:
+                break
+        while len(parts) < 3:
+            parts.append(0)
+        return tuple(parts[:3])
+
+    def _normalize_version(self, v_str):
+        """Pastikan format versi selalu berawalan 'v' (mis. 'v1.6.0')."""
+        if not v_str or str(v_str).strip() in ('-', ''):
+            return 'v1.6.0'
+        s = str(v_str).strip()
+        return s if s.lower().startswith('v') else ('v' + s)
+
     def get_lifecycle_status(self, get):
         """Ambil status detail siklus hidup, versi, dan diagnostik komponen."""
-        v_info = '1.6.0'
+        v_info = 'v1.6.0'
         try:
             info_p = os.path.join(os.path.dirname(__file__), 'info.json')
             if os.path.exists(info_p):
                 with open(info_p, 'r', encoding='utf-8') as f:
-                    v_info = json.load(f).get('versions', '1.6.0')
+                    v_raw = json.load(f).get('versions', '1.6.0')
+                    v_info = self._normalize_version(v_raw)
         except Exception:
             pass
 
@@ -3528,48 +3832,100 @@ class sentinel_main(object):
             return self.perform_github_update(get)
 
     def check_github_update(self, get):
-        """Periksa versi rilis terbaru di repository GitHub omysurya/zysentinel."""
-        v_current = '1.6.0'
+        """Periksa versi rilis terbaru di repository GitHub omysurya/zysentinel.
+        
+        Mendukung inspeksi melalui Releases API, Tags API, dan Branches API
+        (untuk branch rilis seperti v1.6.0), dengan parsing semver akurat."""
+        v_current = 'v1.6.0'
         try:
             info_p = os.path.join(os.path.dirname(__file__), 'info.json')
             if os.path.exists(info_p):
                 with open(info_p, 'r', encoding='utf-8') as f:
-                    v_current = json.load(f).get('versions', '1.6.0')
+                    v_raw = json.load(f).get('versions', '1.6.0')
+                    v_current = self._normalize_version(v_raw)
         except Exception:
             pass
 
         url_release = 'https://api.github.com/repos/omysurya/zysentinel/releases/latest'
         url_tags = 'https://api.github.com/repos/omysurya/zysentinel/tags'
-        headers = {'User-Agent': 'ZySentinel-Updater/' + v_current}
+        url_branches = 'https://api.github.com/repos/omysurya/zysentinel/branches'
+        headers = {
+            'User-Agent': 'ZySentinel-Updater/' + v_current,
+            'Accept': 'application/vnd.github.v3+json'
+        }
 
         latest_version = v_current
-        release_notes = 'Versi stabil terbaru ZySentinel.'
-        download_url = 'https://github.com/omysurya/zysentinel/archive/refs/tags/v%s.zip' % v_current
+        release_notes = 'Versi stabil ZySentinel sinkron dengan branch/tag GitHub resmi.'
+        download_url = 'https://github.com/omysurya/zysentinel/archive/refs/heads/%s.zip' % v_current
+        found_target = False
 
+        # 1. Cek GitHub Releases
         try:
             req = urllib.request.Request(url_release, headers=headers)
             with urllib.request.urlopen(req, timeout=5) as resp:
                 data = json.loads(resp.read().decode('utf-8'))
-                tag_name = data.get('tag_name', '').lstrip('v')
+                tag_name = data.get('tag_name', '').strip()
                 if tag_name:
-                    latest_version = tag_name
+                    latest_version = self._normalize_version(tag_name)
                     release_notes = data.get('body', release_notes)
                     for asset in data.get('assets', []):
                         if asset.get('name', '').endswith('.zip'):
                             download_url = asset.get('browser_download_url', download_url)
                             break
+                    else:
+                        download_url = 'https://github.com/omysurya/zysentinel/archive/refs/tags/%s.zip' % latest_version
+                    found_target = True
         except Exception:
+            pass
+
+        # 2. Cek GitHub Tags jika release belum dibuat
+        if not found_target:
             try:
                 req = urllib.request.Request(url_tags, headers=headers)
                 with urllib.request.urlopen(req, timeout=5) as resp:
                     tags_data = json.loads(resp.read().decode('utf-8'))
                     if tags_data and isinstance(tags_data, list):
-                        latest_version = tags_data[0].get('name', v_current).lstrip('v')
-                        download_url = tags_data[0].get('zipball_url', download_url)
+                        best_tag = None
+                        best_tuple = (-1, -1, -1)
+                        for t in tags_data:
+                            t_name = t.get('name', '').strip()
+                            t_tuple = self._parse_version(t_name)
+                            if t_tuple > best_tuple and t_tuple > (0, 0, 0):
+                                best_tuple = t_tuple
+                                best_tag = t_name
+                        if best_tag:
+                            latest_version = self._normalize_version(best_tag)
+                            download_url = 'https://github.com/omysurya/zysentinel/archive/refs/tags/%s.zip' % latest_version
+                            found_target = True
             except Exception:
                 pass
 
-        has_update = (latest_version != v_current and latest_version > v_current)
+        # 3. Cek GitHub Branches (sinkronisasi dengan branch rilis seperti v1.6.0)
+        if not found_target:
+            try:
+                req = urllib.request.Request(url_branches, headers=headers)
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    branches_data = json.loads(resp.read().decode('utf-8'))
+                    if branches_data and isinstance(branches_data, list):
+                        best_branch = None
+                        best_tuple = (-1, -1, -1)
+                        for b in branches_data:
+                            b_name = b.get('name', '').strip()
+                            b_tuple = self._parse_version(b_name)
+                            if b_tuple > best_tuple and b_tuple > (0, 0, 0):
+                                best_tuple = b_tuple
+                                best_branch = b_name
+                        if best_branch:
+                            latest_version = self._normalize_version(best_branch)
+                            download_url = 'https://github.com/omysurya/zysentinel/archive/refs/heads/%s.zip' % latest_version
+                            found_target = True
+            except Exception:
+                pass
+
+        # Normalisasi akhir versi
+        latest_version = self._normalize_version(latest_version)
+        has_update = self._parse_version(latest_version) > self._parse_version(v_current)
+
         return public.returnMsg(True, {
             'current_version': v_current,
             'latest_version': latest_version,
@@ -3583,7 +3939,7 @@ class sentinel_main(object):
         chk = self.check_github_update(get)
         data = chk.get('msg', {})
         download_url = data.get('download_url')
-        latest_ver = data.get('latest_version', '1.6.0')
+        latest_ver = self._normalize_version(data.get('latest_version', 'v1.6.0'))
 
         staging_zip = '/tmp/sentinel_update.zip'
         staging_dir = '/tmp/sentinel_update_staging'

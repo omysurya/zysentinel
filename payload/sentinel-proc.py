@@ -47,6 +47,32 @@ BLOCKED_TOOLS = frozenset([
     "chattr", "chmod", "chown", "pkill", "killall", "crontab", "pkexec", "sudo"
 ])
 
+# Kategori biner penambang kripto (Crypto Miners / Botnet Miners)
+BLOCKED_MINERS = frozenset([
+    "xmrig", "minerd", "cpuminer", "xmr-stak", "nanominer", "ccminer",
+    "ethminer", "nbminer", "t-rex", "gminer", "phoenixminer", "srbminer",
+    "bminer", "hellminer", "wildrig", "lolminer", "claymore", "teamredminer"
+])
+
+# Perkakas & perilaku ransomware (enkripsi paksa massal)
+BLOCKED_RANSOM_TOOLS = frozenset([
+    "vssadmin", "wbadmin", "bcdedit", "cipher"
+])
+
+# Argumen & protokol pertambangan kripto (Stratum, pool monero, dll)
+CRYPTO_MINING_PATTERNS = (
+    "stratum+tcp://", "stratum+ssl://", "stratum2+tcp://", "stratum+udp://",
+    "stratum+tls://", "--donate-level", "--algo=rx/0", "--algo=cryptonight",
+    "moneroocean", "supportxmr", "minexmr", "c3pool", "pool.hashvault",
+    "nanopool.org", "nicehash.com", "f2pool.com", "antpool.com", "cryptonight"
+)
+
+# Pola perintah ransomware (enkripsi paksa massal)
+RANSOMWARE_CMD_PATTERNS = (
+    "openssl enc -aes", "gpg --batch --passphrase",
+    "7z a -p", "rar a -hp", "zip -e -P"
+)
+
 SUSPICIOUS_DIRS = (
     "/tmp/",
     "/var/tmp/",
@@ -289,6 +315,7 @@ def scan_once(target_uid=DEFAULT_WEB_UID, mode="enforce"):
             # Lewati proses root (UID 0) - root memiliki kendali penuh
             if st_uid == 0:
                 continue
+            is_web_user = (st_uid == target_uid or st_uid == DEFAULT_WEB_UID or st_uid >= 1000)
         except (FileNotFoundError, ProcessLookupError, PermissionError):
             continue
 
@@ -350,15 +377,27 @@ def scan_once(target_uid=DEFAULT_WEB_UID, mode="enforce"):
             if basename in BLOCKED_SHELLS:
                 rule_violation = f"ILLEGAL_SHELL({basename})"
             
-            # Aturan 2: Alat tunnel / scanner / sistem tamper
+            # Aturan 2: Penambang Kripto (Crypto Miner Binary)
+            elif basename in BLOCKED_MINERS:
+                rule_violation = f"CRYPTO_MINER({basename})"
+
+            # Aturan 3: Argumen & Pool Mining Kripto pada cmdline
+            elif cmdline and any(mp in cmdline.lower() for mp in CRYPTO_MINING_PATTERNS):
+                rule_violation = f"CRYPTO_POOL_MINING({cmdline[:50]})"
+
+            # Aturan 4: Alat tunnel / scanner / sistem tamper
             elif basename in BLOCKED_TOOLS:
                 rule_violation = f"BLOCKED_TOOL({basename})"
-                
-            # Aturan 3: Eksekusi binary dari folder temporer
+
+            # Aturan 5: Perilaku Ransomware / Enkripsi Paksa
+            elif basename in BLOCKED_RANSOM_TOOLS or (cmdline and any(rp in cmdline.lower() for rp in RANSOMWARE_CMD_PATTERNS)):
+                rule_violation = f"RANSOMWARE_BEHAVIOR({cmdline[:50] if cmdline else basename})"
+
+            # Aturan 6: Eksekusi binary dari folder temporer
             elif exe_path and any(exe_path.startswith(d) for d in SUSPICIOUS_DIRS):
                 rule_violation = f"TEMP_DIR_EXEC({exe_path})"
                 
-            # Aturan 4: Binary ELF yang berjalan langsung di direktori webroot
+            # Aturan 7: Binary ELF yang berjalan langsung di direktori webroot
             elif exe_path and exe_path.startswith("/www/wwwroot/") and is_elf(exe_path):
                 rule_violation = f"WEBROOT_ELF_EXEC({exe_path})"
 

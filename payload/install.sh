@@ -287,9 +287,16 @@ pasang_antivirus() {
     say "ClamAV tidak tersedia di sistem ini; fitur Antivirus nonaktif"
   fi
 
-  # Struktur direktori sentinel/av
-  mkdir -p "$BASE/av/baseline" "$BASE/av/last" "$BASE/av/quarantine/files" "$BASE/av/quarantine/meta" 2>/dev/null
+  # Struktur direktori sentinel/av & rkhunter
+  mkdir -p "$BASE/av/baseline" "$BASE/av/last" "$BASE/av/quarantine/files" "$BASE/av/quarantine/meta" \
+           "$BASE/db/rkhunter" "$BASE/tmp/rkhunter" 2>/dev/null
   chmod 750 "$BASE/av" "$BASE/av/quarantine" 2>/dev/null || true
+  chmod 700 "$BASE/tmp/rkhunter" 2>/dev/null || true
+
+  # Salin database awal rkhunter bila ada
+  if [ ! -f "$BASE/db/rkhunter/rkhunter.dat" ] && [ -d /var/lib/rkhunter/db ]; then
+    cp -rn /var/lib/rkhunter/db/* "$BASE/db/rkhunter/" 2>/dev/null || true
+  fi
 
   # Salin skrip dari payload
   local pay; pay="$(dirname "$0")/payload"
@@ -638,6 +645,18 @@ kunci_keamanan_benteng() {
   say "seluruh izin benteng dikunci rapat untuk root saja"
 }
 
+pasang_icon() {
+  local plug_dir="/www/server/panel/plugin/sentinel"
+  local icon_src="$plug_dir/icon.png"
+  [ -f "$icon_src" ] || icon_src="$(dirname "$0")/icon.png"
+  if [ -f "$icon_src" ]; then
+    mkdir -p /www/server/panel/BTPanel/static/img/soft_ico /www/server/panel/BTPanel/static/vite/images/soft-ico
+    cp -p "$icon_src" /www/server/panel/BTPanel/static/img/soft_ico/ico-sentinel.png 2>/dev/null || true
+    cp -p "$icon_src" /www/server/panel/BTPanel/static/vite/images/soft-ico/ico-sentinel.png 2>/dev/null || true
+    say "ikon CyberMatrix resmi disinkronkan ke aset panel aaPanel"
+  fi
+}
+
 butuh_root
 AKSI="${1:-pasang}"
 ARG2="${2:-}"
@@ -646,17 +665,19 @@ case "$AKSI" in
     cek_depe \
       && pasang_daemon && pasang_unit_dari_payload && pasang_firewall \
       && pasang_layanan && pasang_notif && konsolidasi_waf && pasang_waf \
-      && pasang_antivirus && pasang_defender_elit && kunci_keamanan_benteng
+      && pasang_antivirus && pasang_defender_elit && kunci_keamanan_benteng \
+      && pasang_icon
     say "selesai. Status: systemctl status sentinel.service"
     ;;
   fresh|fresh-install)
-    pasang_fresh
+    pasang_fresh && pasang_icon
     ;;
   update|upgrade)
     cek_depe \
       && pasang_daemon && pasang_unit_dari_payload && pasang_firewall \
       && pasang_layanan && pasang_notif && konsolidasi_waf && pasang_waf \
-      && pasang_antivirus && pasang_defender_elit && kunci_keamanan_benteng
+      && pasang_antivirus && pasang_defender_elit && kunci_keamanan_benteng \
+      && pasang_icon
     say "pembaruan selesai. Versi terbaru aktif."
     ;;
   repair|perbaiki|self-heal)

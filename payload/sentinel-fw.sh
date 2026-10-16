@@ -189,6 +189,10 @@ GLOBAL_RATE="${SENTINEL_GLOBAL_RATE-3000/second}"
 GLOBAL_BURST="${SENTINEL_GLOBAL_BURST-6000}"
 # Port web yang dilindungi.
 WEB_PORTS="${SENTINEL_WEB_PORTS:-80,443}"
+# Port untuk geo-ban. Bawaan 443 (HTTPS) agar tantangan HTTP-01 Let's Encrypt (port 80)
+# tetap dapat diverifikasi secara global dari server CA mana pun tanpa diblokir,
+# sementara seluruh lalu lintas produksi HTTPS tetap terlindungi secara ketat.
+GEO_PORTS="${SENTINEL_GEO_PORTS:-443}"
 
 say() { printf '[sentinel-fw] %s\n' "$*"; }
 err() { printf '[sentinel-fw] GALAT: %s\n' "$*" >&2; }
@@ -305,6 +309,11 @@ do_install() {
         err "gagal memulihkan geo-ban; periksa $GEO_JSON dan kode negara"
       fi
     fi
+  else
+    # Bila mode off atau negara kosong: pastikan ipset dikosongkan agar tidak ada sisa CIDR lama
+    if "$IPSET" list "$SET_GEO" >/dev/null 2>&1; then
+      "$IPSET" flush "$SET_GEO" 2>/dev/null || true
+    fi
   fi
 
   "$IPT" -N "$CHAIN" 2>/dev/null || true
@@ -334,13 +343,17 @@ do_install() {
   #
   #     Hanya berlaku di port web. SSH dan port panel tidak tersentuh,
   #     supaya konfigurasi yang salah masih bisa diperbaiki.
-  if [ "$SET_GEO" ] && "$IPSET" list "$SET_GEO" >/dev/null 2>&1 \
+  if [ "$GEO_MODE" != "off" ] && [ -n "$GEO_NEGARA" ] \
+     && [ "$SET_GEO" ] && "$IPSET" list "$SET_GEO" >/dev/null 2>&1 \
      && [ "$("$IPSET" list "$SET_GEO" 2>/dev/null | grep -c '^[0-9]')" -gt 0 ]; then
-    "$IPT" -A "$CHAIN" -p tcp -m multiport --dports "$WEB_PORTS" \
+    "$IPT" -A "$CHAIN" -p tcp -m multiport --dports "$GEO_PORTS" \
       -m set --match-set "$SET_GEO" src \
       -m comment --comment "sentinel:geo-drop" -j DROP
-    say "geo-ban aktif: $("$IPSET" list "$SET_GEO" 2>/dev/null | grep -c '^[0-9]') blok CIDR diblokir pada port $WEB_PORTS"
+    say "geo-ban aktif: $("$IPSET" list "$SET_GEO" 2>/dev/null | grep -c '^[0-9]') blok CIDR diblokir pada port $GEO_PORTS"
   else
+    if "$IPSET" list "$SET_GEO" >/dev/null 2>&1; then
+      "$IPSET" flush "$SET_GEO" 2>/dev/null || true
+    fi
     say "geo-ban tidak aktif (set kosong atau mode off)"
   fi
 

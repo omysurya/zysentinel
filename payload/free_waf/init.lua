@@ -720,6 +720,9 @@ end
 function url_white()
     local ctx = C()
     if ngx.var.document_root == '/www/server/phpmyadmin' then return true end
+    if ctx.uri and (ctx.uri:sub(1, 28) == "/.well-known/acme-challenge/" or ctx.uri:sub(1, 13) == "/.well-known/") then
+        return true
+    end
     if is_ngx_match(url_white_rules, ctx.request_uri, false) then
         local url_data = split2(ctx.request_uri, '?')
         if not url_data or not url_data[1] then
@@ -1122,6 +1125,11 @@ function run_btwaf()
     ctx.ipn = arrip(ctx.ip)
     ctx.request_uri = ngx.var.request_uri
     ctx.uri = ngx.unescape_uri(ngx.var.uri)
+
+    -- Bypass WAF inspection for Let's Encrypt / ACME challenge verification
+    if ctx.uri and (ctx.uri:sub(1, 28) == "/.well-known/acme-challenge/" or ctx.uri:sub(1, 13) == "/.well-known/") then
+        return false
+    end
     ctx.uri_request_args = ngx.req.get_uri_args() or {}
     ctx.cycle = config['cc']['cycle']
     ctx.endtime = config['cc']['endtime']
