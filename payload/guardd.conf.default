@@ -1,0 +1,140 @@
+# ============================================================
+# guardd.conf -- konfigurasi daemon Sentinel
+#
+# Format: key = value  (baris diawali # diabaikan)
+# Diubah lewat: /www/server/sentinel/bin/guardctl set <key> <nilai>
+# atau lewat plugin panel.
+#
+# Mengubah berkas ini MEMBUTUHKAN restart guardd, karena semua nilai
+# dibaca sekali saat daemon mulai (kecuali rescan yang periodik).
+# ============================================================
+
+# --- globale ---
+enforce = 0
+# enforce = 0 : hanya deteksi + statistik (tidak pernah memblokir)
+# enforce = 1 : skor tinggi berujung throttling dan ban di ipset
+
+rescan_interval = 30
+# Berapa detik sekali daftar access log dicari ulang.
+# Tambah vhost / hapus vhost akan terbaca dalam <= 30 detik tanpa
+# restart daemon dan tanpa menyentuh kode.
+
+startup_backfill = 0
+# Berapa detik log terakhir yang DILEWATI saat start (0 = dari awal
+# berkas). Pakai > 0 supaya statistik tidak tercemar request lama.
+
+# --- ambang skor ---
+# Skor sudah komposit (scanner + bruteforce + flood + UA palsu +
+# enumerasi path digabung).
+
+watch_score    = 20
+throttle_score = 60
+ban_score      = 150
+
+# --- batas laju throttle ---
+# Berlaku untuk IP yang masuk daftar throttle saja, bukan semua IP.
+#
+# throttle_rps = permintaan per detik. Menahan ledakan sesaat.
+# throttle_burst = jumlah request yang boleh lewat sekaligus di atas rps.
+# throttle_rpm = permintaan per menit. Menahan penyalahgunaan berlanjut
+#                 yang lolos dari aturan per detik (misalnya 4 rps terus
+#                 menerus = 240 per menit, di bawah 5 rps sehingga tidak
+#                 pernah tersentuh aturan per detik).
+# Isi throttle_rpm dengan 0 untuk mematikan aturan per menit.
+#
+# Nilai di sini dibaca sentinel-fw.sh. Memperbarui throttle_rps atau
+# throttle_rpm tidak butuh restart guardd, cukup jalankan:
+#   /www/server/sentinel/bin/sentinel-fw.sh install
+throttle_rps = 5
+throttle_burst = 15
+throttle_rpm = 300
+
+# --- geo-ban (blokir per negara) ---
+# geo_mode   = off
+# geo_mode   = off
+# geo_mode   = off
+#                    Sangat ketat: satu negara terlewat berarti seluruh
+#                    pengunjung dari sana diblokir. Pakai dengan hati-hati.
+# geo_negara       : kode negara ISO dua huruf, dipisah koma tanpa spasi.
+#                    Contoh: CN,RU,KP
+#
+# PERINGATAN: geo-ban hanya berlaku di port web (80,443). SSH dan port
+# panel TIDAK tersentuh, jadi konfigurasi yang salah masih bisa
+# diperbaiki. Whitelist dan allowlist selalu menang atas geo-ban.
+#
+# Sumber blok CIDR: /www/server/panel/data/firewall/GeoLite2-Country.json
+# Setelah mengubah dua nilai ini, jalankan:
+#   /www/server/sentinel/bin/sentinel-fw.sh geo-apply
+geo_mode   = off
+geo_negara = 
+
+# --- bobot skor ---
+# NILAI INI DIKALIBRASI DARI LOG PRODUKSI, bukan ditebak.
+# Metode: seluruh 523.953 baris access log produksi (30 Sep 2026 s/d
+# 2 Okt 2026, 47.355 IP berbeda) diputar ulang dengan simulasi yang
+# meniru score_of() dan pelRedaman skor persis,
+# memakai stempel waktu asli tiap baris.
+#
+# Hasil pada bobot ini:
+#   6 IP  menyentuh ambang ban (>= 150)  -> semuanya terbukti penyerang
+#   117  berasal dari crawler sah  -> masih 33 poin di bawah ban
+#   backend payroll 103.129.148.157      -> hanya 20 (watch)
+#
+# weight_distinct sengaja kecil (1, bukan 2). Pengukuran menunjukkan
+# crawler sah seperti GrokBot dan TelegramBot menjelajah puluhan path
+# berbeda dan dengan bobot 2 skornya mencapai 137 -- hanya 13 poin di
+# bawah ambang ban. Path 4xx yang berbeda memang sinyal yang lemah:
+# crawler yang sopan juga menjelajah. Scanner dan brute force hampir
+# tidak pernah muncul pada trafik sah, jadi bobotnya tetap tinggi.
+
+weight_scan     = 8
+weight_brute    = 6
+weight_badua    = 1
+weight_distinct = 1
+
+# Batas maksimum kontribusi per kategori, supaya satu kategori saja
+# tidak cukup untuk mencapai ambang ban.
+# Total maksimum = 80 + 120 + 20 + 20 = 240.
+cap_scan     = 10
+cap_brute    = 20
+cap_badua    = 20
+cap_distinct = 20
+
+# --- durasi ---
+ban_seconds     = 3600
+ban_seconds_max = 86400
+# Ban naik bertahap untuk offenders berulang (x2 per offense, dibatasi).
+
+# --- pagu (batas keras, bukan saran) ---
+max_ips            = 16384
+max_lines_per_tick = 20000
+# Pagu baris log per siklus. Saat flood, daemon memproses|max_lines_per_tick|
+# baris lalu menunggu siklus berikutnya -- bukan membanjiri CPU.
+
+# --- interval penulisan ---
+flush_interval = 5
+# Seberapa sering statistik ditulis ke SQLite (batch).
+
+# --- jalur ---
+db_path    = /www/server/sentinel/data/guardd.db
+run_dir    = /www/server/sentinel/run
+log_file   = /www/server/sentinel/log/guardd.log
+allow_file = /www/server/sentinel/etc/allowlist.txt
+
+# Direktori yang dipindai rekursif untuk mencari directive access_log.
+conf_dir = /www/server/panel/vhost/nginx
+conf_dir = /www/server/nginx/conf
+
+# Direktori log yang dipindai sebagai jaring pengaman (berkas *.log yang
+# memverifikasi dirinya sebagai access log). Tidak perlu diubah saat
+# menambah/menghapus vhost.
+log_dir = /www/wwwlogs
+
+# Ambang antrian review. 0 mematikan antrian.
+# IP yang mencapai skor ini DICATAT tapi tidak diblokir.
+review_score    = 100
+
+# Notifikasi. URL kosong berarti daemon tidak menulis antrean notifikasi.
+notify_url     = ""
+notify_token   = ""
+notify_url     = ""

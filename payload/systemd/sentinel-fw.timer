@@ -1,0 +1,29 @@
+[Unit]
+Description=Sentinel pasang ulang aturan firewall secara berkala
+Documentation=file:/www/docs/2026-10-02-fitur-sentinel-monitoring-firewall.md
+
+[Timer]
+# Setiap 5 menit, dihitung dari kalender, bukan dari aktivitas unit.
+#
+# Awalnya dipakai OnUnitActiveSec=5min. Dua sebab kenapa itu tidak
+# pernah menyala pada unit ini:
+#
+#   1. sentinel-fw.service memakai RemainAfterExit=yes, jadi setelah
+#      satu kali jalan unit-nya TIDAK PERNAH berubah menjadi inactive.
+#      OnUnitInactiveSec= karena itu juga tidak pernah punya titik acuan.
+#   2. Akibatnya systemctl list-timers menulis "Trigger: n/a" dan
+#      kolom NEXT kosong, padahal status unit tetap "active (running)".
+#      Ini jebakan yang sama seperti reload nginx yang selalu mencetak
+#      "done": status terlihat benar, tetapi tidak ada yang benar-benar
+#      berjalan.
+#
+# OnCalendar tidak bergantung pada apa pun yang dilakukan unit, jadi
+# selalu punya jadwal berikutnya. Persistent=true membuat satu
+# pemasangan tetap dijalankan begitu mesin dinyalakan, walau jamnya
+# terlewat.
+OnCalendar=*-*-* *:0/5:00
+Persistent=true
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target

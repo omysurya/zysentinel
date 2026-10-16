@@ -1,0 +1,21 @@
+# ============================================================
+# sentinel - daftar putih yang tidak boleh pernah diblokir
+#
+# Isi berkas ini dibaca guardd (untuk statistik) DAN
+# sentinel-fw.sh (untuk aturan iptables). Keduanya membaca ulang
+# berkas ini setiap rescan / setiap pemasangan ulang, jadi daftar
+# bisa ditambah tanpa perlu restart daemon.
+#
+# Format: satu entri per baris. Boleh IP tunggal atau CIDR.
+#_baris_kosong_dan_komentar_abaikan.
+#
+# PENTING: guardd TIDAK pernah memasukkan IP ini ke ipset
+# manapun, sehingga tidak bisa ter-ban maupun ter-throttle.
+# ============================================================
+
+# Backend aplikasi payroll (server5-whm-solo, sales.pharmasolindo.com).
+# Menghasilkan 650 HTTP 401 pada /payroll/auth dalam log produksi --
+# itu aplikasi yang menebak kredensial, bukan serangan. Tanpa baris
+# ini backend sah akan ikut ter-ban. Sudah juga ada di
+# aapanel.ipv4.whitelist, jadi terlindungi dua lapis.
+103.129.148.157

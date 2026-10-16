@@ -1,0 +1,28 @@
+[Unit]
+Description=Sentinel pengirim notifikasi (ban dan throttle)
+Documentation=file:/www/docs/2026-10-15-fitur-notifikasi-ban-dan-throttle.md
+After=sentinel.service
+
+[Service]
+Type=oneshot
+# Berapa pun timeout yang berlaku, pengirim tidak boleh menggantung.
+# Kalau alamat tujuan tidak menjawab, siklus berikutnya yang mencoba
+# lagi. Menunggu hanya memperlambat apa yang tidak akan berhasil.
+TimeoutStartSec=60
+ExecStart=/www/server/sentinel/bin/sentinel-notify.sh
+
+# Notifikasi memuat alamat IP penyerang. Kelihatannya tidak serum
+# sensitif seperti kata sandi, tapi aksesnya tetap dibatasi.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+ReadWritePaths=/www/server/sentinel
+
+StandardOutput=append:/www/server/sentinel/log/notify.out
+StandardError=append:/www/server/sentinel/log/notify.out
+
+[Install]
+WantedBy=multi-user.target

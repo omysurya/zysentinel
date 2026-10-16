@@ -1,0 +1,175 @@
+#!/bin/bash
+# ============================================================
+# guardctl -- kendali baris perintah untuk guardd
+#
+# Semua perintah jalan lewat unix socket. Bila guardd mati, perintah
+# yang butuh daemon akan memberi tahu, bukan diam-diam berhasil.
+# ============================================================
+set -u
+
+RUNDIR="${SENTINEL_RUN:-/www/server/sentinel/run}"
+SOCK="${SENTINEL_SOCK:-$RUNDIR/guardd.sock}"
+CONF="${SENTINEL_CONF:-/www/server/sentinel/etc/guardd.conf}"
+PIDFILE="$RUNDIR/guardd.pid"
+STATUSJSON="$RUNDIR/status.json"
+
+say() { printf '%s\n' "$*"; }
+err() { printf 'GALAT: %s\n' "$*" >&2; }
+
+ctl() {
+  [ -S "$SOCK" ] || { err "socket daemon tidak ada ($SOCK), guardd belum jalan"; return 1; }
+  local reply
+  reply="$(printf '%s' "$1" | timeout 5 nc -U -q1 "$SOCK" 2>/dev/null)" \
+    || reply="$(printf '%s' "$1" | timeout 5 socat - "UNIX-CONNECT:$SOCK" 2>/dev/null)"
+  if [ -z "$reply" ]; then err "tidak ada balasan dari guardd"; return 1; fi
+  say "$reply"
+  case "$reply" in *'"ok":true'*) return 0 ;; *) return 1 ;; esac
+}
+
+case "${1:-}" in
+  status)
+    if [ -f "$STATUSJSON" ]; then
+      if command -v jq >/dev/null 2>&1; then
+        jq . "$STATUSJSON"
+      else
+        cat "$STATUSJSON"
+      fi
+    else
+      err "status.json belum ada; guardd belum menulis statistik"
+      exit 1
+    fi
+    ;;
+
+  brief)
+    # Ringkasan satu baris, enak untuk monitoring.
+    [ -f "$STATUSJSON" ] || { err "status.json belum ada"; exit 1; }
+    if command -v jq >/dev/null 2>&1; then
+      # Dua angka ban sengaja dipisahkan. bans_total adalah jumlah
+      # ban yang PERNAH dibuat sejak daemon mulai, sedangkan bans_active
+      # adalah ban yang masih berlaku sekarang. Kalau keduanya dicampur
+      # jadi satu, angka terlihat tidak pernah turun padahal ipset sudah
+      # kosong.
+      jq -r '"enforce=\(.enforce) log=\(.logs|length) request=\(.total_req) " +
+           "bytes=\(.total_bytes) ip=\(.ips_tracked) " +
+           "ban_aktif=\(.bans_active) ban_total=\(.bans_total) " +
+           "throttle=\(.throttles_total) rss=\(.rss_kb)KB"' "$STATUSJSON"
+    else
+      cat "$STATUSJSON"
+    fi
+    ;;
+
+  ping)   ctl "ping" ;;
+  ban)
+    [ -n "${2:-}" ] || { err "pakai: guardctl ban <ip> [durasi detik]"; exit 1; }
+    # Durasi opsional harus benar-benar dikirim ke daemon. Kalau argumen
+    # ketiga diabaikan diam-diam, nilai yang diketik di panel tidak
+    # pernah berlaku dan ban selalu memakai durasi bawaan.
+    if [ -n "${3:-}" ]; then
+      case "$3" in
+        ''|*[!0-9]*) err "durasi harus angka bulat: $3"; exit 1 ;;
+      esac
+      ctl "ban $2 $3"
+    else
+      ctl "ban $2"
+    fi
+    ;;
+  unban)  [ -n "${2:-}" ] || { err "pakai: guardctl unban <ip>"; exit 1; }; ctl "unban $2" ;;
+  unreview) [ -n "${2:-}" ] || { err "pakai: guardctl unreview <ip>"; exit 1; }; ctl "unreview $2" ;;
+  allow)  [ -n "${2:-}" ] || { err "pakai: guardctl allow <ip>"; exit 1; }; ctl "allow $2" ;;
+  rescan) ctl "rescan" ;;
+  flush)  ctl "flush" ;;
+
+  panic|panic-on|panic-off|panic-status)
+    # Panic TIDAK lewat socket daemon. Aturan iptables harus tetap bisa
+    # dipasang ulang dan dicabut meski guardd sedang mati, dan justru
+    # di saat panik guardd itu yang paling mungkin tidak merespons.
+    FW="${SENTINEL_FW:-/www/server/sentinel/bin/sentinel-fw.sh}"
+    [ -x "$FW" ] || { err "skrip firewall tidak ditemukan: $FW"; exit 1; }
+    "$FW" "$1"
+    rc=$?
+    # panic-status mengembalikan 1 saat tidak aktif. Itu jawaban yang
+    # benar, bukan kegagalan perintah, jadi diteruskan apa adanya.
+    exit $rc
+    ;;
+
+  stop)
+    ctl "stop" && say "permintaan berhenti dikirim, guardd akan menutup diri"
+    ;;
+
+  set)
+    # Ubah satu key di berkas config. Menghentikan daemon dari
+    # panel karena daemon membaca config hanya saat start.
+    key="${2:-}"; val="${3:-}"
+    [ -n "$key" ] || { err "pakai: guardctl set <key> <nilai>"; exit 1; }
+    if [ ! -f "$CONF" ]; then err "config tidak ditemukan: $CONF"; exit 1; fi
+    before="$CONF.$(date +%Y%m%d%H%M%S).bak"
+    cp -p "$CONF" "$before"
+    if grep -qE "^[[:space:]]*$key[[:space:]]*=" "$CONF"; then
+      sed -i -E "s|^[[:space:]]*$key[[:space:]]*=.*|$key = $val|" "$CONF"
+    else
+      printf '%s = %s\n' "$key" "$val" >> "$CONF"
+    fi
+    say "config diperbarui: $key = $val (backup: $before)"
+    say "jalankan: systemctl restart sentinel"
+    ;;
+
+  live)
+    # Ikuti status.json tiap 2 detik.
+    [ -f "$STATUSJSON" ] || { err "status.json belum ada"; exit 1; }
+    while :; do
+      clear 2>/dev/null || true
+      if command -v jq >/dev/null 2>&1; then
+        jq -r '"waktu      : \(.ts)  uptime=\(.uptime)s",
+               "mode        : \(if .enforce==1 then "AKTIF (memblokir)" else "MONITOR (tidak memblokir)" end)",
+               "request    : \(.total_req)  byte=\(.total_bytes)  baris-terbaca=\(.lines)",
+               "IP dilacak  : \(.ips_tracked)",
+               "log ditail  : \(.logs|length)",
+               "ban total   : \(.bans_total)  throttle total: \(.throttles_total)  ban aktif: \(.bans|length)",
+               "memori      : \(.rss_kb) KB",
+               "ambang      : watch=\(.watch_score) throttle=\(.throttle_score) ban=\(.ban_score)",
+               "--- 10 IP teratas ---",
+               (.top_ips[:10][] | "  \(.ip)  req=\(.req)  skor=\(.score)  level=\(.level)"),
+               "--- ban aktif ---",
+               ((.bans[:10][]? | "  \(.ip)  \(.kind)  skor=\(.score)  sisa=\(.until - .ts)d") // "  (tidak ada)")' \
+          "$STATUSJSON"
+      else
+        cat "$STATUSJSON"
+      fi
+      sleep 2
+    done
+    ;;
+
+  logs)
+    n="${2:-50}"
+    if command -v journalctl >/dev/null 2>&1 && systemctl cat sentinel >/dev/null 2>&1; then
+      journalctl -u sentinel -n "$n" --no-pager
+    else
+      tail -n "$n" /www/server/sentinel/log/guardd.log 2>/dev/null || err "log tidak ditemukan"
+    fi
+    ;;
+
+  ""|help|-h|--help)
+    cat <<'EOF'
+pakai: guardctl <perintah>
+
+  status            tampilkan status.json lengkap (format rapi)
+  brief             ringkasan satu baris
+  live              tampilkan langsung, diperbarui tiap 2 detik
+  ping              uji daemon menjawab
+  ban <ip>          blokir IP sekarang juga (dengan timeout bawaan)
+  unban <ip>        lepas blokir dan hapus dari daftar
+  unreview <ip>     lepas dari antrian review tanpa memblokir
+  allow <ip>        whitelist permanen (bertahan setelah restart)
+  rescan            paksa penemuan ulang daftar access log sekarang juga
+  flush             paksa penulisan statistik ke database
+  panic-on          blokir seluruh akses web (port web saja, SSH tetap aman)
+  panic-off         cabut blokir panic
+  panic-status      cek apakah panic sedang aktif
+  stop              minta daemon berhenti rapi
+  set <k> <v>       ubah satu key di guardd.conf
+  logs [n]          tampilkan n baris log terakhir
+EOF
+    ;;
+
+  *) err "perintah tidak dikenal: $1 (lihat: guardctl help)"; exit 1 ;;
+esac
