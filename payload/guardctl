@@ -18,9 +18,16 @@ err() { printf 'GALAT: %s\n' "$*" >&2; }
 
 ctl() {
   [ -S "$SOCK" ] || { err "socket daemon tidak ada ($SOCK), guardd belum jalan"; return 1; }
-  local reply
-  reply="$(printf '%s' "$1" | timeout 5 nc -U -q1 "$SOCK" 2>/dev/null)" \
-    || reply="$(printf '%s' "$1" | timeout 5 socat - "UNIX-CONNECT:$SOCK" 2>/dev/null)"
+  local reply=""
+  if command -v nc >/dev/null 2>&1; then
+    reply="$(printf '%s' "$1" | timeout 5 nc -U -q1 "$SOCK" 2>/dev/null)"
+  fi
+  if [ -z "$reply" ] && command -v socat >/dev/null 2>&1; then
+    reply="$(printf '%s' "$1" | timeout 5 socat - "UNIX-CONNECT:$SOCK" 2>/dev/null)"
+  fi
+  if [ -z "$reply" ] && command -v python3 >/dev/null 2>&1; then
+    reply="$(python3 -c "import socket, sys; s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); s.settimeout(5); s.connect('$SOCK'); s.sendall(sys.argv[1].encode()); print(s.recv(4096).decode('utf-8', errors='ignore').strip())" "$1" 2>/dev/null)"
+  fi
   if [ -z "$reply" ]; then err "tidak ada balasan dari guardd"; return 1; fi
   say "$reply"
   case "$reply" in *'"ok":true'*) return 0 ;; *) return 1 ;; esac

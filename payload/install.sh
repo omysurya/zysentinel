@@ -70,12 +70,13 @@ pasang_daemon() {
   # aturan kernel tidak bisa dipasang sama sekali.
   if [ -d "$pay" ]; then
     mkdir -p "$BIN" "$BASE/src"
-    for f in guardctl sentinel-fw.sh sentinel-waf.sh sentinel-av.sh sentinel-proc.py sentinel-intel.sh sentinel-notify.sh sentinel-ports.py; do
+    for f in guardctl sentinel-fw.sh sentinel-waf.sh sentinel-av.sh sentinel-proc.py sentinel-intel.sh sentinel-notify.sh sentinel-ports.py sentinel-upload-scan.py; do
       if [ -f "$pay/$f" ]; then
         cp -p "$pay/$f" "$BIN/$f"
         chmod 755 "$BIN/$f"
       fi
     done
+    [ -f "$pay/guardd" ] && cp -p "$pay/guardd" "$BIN/guardd" && chmod 755 "$BIN/guardd"
     [ -f "$pay/guardd.c" ] && cp -p "$pay/guardd.c" "$BASE/src/guardd.c"
     # config TIDAK ditimpa bila sudah ada: isinya memuat penyesuaian
     # operator (ambang, geo-ban, throttle) yang tidak boleh hilang saat
@@ -90,6 +91,12 @@ pasang_daemon() {
     if [ -f "$pay/proc_whitelist.json.default" ] && [ ! -f "$ETC/proc_whitelist.json" ]; then
       cp -p "$pay/proc_whitelist.json.default" "$ETC/proc_whitelist.json"
       say "proc_whitelist.json dibuat dari default"
+    fi
+    # Pasang kunci proteksi anti-tamper (hanya root yang bisa menghapus)
+    if [ ! -f "$ETC/uninstall.lock" ]; then
+      echo "zysentinel_tamper_protection_locked_by_root" > "$ETC/uninstall.lock"
+      chmod 600 "$ETC/uninstall.lock"
+      say "kunci proteksi anti-tamper (uninstall.lock) aktif"
     fi
   fi
 
@@ -111,17 +118,24 @@ EOF
     err "guardd.conf tidak ada, konfigurasi tidak bisa dibuat otomatis"
     return 1
   fi
-  if [ ! -x "$BIN/guardd" ]; then
-    if [ -f "$BASE/src/guardd.c" ] && command -v gcc >/dev/null 2>&1; then
-      say "menyusun guardd dari sumber"
-      gcc -O2 -Wall -Wextra -o "$BIN/guardd" "$BASE/src/guardd.c" \
-          -lsqlite3 -lm || { err "gagal menyusun guardd"; return 1; }
-    else
-      err "binary guardd tidak ada dan gcc tidak tersedia"
-      return 1
+  if [ ! -x "$BIN/guardd" ] || ! "$BIN/guardd" -V >/dev/null 2>&1; then
+    if [ -f "$pay/guardd" ]; then
+      cp -p "$pay/guardd" "$BIN/guardd"
+      chmod 755 "$BIN/guardd"
+      say "binary guardd dipasang dari payload"
+    fi
+    if [ ! -x "$BIN/guardd" ] || ! "$BIN/guardd" -V >/dev/null 2>&1; then
+      if [ -f "$BASE/src/guardd.c" ] && command -v gcc >/dev/null 2>&1; then
+        say "menyusun guardd dari sumber C"
+        gcc -O2 -Wall -Wextra -o "$BIN/guardd" "$BASE/src/guardd.c" \
+            -lsqlite3 -lm || { err "gagal menyusun guardd"; return 1; }
+      else
+        err "binary guardd tidak dapat dijalankan dan compiler gcc tidak tersedia"
+        return 1
+      fi
     fi
   fi
-  chmod 755 "$BIN/guardd" "$BIN/guardctl" "$BIN/sentinel-fw.sh" "$BIN/sentinel-av.sh" "$BIN/sentinel-proc.py" "$BIN/sentinel-intel.sh" "$BIN/sentinel-notify.sh" "$BIN/sentinel-ports.py" 2>/dev/null
+  chmod 755 "$BIN/guardd" "$BIN/guardctl" "$BIN/sentinel-fw.sh" "$BIN/sentinel-av.sh" "$BIN/sentinel-proc.py" "$BIN/sentinel-intel.sh" "$BIN/sentinel-notify.sh" "$BIN/sentinel-ports.py" "$BIN/sentinel-upload-scan.py" 2>/dev/null
   return 0
 }
 
@@ -273,9 +287,16 @@ pasang_antivirus() {
     say "ClamAV tidak tersedia di sistem ini; fitur Antivirus nonaktif"
   fi
 
-  # Struktur direktori sentinel/av
-  mkdir -p "$BASE/av/baseline" "$BASE/av/last" "$BASE/av/quarantine/files" "$BASE/av/quarantine/meta" 2>/dev/null
+  # Struktur direktori sentinel/av & rkhunter
+  mkdir -p "$BASE/av/baseline" "$BASE/av/last" "$BASE/av/quarantine/files" "$BASE/av/quarantine/meta" \
+           "$BASE/db/rkhunter" "$BASE/tmp/rkhunter" 2>/dev/null
   chmod 750 "$BASE/av" "$BASE/av/quarantine" 2>/dev/null || true
+  chmod 700 "$BASE/tmp/rkhunter" 2>/dev/null || true
+
+  # Salin database awal rkhunter bila ada
+  if [ ! -f "$BASE/db/rkhunter/rkhunter.dat" ] && [ -d /var/lib/rkhunter/db ]; then
+    cp -rn /var/lib/rkhunter/db/* "$BASE/db/rkhunter/" 2>/dev/null || true
+  fi
 
   # Salin skrip dari payload
   local pay; pay="$(dirname "$0")/payload"
@@ -300,6 +321,10 @@ pasang_defender_elit() {
     if [ -f /etc/systemd/system/sentinel-proc.service ]; then
       systemctl enable --now sentinel-proc.service 2>/dev/null || true
       say "layanan sentinel-proc (Runtime EDR) aktif"
+    fi
+    if [ -f /etc/systemd/system/sentinel-upload-scan.service ]; then
+      systemctl enable --now sentinel-upload-scan.service 2>/dev/null || true
+      say "layanan sentinel-upload-scan (Real-Time Upload Protection) aktif"
     fi
     if [ -f /etc/systemd/system/sentinel-intel.timer ]; then
       systemctl enable --now sentinel-intel.timer 2>/dev/null || true
@@ -369,44 +394,302 @@ pasang_layanan() {
   say "layanan sentinel dijalankan"
 }
 
-cabut() {
-  say "Mencabut hook free_waf (data dipertahankan)"
-  bash "$BIN/sentinel-waf.sh" freewaf-remove 2>/dev/null
-  say "Mencabut aturan kernel"
-  bash "$BIN/sentinel-fw.sh" remove 2>/dev/null
-  if command -v systemctl >/dev/null 2>&1; then
-    systemctl disable --now sentinel-proc.service 2>/dev/null
-    systemctl disable --now sentinel-intel.timer 2>/dev/null
-    systemctl disable --now sentinel-intel.service 2>/dev/null
-    systemctl disable --now sentinel-av.timer 2>/dev/null
-    systemctl disable --now sentinel-av.service 2>/dev/null
-    systemctl disable --now sentinel-fw.timer 2>/dev/null
-    systemctl disable --now sentinel-notify.timer 2>/dev/null
-    systemctl disable --now sentinel.service 2>/dev/null
-    systemctl disable --now sentinel-fw.service 2>/dev/null
-    say "layanan sentinel dihentikan"
+cabut_bersih() {
+  local force=0
+  if [ "${1:-}" = "--force" ] || [ "${1:-}" = "--clean" ] || [ "${1:-}" = "-y" ] || [ ! -t 0 ]; then
+    force=1
   fi
-  say "Berkas di $BASE dan unit systemd TIDAK dihapus, hanya dimatikan."
-  say "Data karantina, statistik, dan daftar putih tetap tersimpan."
+
+  if [ "$force" -eq 0 ]; then
+    echo "============================================================"
+    echo " PERINGATAN: PENCABUTAN BERSIH ZYSENTINEL"
+    echo " Tindakan ini akan menghentikan seluruh layanan proteksi,"
+    echo " mencabut aturan kernel firewall, melepas hook WAF, dan"
+    echo " menghapus seluruh berkas/log di $BASE."
+    echo " Konfigurasi vhost dan server akan dikembalikan ke awal."
+    echo "============================================================"
+    read -r -p "Ketik 'UNINSTALL' untuk menyetujui pencabutan: " jawab
+    if [ "$jawab" != "UNINSTALL" ] && [ "$jawab" != "uninstall" ] && [ "$jawab" != "y" ] && [ "$jawab" != "Y" ]; then
+      say "Pencabutan dibatalkan oleh pengguna."
+      return 0
+    fi
+  fi
+
+  say "Memulai pencabutan bersih ZySentinel..."
+  rm -f "$ETC/uninstall.lock" 2>/dev/null || true
+
+  # 1. Cabut hook WAF webserver dan reload Nginx
+  if [ -x "$BIN/sentinel-waf.sh" ]; then
+    say "Mencabut hook free_waf dan Coraza dari webserver"
+    bash "$BIN/sentinel-waf.sh" freewaf-remove 2>/dev/null || true
+  fi
+  rm -f /www/server/panel/vhost/nginx/free_waf.conf 2>/dev/null || true
+  if [ -x /www/server/nginx/sbin/nginx ]; then
+    if /www/server/nginx/sbin/nginx -t >/dev/null 2>&1; then
+      /etc/init.d/nginx reload >/dev/null 2>&1 || true
+      say "Nginx diverifikasi normal & direload"
+    fi
+  fi
+
+  # 2. Cabut aturan kernel firewall & port rules
+  if [ -x "$BIN/sentinel-fw.sh" ]; then
+    say "Mencabut aturan rantai kernel firewall"
+    bash "$BIN/sentinel-fw.sh" remove 2>/dev/null || true
+  fi
+  if command -v ipset >/dev/null 2>&1; then
+    for s in sentinel_ban sentinel_thr sentinel_rev sentinel_intel sentinel_ports_in sentinel_ports_out; do
+      ipset flush "$s" 2>/dev/null || true
+      ipset destroy "$s" 2>/dev/null || true
+    done
+  fi
+
+  # 3. Hentikan & hapus seluruh unit systemd
+  if command -v systemctl >/dev/null 2>&1; then
+    local units="sentinel-upload-scan.service sentinel-proc.service sentinel-intel.timer sentinel-intel.service sentinel-av.timer sentinel-av.service sentinel-fw.timer sentinel-fw.service sentinel-notify.timer sentinel.service"
+    for u in $units; do
+      systemctl stop "$u" 2>/dev/null || true
+      systemctl disable "$u" 2>/dev/null || true
+    done
+    rm -f /etc/systemd/system/sentinel* 2>/dev/null || true
+    systemctl daemon-reload 2>/dev/null || true
+    say "seluruh layanan systemd dihentikan dan unit dicabut"
+  fi
+
+  # 4. Hapus seluruh direktori kerja, basis data, dan log Sentinel
+  rm -rf "$BASE"
+  say "berkas di $BASE dan log dibersihkan secara total"
+  say "pencabutan bersih selesai. Server kembali ke konfigurasi awal."
+  return 0
+}
+
+cabut() {
+  cabut_bersih "${1:-}"
+}
+
+pasang_fresh() {
+  say "memulai instalasi baru (Fresh Install) ZySentinel..."
+  rm -f "$ETC/uninstall.lock" 2>/dev/null || true
+  # Hentikan layanan lama bila sedang berjalan
+  if command -v systemctl >/dev/null 2>&1; then
+    local units="sentinel-upload-scan.service sentinel-proc.service sentinel-intel.timer sentinel-intel.service sentinel-av.timer sentinel-av.service sentinel-fw.timer sentinel-fw.service sentinel-notify.timer sentinel.service"
+    for u in $units; do
+      systemctl stop "$u" 2>/dev/null || true
+    done
+  fi
+  # Bersihkan data lama untuk fresh slate
+  rm -rf "$BASE/data" "$BASE/etc" "$BASE/run" "$BASE/log" "$BASE/av"
+  cek_depe \
+    && pasang_daemon && pasang_unit_dari_payload && pasang_firewall \
+    && pasang_layanan && pasang_notif && konsolidasi_waf && pasang_waf \
+    && pasang_antivirus && pasang_defender_elit && kunci_keamanan_benteng
+  say "fresh install selesai. Status: systemctl status sentinel.service"
+}
+
+perbaiki_mandiri() {
+  say "memulai diagnostik dan perbaikan mandiri (Self-Heal) ZySentinel..."
+  local pay; pay="$(dirname "$0")/payload"
+  local dipulihkan=0
+
+  # 1. Periksa direktori dasar
+  mkdir -p "$BASE" "$BIN" "$ETC" "$BASE/run" "$BASE/data" "$BASE/log" "$BASE/src" "$BASE/av/baseline" "$BASE/av/last" "$BASE/av/quarantine/files" "$BASE/av/quarantine/meta"
+
+  # 2. Periksa skrip biner di BIN
+  for f in guardctl sentinel-fw.sh sentinel-waf.sh sentinel-av.sh sentinel-proc.py sentinel-intel.sh sentinel-notify.sh sentinel-ports.py sentinel-upload-scan.py; do
+    if [ ! -f "$BIN/$f" ] || [ ! -s "$BIN/$f" ]; then
+      if [ -f "$pay/$f" ]; then
+        cp -p "$pay/$f" "$BIN/$f"
+        chmod 750 "$BIN/$f"
+        say "skrip $f dipulihkan dari payload"
+        dipulihkan=$((dipulihkan + 1))
+      fi
+    fi
+  done
+
+  # 3. Periksa biner guardd
+  if [ ! -x "$BIN/guardd" ] || ! "$BIN/guardd" -V >/dev/null 2>&1; then
+    if [ -f "$pay/guardd" ]; then
+      cp -p "$pay/guardd" "$BIN/guardd"
+      chmod 750 "$BIN/guardd"
+      say "biner guardd dipulihkan dari payload"
+      dipulihkan=$((dipulihkan + 1))
+    elif [ -f "$BASE/src/guardd.c" ] && command -v gcc >/dev/null 2>&1; then
+      gcc -O2 -Wall -Wextra -o "$BIN/guardd" "$BASE/src/guardd.c" -lsqlite3 -lm 2>/dev/null || true
+      chmod 750 "$BIN/guardd"
+      say "biner guardd dikompilasi ulang dari sumber C"
+      dipulihkan=$((dipulihkan + 1))
+    fi
+  fi
+
+  # 4. Periksa berkas konfigurasi default
+  if [ ! -f "$ETC/guardd.conf" ] && [ -f "$pay/guardd.conf.default" ]; then
+    cp -p "$pay/guardd.conf.default" "$ETC/guardd.conf"
+    dipulihkan=$((dipulihkan + 1))
+  fi
+  if [ ! -f "$ETC/allowlist.txt" ] && [ -f "$pay/allowlist.txt.default" ]; then
+    cp -p "$pay/allowlist.txt.default" "$ETC/allowlist.txt"
+    dipulihkan=$((dipulihkan + 1))
+  fi
+  if [ ! -f "$ETC/proc_whitelist.json" ] && [ -f "$pay/proc_whitelist.json.default" ]; then
+    cp -p "$pay/proc_whitelist.json.default" "$ETC/proc_whitelist.json"
+    dipulihkan=$((dipulihkan + 1))
+  fi
+  if [ ! -f "$ETC/uninstall.lock" ]; then
+    echo "zysentinel_tamper_protection_locked_by_root" > "$ETC/uninstall.lock"
+    chmod 600 "$ETC/uninstall.lock"
+    dipulihkan=$((dipulihkan + 1))
+  fi
+
+  # 5. Periksa unit systemd
+  pasang_unit_dari_payload
+
+  # 6. Periksa dan pulihkan status layanan yang macet/mati
+  if command -v systemctl >/dev/null 2>&1; then
+    for s in sentinel-fw.service sentinel-fw.timer sentinel.service sentinel-proc.service sentinel-upload-scan.service sentinel-intel.timer sentinel-av.timer; do
+      if [ -f "/etc/systemd/system/$s" ]; then
+        if ! systemctl is-active --quiet "$s"; then
+          systemctl restart "$s" 2>/dev/null || true
+          say "layanan $s diaktifkan kembali"
+          dipulihkan=$((dipulihkan + 1))
+        fi
+      fi
+    done
+  fi
+
+  # 7. Periksa aturan firewall kernel
+  if [ -x "$BIN/sentinel-fw.sh" ]; then
+    if ! iptables -S IN_BT 2>/dev/null | grep -q 'sentinel_in' && ! iptables -S INPUT 2>/dev/null | grep -q 'sentinel_in'; then
+      bash "$BIN/sentinel-fw.sh" install >/dev/null 2>&1 || true
+      say "aturan kernel firewall sentinel_in dipasang ulang"
+      dipulihkan=$((dipulihkan + 1))
+    fi
+  fi
+
+  # 8. Periksa hook WAF & validasi Nginx (Zero Downtime)
+  if [ -x "$BIN/sentinel-waf.sh" ]; then
+    bash "$BIN/sentinel-waf.sh" freewaf-status >/dev/null 2>&1 || true
+  fi
+  if [ -x /www/server/nginx/sbin/nginx ]; then
+    if /www/server/nginx/sbin/nginx -t >/dev/null 2>&1; then
+      say "konfigurasi webserver diverifikasi valid (tanpa gangguan)"
+    fi
+  fi
+
+  # 9. Terapkan pengerasan benteng
+  kunci_keamanan_benteng
+
+  say "diagnostik self-heal selesai. Total anomali dipulihkan: $dipulihkan"
+  return 0
+}
+
+kunci_keamanan_benteng() {
+  say "menerapkan pengerasan keamanan berkas & hak akses benteng ZySentinel"
+  local plug_dir; plug_dir="$(cd "$(dirname "$0")" && pwd)"
+
+  # 1. Pastikan seluruh kepemilikan di bawah sentinel & plugin adalah root:root
+  chown -R root:root "$BASE" 2>/dev/null || true
+  chown -R root:root "$plug_dir" 2>/dev/null || true
+
+  # 2. Amankan direktori konfigurasi (hanya root yang bisa membaca/menulis)
+  if [ ! -f "$ETC/uninstall.lock" ]; then
+    echo "zysentinel_tamper_protection_locked_by_root" > "$ETC/uninstall.lock"
+    say "kunci proteksi anti-tamper (uninstall.lock) diaktifkan"
+  fi
+  chmod 700 "$ETC" 2>/dev/null || true
+  chmod 600 "$ETC"/* 2>/dev/null || true
+
+  # 3. Amankan direktori basis data SQLite (hanya root yang bisa akses)
+  chmod 700 "$BASE/data" 2>/dev/null || true
+  chmod 600 "$BASE/data"/* 2>/dev/null || true
+
+  # 4. Amankan biner dan skrip eksekusi (hanya root yang bisa eksekusi/tulis)
+  chmod 750 "$BIN" 2>/dev/null || true
+  chmod 750 "$BIN"/* 2>/dev/null || true
+
+  # 5. Amankan direktori log & runtime
+  chmod 700 "$BASE/log" 2>/dev/null || true
+  chmod 755 "$BASE/run" 2>/dev/null || true
+
+  # 6. Amankan modul karantina & baseline FIM
+  chmod 700 "$BASE/av" "$BASE/av/baseline" "$BASE/av/last" "$BASE/av/quarantine" 2>/dev/null || true
+  chmod -R 700 "$BASE/av/quarantine" 2>/dev/null || true
+
+  # 7. Amankan aturan WAF free_waf: Hapus izin world-writable (666) yang berbahaya
+  if [ -d "$BASE/waf/free_waf/rule" ]; then
+    chown -R root:root "$BASE/waf/free_waf" 2>/dev/null || true
+    chmod 755 "$BASE/waf/free_waf" "$BASE/waf/free_waf/rule" 2>/dev/null || true
+    chmod 644 "$BASE/waf/free_waf/rule"/*.json 2>/dev/null || true
+    chmod 644 "$BASE/waf/free_waf"/*.lua 2>/dev/null || true
+    chmod 644 "$BASE/waf/free_waf"/*.json 2>/dev/null || true
+    chmod 640 "$BASE/waf/free_waf"/*.bak* 2>/dev/null || true
+    touch "$BASE/waf/free_waf/drop_ip.log" "$BASE/waf/free_waf/total.json" 2>/dev/null || true
+    chown www:www "$BASE/waf/free_waf/drop_ip.log" "$BASE/waf/free_waf/total.json" 2>/dev/null \
+      || chown nobody:nogroup "$BASE/waf/free_waf/drop_ip.log" "$BASE/waf/free_waf/total.json" 2>/dev/null || true
+    chmod 660 "$BASE/waf/free_waf/drop_ip.log" "$BASE/waf/free_waf/total.json" 2>/dev/null || true
+    chmod o-rw "$BASE/waf/free_waf/drop_ip.log" "$BASE/waf/free_waf/total.json" 2>/dev/null || true
+  fi
+
+  # 8. Amankan seluruh direktori plugin panel aaPanel dari modifikasi non-root
+  local panel_plugin_dir="/www/server/panel/plugin"
+  if [ -d "$panel_plugin_dir" ]; then
+    chown -R root:root "$panel_plugin_dir" 2>/dev/null || true
+    chmod 755 "$panel_plugin_dir" 2>/dev/null || true
+    chmod -R u+rwX,go-w "$panel_plugin_dir" 2>/dev/null || true
+    find "$panel_plugin_dir" -maxdepth 1 -type d -exec chmod 755 {} + 2>/dev/null || true
+  fi
+  chmod -R go-w "$plug_dir" 2>/dev/null || true
+  chmod 750 "$plug_dir"/*.sh 2>/dev/null || true
+
+  # 9. Amankan berkas konfigurasi kritis webserver & panel dari manipulasi
+  chmod -R go-w /www/server/panel/config /www/server/panel/vhost /www/server/nginx/conf 2>/dev/null || true
+
+  say "seluruh izin benteng dikunci rapat untuk root saja"
+}
+
+pasang_icon() {
+  local plug_dir="/www/server/panel/plugin/sentinel"
+  local icon_src="$plug_dir/icon.png"
+  [ -f "$icon_src" ] || icon_src="$(dirname "$0")/icon.png"
+  if [ -f "$icon_src" ]; then
+    mkdir -p /www/server/panel/BTPanel/static/img/soft_ico /www/server/panel/BTPanel/static/vite/images/soft-ico
+    cp -p "$icon_src" /www/server/panel/BTPanel/static/img/soft_ico/ico-sentinel.png 2>/dev/null || true
+    cp -p "$icon_src" /www/server/panel/BTPanel/static/vite/images/soft-ico/ico-sentinel.png 2>/dev/null || true
+    say "ikon CyberMatrix resmi disinkronkan ke aset panel aaPanel"
+  fi
 }
 
 butuh_root
 AKSI="${1:-pasang}"
+ARG2="${2:-}"
 case "$AKSI" in
-  pasang|install|update|upgrade)
-    # update = pasang ulang idempoten. Semua langkah aman dijalankan
-    # berkali-kali: config yang ada tidak ditimpa, unit yang ada tidak
-    # diganti, aturan kernel tidak digandakan.
+  pasang|install)
     cek_depe \
       && pasang_daemon && pasang_unit_dari_payload && pasang_firewall \
       && pasang_layanan && pasang_notif && konsolidasi_waf && pasang_waf \
-      && pasang_antivirus && pasang_defender_elit
+      && pasang_antivirus && pasang_defender_elit && kunci_keamanan_benteng \
+      && pasang_icon
     say "selesai. Status: systemctl status sentinel.service"
     ;;
+  fresh|fresh-install)
+    pasang_fresh && pasang_icon
+    ;;
+  update|upgrade)
+    cek_depe \
+      && pasang_daemon && pasang_unit_dari_payload && pasang_firewall \
+      && pasang_layanan && pasang_notif && konsolidasi_waf && pasang_waf \
+      && pasang_antivirus && pasang_defender_elit && kunci_keamanan_benteng \
+      && pasang_icon
+    say "pembaruan selesai. Versi terbaru aktif."
+    ;;
+  repair|perbaiki|self-heal)
+    perbaiki_mandiri
+    ;;
   cabut|uninstall)
-    cabut
+    cabut_bersih "$ARG2"
+    ;;
+  kunci)
+    kunci_keamanan_benteng
     ;;
   *)
-    echo "pakai: $0 {pasang|cabut}"; exit 1
+    echo "pakai: $0 {pasang|fresh|update|repair|cabut|kunci}"; exit 1
     ;;
 esac
