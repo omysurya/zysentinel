@@ -13,6 +13,12 @@ import re
 import json
 import time
 import subprocess
+import socket
+import hashlib
+import platform
+import sqlite3
+import urllib.request
+import urllib.parse
 
 if sys.version_info[0] == 2:
     reload(sys)
@@ -20,8 +26,13 @@ if sys.version_info[0] == 2:
 os.chdir('/www/server/panel')
 
 import public
-if __name__ != '__main__':
-    from panelAuth import panelAuth
+if not hasattr(public, 'returnMsg'):
+    public.returnMsg = lambda status, msg: {'status': bool(status), 'msg': msg}
+try:
+    if __name__ != '__main__':
+        from panelAuth import panelAuth
+except Exception:
+    panelAuth = None
 
 
 def _angka_json(teks, kunci):
@@ -953,6 +964,15 @@ class sentinel_main(object):
         clean_port = port.replace(':', '-')
         if not re.match(r'^[0-9]+(-[0-9]+)?$', clean_port) and clean_port.lower() != 'all':
             return public.returnMsg(False, 'Format port tidak valid (contoh: 80 atau 8000-8080)')
+
+        if clean_port.lower() != 'all':
+            parts = clean_port.split('-')
+            for p_str in parts:
+                p_val = int(p_str)
+                if p_val < 1 or p_val > 65535:
+                    return public.returnMsg(False, 'Nomor port harus berada di antara 1 dan 65535')
+            if len(parts) == 2 and int(parts[0]) >= int(parts[1]):
+                return public.returnMsg(False, 'Rentang port tidak valid (port awal harus lebih kecil)')
 
         action = (get.get('action') or 'ACCEPT').strip().upper()
         if action not in ['ACCEPT', 'DROP']:
@@ -2324,9 +2344,10 @@ class sentinel_main(object):
             return public.returnMsg(False, 'gagal menulis: %s' % ex)
 
         # Daemon harus tahu URL barunya supaya dia menulis antrean.
-        self._tulis_conf('notify_url', url)
-        self._svc2('restart', 'sentinel.service')
-        self._svc2('restart', 'sentinel-notify.timer')
+        if url:
+            self._sh("'%s/bin/guardctl' set notify_url '%s'" % (self.__PATH, url.replace("'", "")), 20)
+        self._sh('systemctl restart sentinel.service', 30)
+        self._sh('systemctl restart sentinel-notify.timer', 30)
         return public.returnMsg(True, 'tujuan notifikasi disimpan')
 
     def _notif_ada(self, kunci):
@@ -3265,3 +3286,514 @@ class sentinel_main(object):
             return public.returnMsg(True, "Aturan whitelist berhasil %s" % st_text)
         except Exception as ex:
             return public.returnMsg(False, 'Gagal mengubah status whitelist: %s' % str(ex))
+
+    # ------------------------------------------------------------------ #
+    # Real-Time Upload Scanner & Per-Host Quarantine (Imunify360 Style)  #
+    # ------------------------------------------------------------------ #
+    def _upload_scan_cli(self, *args):
+        """Panggil biner sentinel-upload-scan.py dengan pyenv python3."""
+        script = self._p('bin', 'sentinel-upload-scan.py')
+        py_bin = '/www/server/panel/pyenv/bin/python3'
+        if not os.path.exists(py_bin):
+            py_bin = 'python3'
+        cmd = [py_bin, script] + list(args)
+        cmd_str = ' '.join(["'%s'" % c for c in cmd])
+        return self._sh(cmd_str, 30)
+
+    def get_vhost_upload_scan(self, get):
+        """Ambil status upload scanner, clamd socket, RAM, dan status per vhost."""
+        rc, o, e = self._upload_scan_cli('status')
+        if rc != 0:
+            return public.returnMsg(False, 'Gagal mengambil status upload scanner: %s' % (e or o))
+        try:
+            data = json.loads(o)
+            rc_svc, o_svc, _ = self._sh('systemctl is-active sentinel-upload-scan.service', 5)
+            data['systemd_active'] = (o_svc.strip() == 'active')
+            return public.returnMsg(True, data)
+        except Exception as ex:
+            return public.returnMsg(False, 'Galat parsing respons status: %s' % str(ex))
+
+    def toggle_vhost_upload_scan(self, get):
+        """Aktifkan atau nonaktifkan pemindaian upload realtime untuk satu vhost."""
+        vhost = str(get.get('vhost', '')).strip()
+        if not vhost or '/' in vhost or '..' in vhost:
+            return public.returnMsg(False, 'Nama vhost tidak valid')
+        rc, o, e = self._upload_scan_cli('toggle-vhost', vhost)
+        if rc != 0:
+            return public.returnMsg(False, 'Gagal mengubah status vhost: %s' % (e or o))
+        try:
+            res = json.loads(o)
+            st_str = 'diaktifkan' if res.get('enabled') else 'dinonaktifkan'
+            return public.returnMsg(True, "Upload Protection untuk vhost '%s' berhasil %s" % (vhost, st_str))
+        except Exception as ex:
+            return public.returnMsg(False, 'Galat respons toggle: %s' % str(ex))
+
+    def set_vhost_upload_scan(self, get):
+        """Setel status upload scan untuk satu vhost (on / off)."""
+        vhost = str(get.get('vhost', '')).strip()
+        state = str(get.get('state', '')).strip().lower()
+        if not vhost or '/' in vhost or '..' in vhost:
+            return public.returnMsg(False, 'Nama vhost tidak valid')
+        val = 'on' if state in ['1', 'true', 'on', 'yes'] else 'off'
+        rc, o, e = self._upload_scan_cli('set-vhost', vhost, val)
+        if rc != 0:
+            return public.returnMsg(False, 'Gagal menyimpan status vhost: %s' % (e or o))
+        try:
+            res = json.loads(o)
+            return public.returnMsg(True, res)
+        except Exception as ex:
+            return public.returnMsg(False, str(ex))
+
+    def get_vhost_quarantine(self, get):
+        """Daftar berkas karantina per vhost (atau seluruh vhost jika vhost kosong)."""
+        vhost = str(get.get('vhost', '')).strip()
+        if vhost and ('/' in vhost or '..' in vhost):
+            return public.returnMsg(False, 'Nama vhost tidak valid')
+        args = ['quarantine-list']
+        if vhost:
+            args.append(vhost)
+        rc, o, e = self._upload_scan_cli(*args)
+        if rc != 0:
+            return public.returnMsg(False, 'Gagal mengambil daftar karantina: %s' % (e or o))
+        try:
+            items = json.loads(o)
+            return public.returnMsg(True, items)
+        except Exception as ex:
+            return public.returnMsg(False, str(ex))
+
+    def restore_vhost_quarantine(self, get):
+        """Pulihkan berkas karantina ke lokasi aslinya dan kembalikan hak akses."""
+        meta = str(get.get('meta', '')).strip()
+        if not meta or not meta.endswith('.meta') or not meta.startswith('/www/server/sentinel/av/quarantine/'):
+            return public.returnMsg(False, 'Berkas metadata karantina tidak valid')
+        rc, o, e = self._upload_scan_cli('quarantine-restore', meta)
+        if rc != 0:
+            return public.returnMsg(False, 'Gagal memulihkan berkas: %s' % (e or o))
+        try:
+            res = json.loads(o)
+            if res.get('status'):
+                return public.returnMsg(True, res.get('msg', 'Berkas berhasil dipulihkan'))
+            else:
+                return public.returnMsg(False, res.get('msg', 'Pemulihan gagal'))
+        except Exception as ex:
+            return public.returnMsg(False, str(ex))
+
+    def delete_vhost_quarantine(self, get):
+        """Hapus permanen berkas karantina dan metadata-nya."""
+        meta = str(get.get('meta', '')).strip()
+        if not meta or not meta.endswith('.meta') or not meta.startswith('/www/server/sentinel/av/quarantine/'):
+            return public.returnMsg(False, 'Berkas metadata karantina tidak valid')
+        rc, o, e = self._upload_scan_cli('quarantine-delete', meta)
+        if rc != 0:
+            return public.returnMsg(False, 'Gagal menghapus karantina: %s' % (e or o))
+        try:
+            res = json.loads(o)
+            if res.get('status'):
+                return public.returnMsg(True, res.get('msg', 'Berkas karantina berhasil dihapus'))
+            else:
+                return public.returnMsg(False, res.get('msg', 'Gagal menghapus'))
+        except Exception as ex:
+            return public.returnMsg(False, str(ex))
+
+    def toggle_upload_scan_service(self, get):
+        """Nyalakan atau hentikan layanan daemon sentinel-upload-scan.service."""
+        action = str(get.get('action', '')).strip().lower()
+        if action not in ['start', 'stop', 'restart']:
+            return public.returnMsg(False, 'Aksi tidak valid (start|stop|restart)')
+        rc, o, e = self._sh("systemctl %s sentinel-upload-scan.service" % action, 15)
+        if rc != 0:
+            return public.returnMsg(False, "Gagal %s layanan: %s" % (action, e or o))
+        return public.returnMsg(True, "Layanan sentinel-upload-scan berhasil di-%s" % action)
+
+    # -------------------------------------------------------------------------
+    # MANAJEMEN SIKLUS HIDUP (LIFECYCLE): FRESH | UPDATE | REPAIR | UNINSTALL
+    # DUKUNGAN TELEMETRI GOOGLE ANALYTICS & TERMS POLICY
+    # -------------------------------------------------------------------------
+    def _send_telemetry(self, event_name, extra_params=None):
+        """Kirim statistik telemetri anonim (instalasi/error/pembaruan) ke Google Analytics.
+        
+        Sesuai kebijakan privasi lisensi: HANYA metrik umum sistem yang dikirim.
+        TIDAK ADA kredensial, password, token, atau informasi pribadi/rahasia server.
+        """
+        try:
+            cid = 'anon-sentinel'
+            if os.path.exists('/etc/machine-id'):
+                try:
+                    with open('/etc/machine-id', 'r') as f:
+                        cid = hashlib.md5(f.read().strip().encode('utf-8')).hexdigest()
+                except Exception:
+                    pass
+            elif os.path.exists('/var/lib/dbus/machine-id'):
+                try:
+                    with open('/var/lib/dbus/machine-id', 'r') as f:
+                        cid = hashlib.md5(f.read().strip().encode('utf-8')).hexdigest()
+                except Exception:
+                    pass
+
+            v_info = '1.6.0'
+            try:
+                info_p = os.path.join(os.path.dirname(__file__), 'info.json')
+                if os.path.exists(info_p):
+                    with open(info_p, 'r', encoding='utf-8') as f:
+                        v_info = json.load(f).get('versions', '1.6.0')
+            except Exception:
+                pass
+
+            params = {
+                'v': '2',
+                'tid': 'G-8DBL8LPYQZ',
+                'cid': cid,
+                'en': event_name,
+                'ep.plugin_version': v_info,
+                'ep.os_name': platform.system(),
+                'ep.os_release': platform.release()[:20],
+                'ep.arch': platform.machine()
+            }
+            if extra_params and isinstance(extra_params, dict):
+                for k, v in extra_params.items():
+                    params['ep.' + str(k)] = str(v)[:100]
+
+            url = 'https://www.google-analytics.com/g/collect?' + urllib.parse.urlencode(params)
+            req = urllib.request.Request(url, headers={'User-Agent': 'ZySentinel-Telemetry/' + v_info})
+            urllib.request.urlopen(req, timeout=3.0)
+        except Exception:
+            pass
+
+    def get_lifecycle_status(self, get):
+        """Ambil status detail siklus hidup, versi, dan diagnostik komponen."""
+        v_info = '1.6.0'
+        try:
+            info_p = os.path.join(os.path.dirname(__file__), 'info.json')
+            if os.path.exists(info_p):
+                with open(info_p, 'r', encoding='utf-8') as f:
+                    v_info = json.load(f).get('versions', '1.6.0')
+        except Exception:
+            pass
+
+        installed = os.path.exists(os.path.join(self.__PATH, 'bin', 'guardd'))
+        lock_active = os.path.exists(os.path.join(self.__PATH, 'etc', 'uninstall.lock'))
+
+        units = ['sentinel.service', 'sentinel-fw.service', 'sentinel-proc.service',
+                 'sentinel-upload-scan.service', 'sentinel-intel.timer', 'sentinel-av.timer']
+        services_status = {}
+        for u in units:
+            services_status[u] = (self._svc(u) == 'running')
+
+        hostname = socket.gethostname() if hasattr(socket, 'gethostname') else 'unknown-host'
+
+        return public.returnMsg(True, {
+            'version': v_info,
+            'is_installed': installed,
+            'uninstall_locked': lock_active,
+            'services': services_status,
+            'hostname': hostname
+        })
+
+    def run_lifecycle_action(self, get):
+        """Jalankan aksi siklus hidup: fresh, repair, update, uninstall."""
+        action = str(get.get('action', '')).strip().lower()
+        if action not in ['fresh', 'repair', 'update', 'uninstall']:
+            return public.returnMsg(False, 'Aksi tidak valid (fresh|repair|update|uninstall)')
+
+        plug_dir = os.path.dirname(__file__)
+        install_script = os.path.join(plug_dir, 'install.sh')
+        if not os.path.exists(install_script):
+            return public.returnMsg(False, 'Skrip install.sh tidak ditemukan di direktori plugin')
+
+        if action == 'uninstall':
+            confirm = str(get.get('confirm', '')).strip()
+            if confirm != 'UNINSTALL':
+                return public.returnMsg(False, 'Konfirmasi pencabutan tidak sesuai. Harap ketik UNINSTALL.')
+            rc, o, e = self._sh("bash %s cabut --clean" % install_script, 60)
+            self._send_telemetry('uninstall_clean', {'status': 'success' if rc == 0 else 'failed'})
+            if rc != 0:
+                return public.returnMsg(False, 'Pencabutan gagal: %s' % (e or o))
+            return public.returnMsg(True, 'ZySentinel berhasil dicabut bersih tanpa sisa.')
+
+        elif action == 'fresh':
+            rc, o, e = self._sh("bash %s fresh" % install_script, 90)
+            self._send_telemetry('install_fresh', {'status': 'success' if rc == 0 else 'failed'})
+            if rc != 0:
+                return public.returnMsg(False, 'Fresh install gagal: %s' % (e or o))
+            return public.returnMsg(True, 'Fresh install berhasil diselesaikan dengan konfigurasi bawaan bersih.')
+
+        elif action == 'repair':
+            rc, o, e = self._sh("bash %s repair" % install_script, 60)
+            self._send_telemetry('install_repair', {'status': 'success' if rc == 0 else 'failed'})
+            if rc != 0:
+                return public.returnMsg(False, 'Self-heal / perbaikan mandiri gagal: %s' % (e or o))
+            return public.returnMsg(True, 'Perbaikan mandiri (Self-Heal) selesai: seluruh komponen normal.')
+
+        elif action == 'update':
+            return self.perform_github_update(get)
+
+    def check_github_update(self, get):
+        """Periksa versi rilis terbaru di repository GitHub omysurya/zysentinel."""
+        v_current = '1.6.0'
+        try:
+            info_p = os.path.join(os.path.dirname(__file__), 'info.json')
+            if os.path.exists(info_p):
+                with open(info_p, 'r', encoding='utf-8') as f:
+                    v_current = json.load(f).get('versions', '1.6.0')
+        except Exception:
+            pass
+
+        url_release = 'https://api.github.com/repos/omysurya/zysentinel/releases/latest'
+        url_tags = 'https://api.github.com/repos/omysurya/zysentinel/tags'
+        headers = {'User-Agent': 'ZySentinel-Updater/' + v_current}
+
+        latest_version = v_current
+        release_notes = 'Versi stabil terbaru ZySentinel.'
+        download_url = 'https://github.com/omysurya/zysentinel/archive/refs/tags/v%s.zip' % v_current
+
+        try:
+            req = urllib.request.Request(url_release, headers=headers)
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                data = json.loads(resp.read().decode('utf-8'))
+                tag_name = data.get('tag_name', '').lstrip('v')
+                if tag_name:
+                    latest_version = tag_name
+                    release_notes = data.get('body', release_notes)
+                    for asset in data.get('assets', []):
+                        if asset.get('name', '').endswith('.zip'):
+                            download_url = asset.get('browser_download_url', download_url)
+                            break
+        except Exception:
+            try:
+                req = urllib.request.Request(url_tags, headers=headers)
+                with urllib.request.urlopen(req, timeout=5) as resp:
+                    tags_data = json.loads(resp.read().decode('utf-8'))
+                    if tags_data and isinstance(tags_data, list):
+                        latest_version = tags_data[0].get('name', v_current).lstrip('v')
+                        download_url = tags_data[0].get('zipball_url', download_url)
+            except Exception:
+                pass
+
+        has_update = (latest_version != v_current and latest_version > v_current)
+        return public.returnMsg(True, {
+            'current_version': v_current,
+            'latest_version': latest_version,
+            'has_update': has_update,
+            'release_notes': release_notes,
+            'download_url': download_url
+        })
+
+    def perform_github_update(self, get):
+        """Unduh paket rilis/patch dari GitHub dan jalankan update mandiri."""
+        chk = self.check_github_update(get)
+        data = chk.get('msg', {})
+        download_url = data.get('download_url')
+        latest_ver = data.get('latest_version', '1.6.0')
+
+        staging_zip = '/tmp/sentinel_update.zip'
+        staging_dir = '/tmp/sentinel_update_staging'
+
+        try:
+            if download_url and download_url.startswith('http'):
+                try:
+                    headers = {'User-Agent': 'ZySentinel-Updater/1.6.0'}
+                    req = urllib.request.Request(download_url, headers=headers)
+                    with urllib.request.urlopen(req, timeout=30) as resp, open(staging_zip, 'wb') as out_f:
+                        out_f.write(resp.read())
+                except Exception:
+                    pass
+
+            if not os.path.exists(staging_zip) or os.path.getsize(staging_zip) < 1000:
+                if os.path.exists('/www/backup/sentinel.zip'):
+                    self._sh("cp -f /www/backup/sentinel.zip %s" % staging_zip, 5)
+
+            if not os.path.exists(staging_zip):
+                return public.returnMsg(False, 'Paket pembaruan tidak ditemukan untuk diunduh.')
+
+            self._sh("rm -rf %s && mkdir -p %s" % (staging_dir, staging_dir), 5)
+            self._sh("unzip -o -q %s -d %s" % (staging_zip, staging_dir), 15)
+
+            src_plugin = staging_dir
+            for root, dirs, files in os.walk(staging_dir):
+                if 'install.sh' in files and 'sentinel_main.py' in files:
+                    src_plugin = root
+                    break
+
+            plug_dir = os.path.dirname(__file__)
+            self._sh("cp -af %s/* %s/" % (src_plugin, plug_dir), 15)
+
+            rc, o, e = self._sh("bash %s/install.sh update" % plug_dir, 60)
+            self._sh("rm -rf %s %s" % (staging_zip, staging_dir), 5)
+
+            self._send_telemetry('install_update', {'status': 'success' if rc == 0 else 'failed', 'new_version': latest_ver})
+            if rc != 0:
+                return public.returnMsg(False, 'Pembaruan gagal dijalankan: %s' % (e or o))
+            return public.returnMsg(True, 'Pembaruan ke versi %s berhasil diterapkan!' % latest_ver)
+        except Exception as ex:
+            self._send_telemetry('error_event', {'error': str(ex)[:50], 'context': 'update'})
+            return public.returnMsg(False, 'Gagal mengunduh dan menerapkan update: %s' % str(ex))
+
+    # -------------------------------------------------------------------------
+    # FITUR FEEDBACK & BUGS REPORT (SUBJEK: Feedback | Bugsreport [Topic] [hostname])
+    # SANITASI KREDENSIAL LENGKAP TANPA DATA SENSITIF
+    # -------------------------------------------------------------------------
+    def _sanitize_payload_for_feedback(self, text):
+        """Hapus seluruh kata sandi, token, kunci privat, dan rahasia server."""
+        if not text:
+            return ""
+        s = str(text)
+        s = re.sub(r'-----BEGIN [A-Z ]+ PRIVATE KEY-----[\s\S]*?-----END [A-Z ]+ PRIVATE KEY-----', '[KUNCI_PRIVAT_DIHAPUS]', s)
+        s = re.sub(r'(?i)(password|passwd|pass|pwd|secret|token|api_key|auth|bearer)\s*[:=]\s*[\'"]?[^\s,\'"]+', r'\1: [DIHAPUS_UNTUK_KEAMANAN]', s)
+        s = re.sub(r'(mysql|postgres|redis)://[^:]+:[^@]+@', r'\1://***:***@', s)
+        s = re.sub(r'\b[0-9]{8,10}:[a-zA-Z0-9_-]{35}\b', '[BOT_TOKEN_DIHAPUS]', s)
+        return s
+
+    def _init_feedback_db(self):
+        """Pastikan tabel feedback_reports tersedia di guardd.db."""
+        try:
+            con = sqlite3.connect(os.path.join(self.__PATH, 'data', 'guardd.db'), timeout=3.0)
+            cur = con.cursor()
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS feedback_reports (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    ts INTEGER,
+                    type TEXT,
+                    topic TEXT,
+                    subject TEXT,
+                    message TEXT,
+                    email TEXT,
+                    status TEXT
+                )
+            """)
+            con.commit()
+            con.close()
+        except Exception:
+            pass
+
+    def send_feedback(self, get):
+        """Kirim Feedback atau Bugs Report dengan subject standar tanpa kredensial."""
+        report_type = str(get.get('type', 'Feedback')).strip()
+        if report_type not in ['Feedback', 'Bugsreport', 'Bugs Report']:
+            report_type = 'Feedback'
+        if report_type == 'Bugs Report':
+            report_type = 'Bugsreport'
+
+        raw_topic = str(get.get('topic', '')).strip()
+        if not raw_topic:
+            return public.returnMsg(False, 'Topik laporan tidak boleh kosong')
+
+        raw_message = str(get.get('message', '')).strip()
+        if not raw_message:
+            return public.returnMsg(False, 'Isi pesan tidak boleh kosong')
+
+        user_email = str(get.get('email', '')).strip()
+        include_log = bool(get.get('include_log', False))
+
+        topic = self._sanitize_payload_for_feedback(raw_topic)[:80]
+        message = self._sanitize_payload_for_feedback(raw_message)[:3000]
+
+        hostname = socket.gethostname() if hasattr(socket, 'gethostname') else 'unknown-host'
+        subject = "%s [%s] [%s]" % (report_type, topic, hostname)
+
+        diagnostics = ""
+        if include_log:
+            try:
+                log_file = os.path.join(self.__PATH, 'log', 'sentinel.log')
+                if os.path.exists(log_file):
+                    with open(log_file, 'r', encoding='utf-8', errors='ignore') as f:
+                        lines = f.readlines()[-20:]
+                        diagnostics = self._sanitize_payload_for_feedback("".join(lines))
+            except Exception:
+                pass
+
+        full_body = message
+        if diagnostics:
+            full_body += "\n\n=== DIAGNOSTIK SENTINEL (DISANITASI) ===\n" + diagnostics
+
+        self._init_feedback_db()
+        now_ts = int(time.time())
+        try:
+            con = sqlite3.connect(os.path.join(self.__PATH, 'data', 'guardd.db'), timeout=3.0)
+            cur = con.cursor()
+            cur.execute("""
+                INSERT INTO feedback_reports (ts, type, topic, subject, message, email, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (now_ts, report_type, topic, subject, full_body, user_email, 'SENT'))
+            con.commit()
+            con.close()
+        except Exception:
+            pass
+
+        self._send_telemetry('feedback_submitted', {
+            'report_type': report_type,
+            'topic_len': len(topic),
+            'has_email': bool(user_email)
+        })
+
+        try:
+            payload_data = json.dumps({
+                'type': report_type,
+                'topic': topic,
+                'hostname': hostname,
+                'subject': subject,
+                'message': full_body,
+                'email': user_email,
+                'version': '1.6.0'
+            }).encode('utf-8')
+            dev_url = 'https://api.zysens.com/api/v1/sentinel/feedback'
+            req = urllib.request.Request(
+                dev_url,
+                data=payload_data,
+                headers={'Content-Type': 'application/json', 'User-Agent': 'ZySentinel-Feedback/1.6.0'}
+            )
+            urllib.request.urlopen(req, timeout=4.0)
+        except Exception:
+            pass
+
+        return public.returnMsg(True, {
+            'subject': subject,
+            'msg': 'Laporan berhasil dicatat dan dikirim dengan subjek: %s' % subject
+        })
+
+    def get_feedback_history(self, get):
+        """Ambil riwayat feedback dan laporan bug yang pernah dikirim."""
+        self._init_feedback_db()
+        reports = []
+        try:
+            con = sqlite3.connect(os.path.join(self.__PATH, 'data', 'guardd.db'), timeout=3.0)
+            cur = con.cursor()
+            cur.execute("""
+                SELECT id, ts, type, topic, subject, email, status
+                FROM feedback_reports
+                ORDER BY id DESC LIMIT 20
+            """)
+            for row in cur.fetchall():
+                reports.append({
+                    'id': row[0],
+                    'time': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(row[1])),
+                    'type': row[2],
+                    'topic': row[3],
+                    'subject': row[4],
+                    'email': row[5],
+                    'status': row[6]
+                })
+            con.close()
+        except Exception:
+            pass
+        return public.returnMsg(True, reports)
+
+    def get_terms_and_policy(self, get):
+        """Kembalikan teks syarat ketentuan lisensi dan kebijakan transparansi telemetri."""
+        text = """SYARAT KETENTUAN LISENSI & KEBIJAKAN PRIVASI ZYSENTINEL
+
+1. LISENSI PERANGKAT LUNAK (APACHE LICENSE 2.0)
+ZySentinel adalah perangkat lunak keamanan sumber terbuka berlisensi Apache License, Version 2.0. Anda bebas menggunakan, memodifikasi, dan mendistribusikan perangkat lunak ini untuk keperluan komersial maupun pribadi tanpa biaya royalti.
+
+2. PENGUMPULAN STATISTIK & TELEMETRI GOOGLE ANALYTICS
+Untuk mengukur keandalan, performa, dan memprioritaskan perbaikan bug pada versi selanjutnya, ZySentinel mengumpulkan data analitik anonim saat instalasi, pembaruan, perbaikan mandiri (self-heal), serta galat sistem via Google Analytics.
+
+3. JAMINAN PRIVASI DAN KEAMANAN KREDENSIAL:
+- TIDAK ADA kata sandi, token otentikasi, atau kunci privat (SSL/SSH) yang dikumpulkan atau dikirim.
+- TIDAK ADA data database (MySQL, PostgreSQL, Redis) yang dibaca atau dikirim.
+- TIDAK ADA konten berkas vhost atau data pelanggan situs web yang dikumpulkan.
+- Data yang dikirim murni berupa metrik versi perangkat lunak, sistem operasi (Linux distro), arsitektur mesin, dan status kode aksi instalasi.
+
+4. PELAPORAN FEEDBACK & BUGS:
+Laporan yang dikirim melalui formulir Feedback & Bugs Report secara otomatis disanitasi oleh sistem untuk menghapus segala bentuk kredensial sebelum diteruskan kepada pengembang dengan subjek: Feedback | Bugsreport [Topic] [hostname].
+"""
+        return public.returnMsg(True, text)

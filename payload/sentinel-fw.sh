@@ -697,13 +697,16 @@ do_egress_on() {
   "$IPT" -A "$EGRESS_CHAIN" -p udp --dport 53 -j ACCEPT
   "$IPT" -A "$EGRESS_CHAIN" -p tcp --dport 53 -j ACCEPT
 
-  # 4) Web API keluar (HTTP 80, HTTPS 443)
-  "$IPT" -A "$EGRESS_CHAIN" -p tcp -m multiport --dports 80,443 -j ACCEPT
+  # 4) Web API & Git HTTPS keluar (HTTP 80, HTTPS 443, Git 9418)
+  "$IPT" -A "$EGRESS_CHAIN" -p tcp -m multiport --dports 80,443,9418 -j ACCEPT
 
-  # 5) Submission email (587, 465)
+  # 5) SSH keluar untuk Git clone/pull/push (GitHub, GitLab, Bitbucket: port 22, 2222)
+  "$IPT" -A "$EGRESS_CHAIN" -p tcp -m multiport --dports 22,2222 -j ACCEPT
+
+  # 6) Submission email (587, 465)
   "$IPT" -A "$EGRESS_CHAIN" -p tcp -m multiport --dports 587,465 -j ACCEPT
 
-  # 6) Blokir seluruh koneksi keluar lainnya
+  # 7) Blokir seluruh koneksi keluar lainnya
   if ! "$IPT" -A "$EGRESS_CHAIN" -m comment --comment "sentinel:egress-block" \
        -j REJECT --reject-with icmp-port-unreachable 2>/dev/null; then
     "$IPT" -A "$EGRESS_CHAIN" -m comment --comment "sentinel:egress-block" -j DROP
@@ -716,8 +719,8 @@ do_egress_on() {
   "$IPT" -I OUTPUT 1 -m owner --uid-owner "$WEB_UID" -j "$EGRESS_CHAIN"
 
   mkdir -p /www/server/sentinel/run
-  printf 'on\nuid=%s\nports=53,80,443,587,465\nsince=%s\n' "$WEB_UID" "$(date '+%Y-%m-%d %H:%M:%S')" > "$EGRESS_FLAG_FILE"
-  say "EGRESS GUARD AKTIF: lalu lintas keluar UID $WEB_UID (www) dibatasi ke DNS, HTTP, HTTPS, SMTP"
+  printf 'on\nuid=%s\nports=22,53,80,443,465,587,2222,9418\nsince=%s\n' "$WEB_UID" "$(date '+%Y-%m-%d %H:%M:%S')" > "$EGRESS_FLAG_FILE"
+  say "EGRESS GUARD AKTIF: lalu lintas keluar UID $WEB_UID (www) dibatasi ke DNS, HTTP, HTTPS, Git SSH, SMTP"
 }
 
 do_egress_off() {
@@ -810,8 +813,12 @@ geo_isi_set() {
   # dihentikan di tengah.
   local tmp
   tmp="$(mktemp /tmp/sentinel-geo.XXXXXX)" || return 1
+  local py_bin="python3"
+  if [ -x /www/server/panel/pyenv/bin/python3 ]; then
+    py_bin="/www/server/panel/pyenv/bin/python3"
+  fi
   if ! GEO_JSON="$GEO_JSON" GEO_MODE="$GEO_MODE" GEO_NEGARA="$GEO_NEGARA" \
-       SET_GEO="$SET_GEO" /www/server/panel/pyenv/bin/python3 - > "$tmp" <<'PY'
+       SET_GEO="$SET_GEO" "$py_bin" - > "$tmp" <<'PY'
 import json, os, sys
 try:
     data = json.load(open(os.environ['GEO_JSON']))

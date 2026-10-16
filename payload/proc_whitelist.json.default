@@ -18,6 +18,33 @@
     "enabled": true
   },
   {
+    "id": "wl-git-clone",
+    "name": "Git Clone Repository",
+    "type": "cmdline_match",
+    "pattern": "git clone",
+    "remark": "Izinkan eksekusi git clone dari GitHub, GitLab, atau Git server lainnya",
+    "created_at": 1792060000,
+    "enabled": true
+  },
+  {
+    "id": "wl-git-fetch",
+    "name": "Git Fetch Remote",
+    "type": "cmdline_match",
+    "pattern": "git fetch",
+    "remark": "Izinkan sinkronisasi branch git fetch dari remote",
+    "created_at": 1792060000,
+    "enabled": true
+  },
+  {
+    "id": "wl-ssh-git",
+    "name": "SSH Git Remote Client",
+    "type": "basename",
+    "pattern": "ssh",
+    "remark": "Izinkan klien SSH untuk koneksi git over SSH (port 22)",
+    "created_at": 1792060000,
+    "enabled": true
+  },
+  {
     "id": "wl-artisan",
     "name": "Laravel Artisan",
     "type": "cmdline_match",

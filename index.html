@@ -201,6 +201,9 @@ select.sn-inp{cursor:pointer}
 			<span id="bWaf" class="sn-badge sn-off" title="WAF engine status">waf</span>
 			<span id="bPanic" class="sn-badge sn-off">panic: off</span>
 			<span style="flex:1"></span>
+			<span id="snVerBadge" class="sn-badge" style="background:#f1f5f9;color:#334155;border:1px solid #cbd5e1;cursor:pointer" onclick="snBukaMaintenance('update')" title="Informasi Versi & Pembaruan">v1.6.0</span>
+			<button class="sn-btn sn-sm" onclick="snBukaMaintenance()" style="background:#e0f2fe;color:#0369a1;border:1px solid #bae6fd;font-weight:600">⚙️ Pemeliharaan</button>
+			<button class="sn-btn sn-sm" onclick="snBukaFeedback()" style="background:#fef3c7;color:#92400e;border:1px solid #fde68a;font-weight:600">💬 Feedback</button>
 		</div>
 
 		<div class="sn-mtabs">
@@ -776,11 +779,12 @@ select.sn-inp{cursor:pointer}
 					<div class="sn-tabs">
 						<span class="on" onclick="snWafTab('coraza',this)">Coraza</span>
 						<span onclick="snWafTab('lua',this)">LUA (Free Nginx)</span>
+						<span onclick="snWafTab('upload',this)">Real-Time Upload Protection</span>
 					</div>
 
 					<!-- ==================== WAF: CORAZA ==================== -->
 					<div class="sn-subpage on" id="w-eng">
-						<div class="sn-eng" id="snEngCard">
+						<div class="sn-eng" id="snCorazaHeroCard">
 							<div class="sn-empty">loading</div>
 						</div>
 						<div class="sn-card" style="margin-top:14px">
@@ -827,6 +831,9 @@ select.sn-inp{cursor:pointer}
 
 					<!-- ==================== WAF: LUA (free_waf) ==================== -->
 					<div class="sn-subpage" id="w-lua">
+						<div class="sn-eng" id="snLuaHeroCard" style="margin-bottom:14px">
+							<div class="sn-empty">loading</div>
+						</div>
 						<div class="sn-note" id="nwNote">loading</div>
 						<div class="sn-fl" style="margin:0 0 12px">
 							<span class="sn-btn pri" onclick="snNwInstall()">Install Engine</span>
@@ -899,6 +906,53 @@ select.sn-inp{cursor:pointer}
 						<tbody id="tbFwList"><tr><td colspan="2" class="sn-empty">loading</td></tr></tbody>
 					</table>
 				</div>
+					</div>
+
+					<!-- ==================== WAF: REAL-TIME UPLOAD PROTECTION (Imunify360 Style) ==================== -->
+					<div class="sn-subpage" id="w-upload">
+						<div class="sn-card">
+							<h3>Upload Scanner Service (Imunify360 Style)
+								<span class="sn-fl">
+									<span class="sn-badge sn-off" id="usvcBadge">loading</span>
+									<span class="sn-btn pri" id="btnUsvcToggle" onclick="snUploadScanServiceToggle('restart')">Restart Service</span>
+									<span class="sn-btn" onclick="snUploadScanMuat()">Refresh</span>
+								</span>
+							</h3>
+							<div class="sn-sys" id="usvcInfo"></div>
+							<div class="sn-note" style="margin-top:11px">
+								<b>Anti-Crash Memory Fuse:</b> Menggunakan koneksi streaming socket clamd (<span class="sn-mono">clamdscan --stream</span>)
+								tanpa memuat ulang signature ke RAM (0 MB overhead memori). Apabila sisa RAM bebas server &lt; 100 MB, pemindaian
+								otomatis dilewati secara aman demi mencegah server crash (OOM Killer).
+							</div>
+						</div>
+
+						<div class="sn-card" style="margin-top:14px">
+							<h3>Per-Vhost Real-Time Upload Scanner Control
+								<span class="sn-fl">
+									<span class="sn-btn pri" onclick="snUploadQuarantineModal('')">Semua Karantina</span>
+								</span>
+							</h3>
+							<table class="sn-tb">
+								<thead>
+									<tr>
+										<th>Vhost / Domain</th>
+										<th>Document Root</th>
+										<th>Web Server</th>
+										<th>Auto-Scan Status</th>
+										<th>Karantina</th>
+										<th>Tindakan</th>
+									</tr>
+								</thead>
+								<tbody id="tbUploadVhosts">
+									<tr><td colspan="6" class="sn-empty">loading</td></tr>
+								</tbody>
+							</table>
+							<div class="sn-note" style="margin-top:11px">
+								Setiap berkas malware upload yang terdeteksi secara otomatis dipindahkan ke direktori karantina terisolasi per-vhost
+								(<span class="sn-mono">/www/server/sentinel/av/quarantine/&lt;vhost&gt;/files/</span>) dan langsung <b>dikunci total (chmod 000)</b>
+								sehingga tidak dapat dieksekusi atau dibaca oleh siapapun.
+							</div>
+						</div>
 					</div>
 				</div>
 			</div>
@@ -1086,6 +1140,7 @@ select.sn-inp{cursor:pointer}
 						<span class="on" onclick="snSub2('atur',this)">Settings</span>
 						<span onclick="snSub2('laju',this)">Rate Limits</span>
 						<span onclick="snSub2('panic',this)">Panic</span>
+						<span onclick="snSub2('maintenance',this)">Pemeliharaan</span>
 					</div>
 
 					<div class="sn-subpage on" id="c-atur">
@@ -1160,6 +1215,84 @@ select.sn-inp{cursor:pointer}
 						<div style="font-weight:600;margin:14px 0 6px">Kernel Rules While Panic Is Active</div>
 						<pre class="sn-pre" id="pnRules">not active</pre>
 					</div>
+
+					<!-- SUBPAGE PEMELIHARAAN (LIFECYCLE & MAINTENANCE) -->
+					<div class="sn-subpage" id="c-maintenance">
+						<div class="sn-note" style="margin-bottom:14px">
+							Manajemen siklus hidup instalasi dan pemeliharaan ZySentinel. Pilih operasi yang ingin dilakukan di bawah ini. Seluruh tindakan dilengkapi dialog konfirmasi dan perlindungan keamanan server.
+						</div>
+
+						<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;margin-bottom:16px">
+							<!-- KARTU FRESH INSTALL -->
+							<div class="sn-card" style="margin-bottom:0;border-left:4px solid #10b981">
+								<h3 style="color:#047857">✨ Fresh Install</h3>
+								<p style="font-size:12.5px;color:var(--ink-2);margin:6px 0 12px;line-height:1.5">
+									Memasang ulang ZySentinel dari awal dengan konfigurasi bersih. Berguna jika ingin me-reset seluruh basis data dan memulai dari setelan default bawaan pabrik.
+								</p>
+								<div style="display:flex;align-items:center;justify-content:space-between;margin-top:auto">
+									<a href="javascript:snBukaTerms()" style="font-size:11.5px;color:var(--accent);text-decoration:underline">Ketentuan & Kebijakan</a>
+									<button class="sn-btn ok" onclick="snDoFreshInstall()">Fresh Install</button>
+								</div>
+							</div>
+
+							<!-- KARTU PEMBARUAN (UPDATE) -->
+							<div class="sn-card" style="margin-bottom:0;border-left:4px solid #3b82f6">
+								<h3 style="color:#1d4ed8">🔄 Pembaruan (Update)</h3>
+								<p style="font-size:12.5px;color:var(--ink-2);margin:6px 0 12px;line-height:1.5">
+									Memeriksa rilis terbaru dari repository resmi GitHub (<span class="sn-mono">omysurya/zysentinel</span>). Melakukan patch versi dan pembaruan biner tanpa menghapus data atau konfigurasi Anda.
+								</p>
+								<div style="display:flex;align-items:center;justify-content:space-between;margin-top:auto">
+									<span id="snUpdStatusTxt" style="font-size:11.5px;color:var(--ink-3)">Versi: v1.6.0</span>
+									<button class="sn-btn pri" onclick="snCheckUpdate()">Cek & Update</button>
+								</div>
+							</div>
+
+							<!-- KARTU SELF-HEAL (REPAIR) -->
+							<div class="sn-card" style="margin-bottom:0;border-left:4px solid #f59e0b">
+								<h3 style="color:#b45309">🩹 Perbaikan Mandiri (Repair)</h3>
+								<p style="font-size:12.5px;color:var(--ink-2);margin:6px 0 12px;line-height:1.5">
+									Mendeteksi anomali atau kerusakan berkas, menyusun ulang biner yang hilang, memulihkan file konfigurasi default, dan mengaktifkan kembali daemon yang macet secara otomatis <b>tanpa downtime</b> pada server.
+								</p>
+								<div style="display:flex;align-items:center;justify-content:space-between;margin-top:auto">
+									<span style="font-size:11.5px;color:#059669">● Zero Downtime</span>
+									<button class="sn-btn" style="background:#fef3c7;color:#92400e;border:1px solid #fde68a" onclick="snDoSelfHeal()">Jalankan Self-Heal</button>
+								</div>
+							</div>
+
+							<!-- KARTU UNINSTALL BERSIH -->
+							<div class="sn-card" style="margin-bottom:0;border-left:4px solid #ef4444">
+								<h3 style="color:#b91c1c">🗑️ Pencabutan Bersih (Uninstall)</h3>
+								<p style="font-size:12.5px;color:var(--ink-2);margin:6px 0 12px;line-height:1.5">
+									Menghentikan seluruh proses proteksi, mencabut rantai aturan firewall kernel, melepas hook WAF dari Nginx, dan menghapus seluruh berkas di <span class="sn-mono">/www/server/sentinel</span> secara bersih tanpa sisa.
+								</p>
+								<div style="display:flex;align-items:center;justify-content:space-between;margin-top:auto">
+									<span style="font-size:11.5px;color:#dc2626">⚠️ Menghentikan Proteksi</span>
+									<button class="sn-btn dgr" onclick="snDoUninstall()">Cabut Bersih</button>
+								</div>
+							</div>
+						</div>
+
+						<!-- KARTU RIWAYAT FEEDBACK -->
+						<div class="sn-card">
+							<h3>
+								<span>📋 Riwayat Laporan Feedback & Bug</span>
+								<span class="sn-fl">
+									<button class="sn-btn sn-sm" onclick="snBukaFeedback()">+ Buat Laporan Baru</button>
+									<button class="sn-btn sn-sm" onclick="snLoadFeedbackHistory()">Segarkan</button>
+								</span>
+							</h3>
+							<div class="sn-table-responsive" style="max-height:220px;overflow-y:auto">
+								<table class="sn-tb">
+									<thead>
+										<tr><th>Waktu</th><th>Jenis</th><th>Topik</th><th>Subjek Laporan</th><th>Status</th></tr>
+									</thead>
+									<tbody id="tbFeedbackHistory">
+										<tr><td colspan="5" class="sn-empty">Belum ada laporan yang dikirim</td></tr>
+									</tbody>
+								</table>
+							</div>
+						</div>
+					</div>
 				</div>
 			</div>
 
@@ -1189,7 +1322,7 @@ select.sn-inp{cursor:pointer}
     'cookie_flags': 'SameSite=Lax',
     'send_page_view': true,
     'page_location': window.location.href,
-    'page_title': 'ZySentinel Dashboard'
+    'page_title': 'ZySentinel'
   });
 
   // Kirim event penanda server aktif dan versi ZySentinel
@@ -1457,10 +1590,28 @@ function snTop(nama, el){
 }
 function snWafTab(nama, el){
 	$('#top-waf .sn-tabs span').removeClass('on');
-	$(el).addClass('on');
+	if(el){
+		$(el).addClass('on');
+	} else {
+		var idx = (nama === 'lua') ? 1 : ((nama === 'upload') ? 2 : 0);
+		$('#top-waf .sn-tabs span').eq(idx).addClass('on');
+	}
 	$('#top-waf .sn-subpage').removeClass('on');
-	if(nama === 'lua'){ $('#w-lua').addClass('on'); }
-	else { $('#w-eng').addClass('on'); }
+	if(nama === 'lua'){
+		$('#w-lua').addClass('on');
+		snEngineMuat();
+		snLuaMuat();
+		snNwMuat();
+	}
+	else if(nama === 'upload'){
+		$('#w-upload').addClass('on');
+		snUploadScanMuat();
+	}
+	else {
+		$('#w-eng').addClass('on');
+		snEngineMuat();
+		snWafMuat();
+	}
 	SN_WAFTAB = nama;
 }
 function snSub(nama, el){
@@ -3199,7 +3350,7 @@ function snEngineMuat(){
 		var fw = m.free_waf || {}, cz = m.coraza || {};
 		var nginx = m.nginx_connector || 'none';
 
-		// --- kartu free_waf ---
+		// --- status free_waf ---
 		var fwSt = fw.lua === 'ada'
 			? '<span class="sn-badge sn-ok">siap</span>'
 			: '<span class="sn-badge sn-bad">nginx tanpa Lua</span>';
@@ -3207,7 +3358,7 @@ function snEngineMuat(){
 			? '<span class="sn-badge sn-ok">berjalan</span>'
 			: '<span class="sn-badge sn-off">tidak termuat</span>';
 
-		// --- kartu coraza ---
+		// --- status coraza ---
 		var czSt, czJalan;
 		if(!cz.aset){
 			czSt = '<span class="sn-badge sn-off">belum diunduh</span>';
@@ -3218,32 +3369,36 @@ function snEngineMuat(){
 			? '<span class="sn-badge sn-ok">konektor terpasang</span>'
 			: '<span class="sn-badge sn-off">konektor belum ada</span>';
 
-		var h = ''
-			+ '<div class="sn-engcard ' + (m.pilih === 'free_waf' ? 'on' : '') + '" '
-			+ 'onclick="snEnginePilih(\'' + (m.pilih === 'free_waf' ? 'coraza' : 'free_waf') + '\')">'
-			+ '<div class="t">Free Nginx WAF</div>'
-			+ '<div class="d">WAF Lua di dalam nginx. Ringan, cepat, memeriksa pola '
-			+ 'serangan umum dan CC per IP. Cocok untuk semua jenis situs.</div>'
-			+ '<div class="st">' + fwSt + fwJalan
-			+ '<span class="sn-badge sn-off">Lua: ' + (fw.lua || '-') + '</span></div>'
-			+ '<div class="pilih">' + (m.pilih === 'free_waf'
-				? '<span class="sn-badge sn-ok">aktif</span>'
-				: '<span class="sn-btn pri">Gunakan</span>') + '</div></div>'
+		// 1. Hero Card Coraza (khusus untuk subpage Coraza #w-eng)
+		var isCzActive = (m.pilih === 'coraza');
+		var czBtn = isCzActive
+			? '<span class="sn-badge sn-ok" style="font-size:12px;padding:3px 10px">✓ Aktif (Engine Utama)</span>'
+			: '<span class="sn-btn pri" onclick="snEnginePilih(\'coraza\');event.stopPropagation();">Gunakan Coraza</span>';
 
-			+ '<div class="sn-engcard ' + (m.pilih === 'coraza' ? 'on' : '') + '" '
-			+ 'onclick="snEnginePilih(\'' + (m.pilih === 'coraza' ? 'free_waf' : 'coraza') + '\')">'
+		var czHtml = ''
+			+ '<div class="sn-engcard ' + (isCzActive ? 'on' : '') + '" onclick="snCardClick(\'coraza\')">'
 			+ '<div class="t">Coraza + OWASP CRS</div>'
-			+ '<div class="d">Mesin OWASP Coraza dengan rule CRS. Lebih lengkap, '
-			+ 'tetapi butuh konektor nginx (rebuild dengan --with-compat) yang belum '
-			+ 'terpasang di server ini.</div>'
+			+ '<div class="d">Mesin OWASP Coraza dengan rule CRS komprehensif. Memeriksa ancaman injeksi SQL, XSS, RCE, dan protokol web tingkat lanjut. Memerlukan konektor modul nginx (--with-compat).</div>'
 			+ '<div class="st">' + czSt + czJalan
 			+ (cz.versi && cz.versi !== '-' ? '<span class="sn-badge sn-off">CRS ' + cz.versi + '</span>' : '')
 			+ '</div>'
-			+ '<div class="pilih">' + (m.pilih === 'coraza'
-				? '<span class="sn-badge sn-ok">dipilih</span>'
-				: '<span class="sn-btn">Pilih</span>') + '</div></div>';
+			+ '<div class="pilih">' + czBtn + '</div></div>';
+		$('#snCorazaHeroCard').html(czHtml);
 
-		$('#snEngCard').html(h);
+		// 2. Hero Card Free Nginx WAF (khusus untuk subpage LUA #w-lua)
+		var isFwActive = (m.pilih === 'free_waf');
+		var fwBtn = isFwActive
+			? '<span class="sn-badge sn-ok" style="font-size:12px;padding:3px 10px">✓ Aktif (Engine Utama)</span>'
+			: '<span class="sn-btn pri" onclick="snEnginePilih(\'free_waf\');event.stopPropagation();">Gunakan Free Nginx WAF</span>';
+
+		var fwHtml = ''
+			+ '<div class="sn-engcard ' + (isFwActive ? 'on' : '') + '" onclick="snCardClick(\'free_waf\')">'
+			+ '<div class="t">Free Nginx WAF</div>'
+			+ '<div class="d">WAF Lua di dalam nginx. Ringan, cepat, memeriksa pola serangan umum dan CC per IP. Cocok untuk semua jenis situs.</div>'
+			+ '<div class="st">' + fwSt + fwJalan
+			+ '<span class="sn-badge sn-off">Lua: ' + (fw.lua || '-') + '</span></div>'
+			+ '<div class="pilih">' + fwBtn + '</div></div>';
+		$('#snLuaHeroCard').html(fwHtml);
 
 		// --- info aset coraza ---
 		$('#corazaInfo').html(
@@ -3260,16 +3415,37 @@ function snEngineMuat(){
 	});
 }
 
+function snCardClick(eng){
+	if(!SN_ENG || !SN_ENG.pilih){
+		snEnginePilih(eng);
+		return;
+	}
+	var nama = (eng === 'coraza') ? 'Coraza + OWASP CRS' : 'Free Nginx WAF';
+	if(SN_ENG.pilih === eng){
+		layer.msg('Engine ' + nama + ' saat ini sudah aktif sebagai mesin utama.', {time: 2500});
+	} else {
+		snEnginePilih(eng);
+	}
+}
+
 function snEnginePilih(eng){
 	var nama = (eng === 'coraza') ? 'Coraza + OWASP CRS' : 'Free Nginx WAF';
 	var tanya = (eng === 'coraza')
-		? 'Pilih engine ' + nama + '? Aset disiapkan bila belum ada; engine baru '
-		  + 'berjalan setelah konektor nginx terpasang.'
-		: 'Pilih engine ' + nama + '?';
-	layer.confirm(tanya, function(idx){
+		? 'Pilih dan aktifkan engine ' + nama + '? Aset disiapkan bila belum ada; engine baru berjalan setelah konektor nginx terpasang.'
+		: 'Pilih dan aktifkan engine ' + nama + '? WAF Lua di dalam nginx akan diaktifkan sebagai engine utama.';
+	layer.confirm(tanya, {title: 'Pilih Engine WAF: ' + nama}, function(idx){
 		layer.close(idx);
 		snAjax('set_waf_engine', {engine: eng}, function(m){
-			if(m){ layer.msg(m, {time:4500}); snEngineMuat(); }
+			if(m){
+				layer.msg(m, {time: 3500});
+				snEngineMuat();
+				if(eng === 'free_waf'){
+					snWafTab('lua');
+					snLuaMuat();
+				} else {
+					snWafTab('coraza');
+				}
+			}
 		});
 	});
 }
@@ -3543,6 +3719,166 @@ function snNwRemove(){
 		layer.close(idx);
 		snAjax('freewaf_engine', {action: 'remove'}, function(m){
 			if(m){ layer.msg(m, {time:4000}); snNwMuat(); snLuaMuat(); }
+		});
+	});
+}
+
+/* ---------- WAF: Real-Time Upload Protection (Imunify360 Style) ---------- */
+function snUploadScanMuat(){
+	snAjax('get_vhost_upload_scan', {}, function(data){
+		if(!data) return;
+		var isRunning = data.service_running || data.systemd_active;
+		var badge = $('#usvcBadge');
+		if(isRunning){
+			badge.attr('class', 'sn-badge sn-on').text('RUNNING' + (data.pid ? ' (PID ' + data.pid + ')' : ''));
+			$('#btnUsvcToggle').text('Restart Service').attr('class', 'sn-btn pri');
+		} else {
+			badge.attr('class', 'sn-badge sn-off').text('STOPPED');
+			$('#btnUsvcToggle').text('Start Service').attr('class', 'sn-btn pri');
+		}
+
+		var clamdInfo = data.clamd_ready
+			? '<span style="color:#00b894;font-weight:600">Aktif &amp; Siap (' + (data.clamd_socket || '/var/run/clamav/clamd.ctl') + ')</span>'
+			: '<span style="color:#d63031;font-weight:600">Socket belum terdeteksi (cek clamav-daemon)</span>';
+
+		var ramText = (data.available_ram_mb || 0) + ' MB';
+		var minRam = (data.config && data.config.min_memory_mb) || 100;
+		if((data.available_ram_mb || 0) < minRam){
+			ramText += ' <span style="color:#d63031;font-weight:600">[OOM Fuse Aktif]</span>';
+		} else {
+			ramText += ' <span style="color:#00b894;font-weight:600">[Aman]</span>';
+		}
+
+		var gridHtml = ''
+			+ '<div><span>Status Layanan Watcher</span><span>' + (isRunning ? 'Aktif (Streaming inotify)' : 'Nonaktif') + '</span></div>'
+			+ '<div><span>ClamAV Socket Stream</span><span>' + clamdInfo + '</span></div>'
+			+ '<div><span>RAM Bebas Sistem</span><span>' + ramText + '</span></div>'
+			+ '<div><span>Vhost Diproteksi</span><span>' + (data.active_vhosts_count || 0) + ' dari ' + (data.total_vhosts_count || 0) + ' vhost</span></div>'
+			+ '<div><span>Batas Maks Ukuran Berkas</span><span>' + ((data.config && data.config.max_file_size_mb) || 25) + ' MB</span></div>'
+			+ '<div><span>Total Berkas Dikarantina</span><span>' + (data.total_quarantined || 0) + ' berkas</span></div>';
+		$('#usvcInfo').html(gridHtml);
+
+		var tb = '';
+		var list = data.vhosts || [];
+		if(!list.length){
+			$('#tbUploadVhosts').html('<tr><td colspan="6" class="sn-empty">Tidak ada vhost terdeteksi</td></tr>');
+			return;
+		}
+
+		for(var i = 0; i < list.length; i++){
+			var vh = list[i];
+			var vhNameSafe = vh.vhost.replace(/'/g, "\\'");
+			var btnToggle = vh.enabled
+				? '<span class="sn-btn dgr" style="padding:2px 8px;font-size:11px" onclick="snUploadVhostToggle(\'' + vhNameSafe + '\')">ON (Matikan)</span>'
+				: '<span class="sn-btn pri" style="padding:2px 8px;font-size:11px" onclick="snUploadVhostToggle(\'' + vhNameSafe + '\')">OFF (Aktifkan)</span>';
+
+			var qBadge = vh.quarantined_count > 0
+				? '<span class="sn-badge sn-bad">' + vh.quarantined_count + ' malware</span>'
+				: '<span class="sn-badge sn-off">0 bersih</span>';
+
+			tb += '<tr>'
+				+ '<td><b>' + vh.vhost + '</b></td>'
+				+ '<td class="sn-mono" style="font-size:11px">' + (vh.root || '-') + '</td>'
+				+ '<td><span class="sn-badge">' + (vh.server || 'nginx').toUpperCase() + '</span></td>'
+				+ '<td>' + btnToggle + '</td>'
+				+ '<td>' + qBadge + '</td>'
+				+ '<td><span class="sn-btn" style="padding:2px 8px;font-size:11px" onclick="snUploadQuarantineModal(\'' + vhNameSafe + '\')">Lihat Karantina</span></td>'
+				+ '</tr>';
+		}
+		$('#tbUploadVhosts').html(tb);
+	});
+}
+
+function snUploadVhostToggle(vhost){
+	snAjax('toggle_vhost_upload_scan', {vhost: vhost}, function(res){
+		if(res){
+			layer.msg(res, {time: 2000});
+			snUploadScanMuat();
+		}
+	});
+}
+
+function snUploadScanServiceToggle(action){
+	snAjax('toggle_upload_scan_service', {action: action}, function(res){
+		if(res){
+			layer.msg(res, {time: 2000});
+			setTimeout(snUploadScanMuat, 1000);
+		}
+	});
+}
+
+function snUploadQuarantineModal(vhost){
+	snAjax('get_vhost_quarantine', {vhost: vhost}, function(items){
+		var title = 'Berkas Karantina Upload ' + (vhost ? ('(' + vhost + ')') : '(Semua Vhost)');
+		var rows = '';
+		if(!items || !items.length){
+			rows = '<tr><td colspan="7" class="sn-empty" style="padding:20px">Tidak ada berkas karantina untuk vhost ini. Sistem aman dan bersih.</td></tr>';
+		} else {
+			for(var i = 0; i < items.length; i++){
+				var item = items[i];
+				var metaSafe = (item.meta_file || '').replace(/'/g, "\\'");
+				var vhSafe = (item.vhost || '').replace(/'/g, "\\'");
+				rows += '<tr>'
+					+ '<td style="font-size:11px;white-space:nowrap">' + (item.quarantined_at ? item.quarantined_at.replace('T', ' ').substring(0, 19) : '-') + '</td>'
+					+ '<td><b>' + (item.vhost || '-') + '</b></td>'
+					+ '<td class="sn-mono" style="font-size:11px;max-width:240px;word-break:break-all">' + (item.original_path || '-') + '</td>'
+					+ '<td><span class="sn-badge sn-bad" style="font-size:11px">' + (item.signature || 'Malware') + '</span></td>'
+					+ '<td class="sn-mono" style="font-size:11px">' + ukuranAngka(item.size || 0) + '</td>'
+					+ '<td><span class="sn-badge" style="background:#2d3436;color:#fff;font-size:10px">000 (Terkunci)</span></td>'
+					+ '<td style="white-space:nowrap">'
+					+ '<span class="sn-btn" style="padding:2px 6px;font-size:11px;margin-right:4px" onclick="snUploadQuarantineRestore(\'' + metaSafe + '\',\'' + vhSafe + '\')">Pulihkan</span>'
+					+ '<span class="sn-btn dgr" style="padding:2px 6px;font-size:11px" onclick="snUploadQuarantineDelete(\'' + metaSafe + '\',\'' + vhSafe + '\')">Hapus</span>'
+					+ '</td>'
+					+ '</tr>';
+			}
+		}
+
+		var modalContent = '<div style="padding:15px;max-height:500px;overflow-y:auto">'
+			+ '<table class="sn-tb">'
+			+ '<thead><tr><th>Waktu</th><th>Vhost</th><th>Jalur Berkas Asli</th><th>Signature</th><th>Ukuran</th><th>Lock</th><th>Tindakan</th></tr></thead>'
+			+ '<tbody>' + rows + '</tbody>'
+			+ '</table>'
+			+ '</div>';
+
+		layer.open({
+			type: 1,
+			title: title,
+			area: ['860px', 'auto'],
+			content: modalContent,
+			btn: ['Tutup'],
+			yes: function(idx){ layer.close(idx); }
+		});
+	});
+}
+
+function snUploadQuarantineRestore(metaFile, vhost){
+	layer.confirm('Yakin ingin memulihkan berkas ini ke direktori aslinya di situs?', function(idx){
+		layer.close(idx);
+		snAjax('restore_vhost_quarantine', {meta: metaFile}, function(res){
+			if(res){
+				layer.msg(res, {time: 2500});
+				layer.closeAll('page');
+				setTimeout(function(){
+					snUploadQuarantineModal(vhost);
+					snUploadScanMuat();
+				}, 500);
+			}
+		});
+	});
+}
+
+function snUploadQuarantineDelete(metaFile, vhost){
+	layer.confirm('Hapus permanen berkas karantina ini? Tindakan ini tidak dapat dibatalkan.', function(idx){
+		layer.close(idx);
+		snAjax('delete_vhost_quarantine', {meta: metaFile}, function(res){
+			if(res){
+				layer.msg(res, {time: 2500});
+				layer.closeAll('page');
+				setTimeout(function(){
+					snUploadQuarantineModal(vhost);
+					snUploadScanMuat();
+				}, 500);
+			}
 		});
 	});
 }
@@ -3921,10 +4257,8 @@ SN_SUB = {
 	aksi: snAksiMuat,
 	feed: snFeed, riwayat: snRiwayat, log: snLog
 };
-/* Setting hanya tiga: Settings, Rate Limits, Panic. Engine/WAF pindah ke
-   tab WAF; Allow List dan Kernel Rules pindah ke tab Firewall. */
 SN_SUB2 = {
-	atur: snConf, laju: snLaju, panic: snPanicMuat
+	atur: snConf, laju: snLaju, panic: snPanicMuat, maintenance: snLoadFeedbackHistory
 };
 
 $(function(){
@@ -3933,6 +4267,13 @@ $(function(){
 	snBans();
 	snPanicMuat();
 	SN_SYS_T = 0;
+
+	snAjax('get_lifecycle_status', {}, function(st){
+		if(st){
+			window.SN_HOSTNAME = st.hostname || location.hostname;
+			if(st.version) $('#snVerBadge').text('v' + st.version);
+		}
+	});
 
 	/* rpm mengikuti rps selama operator belum mengetiknya sendiri */
 	$(document).on('input keyup', '#c_throttle_rps', rpmIkuti);
@@ -4355,6 +4696,300 @@ function snPanikRefresh(){
 		var l = $('#bPanic');
 		if(m.aktif){ l.text('panic: ACTIVE'); l.attr('class', 'sn-badge sn-bad'); }
 		else { l.text('panic: off'); l.attr('class', 'sn-badge sn-ok'); }
+	});
+}
+
+/* ============================================================
+   MANAJEMEN SIKLUS HIDUP: FRESH | UPDATE | REPAIR | UNINSTALL
+   FEEDBACK & BUGS REPORT & TERMS POLICY
+   ============================================================ */
+function snBukaMaintenance(subtab){
+	snTop('conf', $('.sn-mtabs span:contains("Setting")').get(0));
+	snSub2('maintenance', $('#top-conf .sn-tabs span:contains("Pemeliharaan")').get(0));
+	if(subtab === 'update'){
+		snCheckUpdate();
+	}
+	snLoadFeedbackHistory();
+}
+
+function snBukaTerms(){
+	snAjax('get_terms_and_policy', {}, function(text){
+		var contentHtml = '<div style="padding:16px 20px;font-size:13px;line-height:1.6;color:var(--ink);max-height:480px;overflow-y:auto">'
+			+ '<pre style="white-space:pre-wrap;font-family:inherit;font-size:12.5px;background:#f8fafc;padding:14px;border-radius:8px;border:1px solid var(--line)">'
+			+ (text || 'Gagal memuat syarat dan kebijakan.')
+			+ '</pre>'
+			+ '</div>';
+		layer.open({
+			type: 1,
+			title: '📜 Syarat Ketentuan Lisensi & Kebijakan Privasi ZySentinel',
+			area: ['640px', '520px'],
+			content: contentHtml,
+			btn: ['Saya Paham'],
+			yes: function(idx){ layer.close(idx); }
+		});
+	});
+}
+
+function snDoFreshInstall(){
+	var confirmHtml = '<div style="padding:16px 20px;font-size:13px;color:var(--ink);line-height:1.6">'
+		+ '<div style="background:#ecfdf5;border:1px solid #a7f3d0;color:#065f46;padding:12px;border-radius:8px;margin-bottom:12px">'
+		+ '<b>Perhatian:</b> Fresh Install akan menyetel ulang seluruh basis data SQLite, mengembalikan konfigurasi default, dan mengaktifkan seluruh modul pengamanan dari awal.'
+		+ '</div>'
+		+ '<p>Apakah Anda yakin ingin menjalankan <b>Fresh Install</b> pada server ini?</p>'
+		+ '<label style="display:flex;align-items:center;gap:8px;margin-top:10px;font-size:12px;color:var(--ink-2);cursor:pointer">'
+		+ '<input type="checkbox" id="cbAgreeFresh" checked> Saya menyetujui <a href="javascript:snBukaTerms()" style="color:var(--accent);text-decoration:underline">Ketentuan Lisensi & Privasi</a>'
+		+ '</label>'
+		+ '</div>';
+
+	layer.open({
+		type: 1,
+		title: 'Konfirmasi Fresh Install',
+		area: ['480px', 'auto'],
+		content: confirmHtml,
+		btn: ['Jalankan Fresh Install', 'Batal'],
+		yes: function(idx){
+			if(!$('#cbAgreeFresh').is(':checked')){
+				layer.msg('Harap setujui ketentuan lisensi terlebih dahulu', {time: 2500});
+				return;
+			}
+			layer.close(idx);
+			var loadIdx = layer.msg('Menjalankan Fresh Install ZySentinel, mohon tunggu...', {time:0, shade:[0.4,'#000']});
+			if(typeof gtag === 'function'){
+				gtag('event', 'install_fresh', {'event_category': 'lifecycle', 'app_version': '1.6.0'});
+			}
+			snAjax('run_lifecycle_action', {action: 'fresh'}, function(res){
+				layer.close(loadIdx);
+				if(res){
+					layer.alert(res, {title: 'Fresh Install Berhasil', icon: 1});
+					snMuatSemua();
+				}
+			});
+		}
+	});
+}
+
+function snCheckUpdate(){
+	var loadIdx = layer.msg('Memeriksa rilis terbaru dari repository GitHub...', {time:0, shade:[0.3,'#000']});
+	snAjax('check_github_update', {}, function(data){
+		layer.close(loadIdx);
+		if(!data) return;
+		var vCur = data.current_version || '1.6.0';
+		var vLat = data.latest_version || vCur;
+		var hasUpd = data.has_update;
+		var notes = data.release_notes || 'Tidak ada catatan rilis.';
+		$('#snUpdStatusTxt').text('Versi: v' + vCur + (hasUpd ? ' (Tersedia v' + vLat + ')' : ' (Terbaru)'));
+
+		var updHtml = '<div style="padding:16px 20px;font-size:13px;line-height:1.5">'
+			+ '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--line)">'
+			+ '<div><b>Versi Aktif:</b> <span class="sn-mono">v' + vCur + '</span></div>'
+			+ '<div><b>Rilis GitHub:</b> <span class="sn-mono" style="color:' + (hasUpd ? '#2563eb' : '#059669') + ';font-weight:700">v' + vLat + '</span></div>'
+			+ '</div>'
+			+ '<div style="margin-bottom:8px;font-weight:600;color:var(--ink-2)">Catatan Rilis:</div>'
+			+ '<pre style="max-height:180px;overflow-y:auto;background:#f8fafc;padding:10px;border-radius:6px;border:1px solid var(--line);font-size:12px;white-space:pre-wrap">'
+			+ notes
+			+ '</pre>'
+			+ (hasUpd 
+				? '<div style="margin-top:12px;color:#1d4ed8;font-size:12px">Pembaruan tersedia! Paket akan diunduh dan dipasang otomatis dari repository resmi.</div>'
+				: '<div style="margin-top:12px;color:#059669;font-size:12px">Anda sudah menggunakan versi terbaru atau patch terkini.</div>')
+			+ '</div>';
+
+		layer.open({
+			type: 1,
+			title: '🔄 Informasi Pembaruan ZySentinel',
+			area: ['520px', 'auto'],
+			content: updHtml,
+			btn: [hasUpd ? 'Pasang Pembaruan Sekarang' : 'Pasang Ulang / Patch', 'Tutup'],
+			yes: function(idx){
+				layer.close(idx);
+				snDoUpdate();
+			}
+		});
+	});
+}
+
+function snDoUpdate(){
+	var loadIdx = layer.msg('Mengunduh dan menerapkan pembaruan ZySentinel...', {time:0, shade:[0.4,'#000']});
+	if(typeof gtag === 'function'){
+		gtag('event', 'install_update', {'event_category': 'lifecycle', 'app_version': '1.6.0'});
+	}
+	snAjax('run_lifecycle_action', {action: 'update'}, function(res){
+		layer.close(loadIdx);
+		if(res){
+			layer.alert(res, {title: 'Pembaruan Sukses', icon: 1});
+			snMuatSemua();
+		}
+	});
+}
+
+function snDoSelfHeal(){
+	layer.confirm('Jalankan perbaikan mandiri (Self-Heal)? Sistem akan memeriksa biner, unit systemd, aturan firewall, dan mengaktifkan kembali daemon yang macet tanpa menyebabkan gangguan atau downtime pada server.',
+		{title: '🩹 Konfirmasi Self-Heal', icon: 3},
+		function(idx){
+			layer.close(idx);
+			var loadIdx = layer.msg('Menjalankan diagnostik dan perbaikan mandiri, mohon tunggu...', {time:0, shade:[0.4,'#000']});
+			if(typeof gtag === 'function'){
+				gtag('event', 'install_repair', {'event_category': 'lifecycle', 'app_version': '1.6.0'});
+			}
+			snAjax('run_lifecycle_action', {action: 'repair'}, function(res){
+				layer.close(loadIdx);
+				if(res){
+					layer.alert(res, {title: 'Self-Heal Selesai', icon: 1});
+					snMuatSemua();
+				}
+			});
+		}
+	);
+}
+
+function snDoUninstall(){
+	var unHtml = '<div style="padding:16px 20px;font-size:13px;color:var(--ink);line-height:1.6">'
+		+ '<div style="background:#fef2f2;border:1px solid #fecaca;color:#991b1b;padding:12px;border-radius:8px;margin-bottom:12px">'
+		+ '<b>PERINGATAN BAHAYA:</b> Anda akan mencabut ZySentinel secara total.<br>'
+		+ '• Seluruh layanan proteksi akan dihentikan.<br>'
+		+ '• Rantai kernel firewall dan set blacklist/throttle akan dicabut.<br>'
+		+ '• Hook WAF pada Nginx akan dilepas (Nginx diverifikasi normal).<br>'
+		+ '• Seluruh berkas di <span class="sn-mono">/www/server/sentinel</span> dan log akan dibersihkan tanpa sisa.<br>'
+		+ '• Konfigurasi server dan vhost dikembalikan ke kondisi awal tanpa merusak situs pelanggan.'
+		+ '</div>'
+		+ '<p style="margin-bottom:8px">Untuk melanjutkan pencabutan bersih, ketik <b>UNINSTALL</b> pada kotak di bawah:</p>'
+		+ '<input type="text" id="inUnConfirm" class="sn-in" style="width:100%;font-weight:700;letter-spacing:1px;text-align:center;border-color:#f87171" placeholder="Ketik UNINSTALL">'
+		+ '</div>';
+
+	layer.open({
+		type: 1,
+		title: '⚠️ Konfirmasi Pencabutan Bersih ZySentinel',
+		area: ['520px', 'auto'],
+		content: unHtml,
+		btn: ['Cabut Bersih Total', 'Batal'],
+		btn1: function(idx){
+			var txt = ($('#inUnConfirm').val() || '').trim();
+			if(txt !== 'UNINSTALL'){
+				layer.msg('Konfirmasi teks salah. Ketik UNINSTALL dengan huruf besar.', {time: 3000});
+				return false;
+			}
+			layer.close(idx);
+			var loadIdx = layer.msg('Mencabut ZySentinel dan membersihkan berkas secara total...', {time:0, shade:[0.5,'#000']});
+			if(typeof gtag === 'function'){
+				gtag('event', 'uninstall_clean', {'event_category': 'lifecycle', 'app_version': '1.6.0'});
+			}
+			snAjax('run_lifecycle_action', {action: 'uninstall', confirm: 'UNINSTALL'}, function(res){
+				layer.close(loadIdx);
+				if(res){
+					layer.alert(res + '<br><br>Dasbor ini akan ditutup.', {
+						title: 'Pencabutan Bersih Selesai',
+						icon: 1,
+						yes: function(aIdx){
+							layer.close(aIdx);
+							snTutup();
+						}
+					});
+				}
+			});
+		}
+	});
+}
+
+function snBukaFeedback(){
+	var hostname = window.SN_HOSTNAME || location.hostname || 'server1';
+	var fbHtml = '<div style="padding:16px 20px;font-size:13px;line-height:1.5">'
+		+ '<div style="display:flex;gap:18px;margin-bottom:12px;padding:8px 12px;background:#f8fafc;border-radius:8px;border:1px solid var(--line)">'
+		+ '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:600">'
+		+ '<input type="radio" name="rdFbType" value="Feedback" checked onchange="snFbUpdatePreview()"> 💡 Usulan / Feedback'
+		+ '</label>'
+		+ '<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-weight:600">'
+		+ '<input type="radio" name="rdFbType" value="Bugsreport" onchange="snFbUpdatePreview()"> 🐛 Laporan Bug & Galat'
+		+ '</label>'
+		+ '</div>'
+		+ '<div style="margin-bottom:10px">'
+		+ '<label style="display:block;font-size:12px;font-weight:600;color:var(--ink-2);margin-bottom:4px">Topik / Judul Laporan:</label>'
+		+ '<input type="text" id="snFbTopicIn" class="sn-in" style="width:100%" placeholder="misal: Masukan antarmuka WAF / Kendala scan upload" oninput="snFbUpdatePreview()">'
+		+ '</div>'
+		+ '<div style="margin-bottom:10px">'
+		+ '<label style="display:block;font-size:12px;font-weight:600;color:var(--ink-2);margin-bottom:4px">Email Anda (Opsional untuk balasan pengembang):</label>'
+		+ '<input type="email" id="snFbEmailIn" class="sn-in" style="width:100%" placeholder="nama@domain.com">'
+		+ '</div>'
+		+ '<div style="margin-bottom:10px">'
+		+ '<label style="display:block;font-size:12px;font-weight:600;color:var(--ink-2);margin-bottom:4px">Rincian Masukan / Laporan Kendala:</label>'
+		+ '<textarea id="snFbMsgIn" class="sn-in" style="width:100%;height:100px;resize:vertical;font-family:inherit" placeholder="Tuliskan pengalaman atau kendala yang dialami..."></textarea>'
+		+ '</div>'
+		+ '<div style="margin-bottom:12px">'
+		+ '<label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink-2);cursor:pointer">'
+		+ '<input type="checkbox" id="cbFbLog" checked> Sertakan ringkasan diagnostik log Sentinel yang telah <b>disanitasi</b> (tanpa kredensial/rahasia)'
+		+ '</label>'
+		+ '</div>'
+		+ '<div style="background:#f1f5f9;border:1px solid #cbd5e1;padding:8px 12px;border-radius:6px;font-size:11.5px;color:#334155">'
+		+ '<b>Format Subjek Terkirim:</b> <span id="snFbSubjectPreview" class="sn-mono" style="color:#0284c7">Feedback [Topik] [' + hostname + ']</span><br>'
+		+ '<span style="font-size:11px;color:#64748b">Jaminan Privasi: Server secara otomatis menghapus password, token, dan kunci privat sebelum diteruskan ke pengembang.</span>'
+		+ '</div>'
+		+ '</div>';
+
+	layer.open({
+		type: 1,
+		title: '💬 Feedback & Laporan Bug Pengembang ZySentinel',
+		area: ['580px', 'auto'],
+		content: fbHtml,
+		btn: ['Kirim Laporan', 'Batal'],
+		yes: function(idx){
+			var type = $('input[name="rdFbType"]:checked').val() || 'Feedback';
+			var topic = ($('#snFbTopicIn').val() || '').trim();
+			var msg = ($('#snFbMsgIn').val() || '').trim();
+			var email = ($('#snFbEmailIn').val() || '').trim();
+			var includeLog = $('#cbFbLog').is(':checked') ? 1 : 0;
+
+			if(!topic){
+				layer.msg('Harap isi topik laporan', {time: 2500});
+				return;
+			}
+			if(!msg){
+				layer.msg('Harap tuliskan rincian pesan laporan', {time: 2500});
+				return;
+			}
+
+			var loadIdx = layer.msg('Mengirim laporan ke pengembang...', {time:0, shade:[0.4,'#000']});
+			snAjax('send_feedback', {type: type, topic: topic, message: msg, email: email, include_log: includeLog}, function(res){
+				layer.close(loadIdx);
+				layer.close(idx);
+				if(res){
+					layer.alert((res.msg || 'Laporan berhasil dikirim.') + '<br><br><b>Subjek:</b> <span class="sn-mono">' + (res.subject || '') + '</span>', {
+						title: 'Laporan Diterima',
+						icon: 1
+					});
+					snLoadFeedbackHistory();
+				}
+			});
+		}
+	});
+	snFbUpdatePreview();
+}
+
+function snFbUpdatePreview(){
+	var type = $('input[name="rdFbType"]:checked').val() || 'Feedback';
+	var topic = ($('#snFbTopicIn').val() || 'Topik').trim() || 'Topik';
+	var hostname = window.SN_HOSTNAME || location.hostname || 'server1';
+	$('#snFbSubjectPreview').text(type + ' [' + topic + '] [' + hostname + ']');
+}
+
+function snLoadFeedbackHistory(){
+	snAjax('get_feedback_history', {}, function(list){
+		var tb = $('#tbFeedbackHistory');
+		if(!tb.length) return;
+		if(!list || !list.length){
+			tb.html('<tr><td colspan="5" class="sn-empty">Belum ada laporan yang dikirim</td></tr>');
+			return;
+		}
+		var rows = '';
+		for(var i = 0; i < list.length; i++){
+			var r = list[i];
+			var tagClass = (r.type === 'Bugsreport') ? 'dgr' : 'pri';
+			rows += '<tr>'
+				+ '<td class="sn-mono" style="font-size:11.5px">' + (r.time || '-') + '</td>'
+				+ '<td><span class="sn-btn sn-sm ' + tagClass + '" style="padding:2px 8px;font-size:11px">' + (r.type || 'Feedback') + '</span></td>'
+				+ '<td><b>' + (r.topic || '-') + '</b></td>'
+				+ '<td class="sn-mono" style="font-size:11px;color:var(--ink-2)">' + (r.subject || '-') + '</td>'
+				+ '<td><span class="sn-tag ok">TERKIRIM</span></td>'
+				+ '</tr>';
+		}
+		tb.html(rows);
 	});
 }
 </script>
