@@ -76,6 +76,7 @@ pasang_daemon() {
         chmod 755 "$BIN/$f"
       fi
     done
+    [ -f "$pay/guardd" ] && cp -p "$pay/guardd" "$BIN/guardd" && chmod 755 "$BIN/guardd"
     [ -f "$pay/guardd.c" ] && cp -p "$pay/guardd.c" "$BASE/src/guardd.c"
     # config TIDAK ditimpa bila sudah ada: isinya memuat penyesuaian
     # operator (ambang, geo-ban, throttle) yang tidak boleh hilang saat
@@ -111,14 +112,21 @@ EOF
     err "guardd.conf tidak ada, konfigurasi tidak bisa dibuat otomatis"
     return 1
   fi
-  if [ ! -x "$BIN/guardd" ]; then
-    if [ -f "$BASE/src/guardd.c" ] && command -v gcc >/dev/null 2>&1; then
-      say "menyusun guardd dari sumber"
-      gcc -O2 -Wall -Wextra -o "$BIN/guardd" "$BASE/src/guardd.c" \
-          -lsqlite3 -lm || { err "gagal menyusun guardd"; return 1; }
-    else
-      err "binary guardd tidak ada dan gcc tidak tersedia"
-      return 1
+  if [ ! -x "$BIN/guardd" ] || ! "$BIN/guardd" -V >/dev/null 2>&1; then
+    if [ -f "$pay/guardd" ]; then
+      cp -p "$pay/guardd" "$BIN/guardd"
+      chmod 755 "$BIN/guardd"
+      say "binary guardd dipasang dari payload"
+    fi
+    if [ ! -x "$BIN/guardd" ] || ! "$BIN/guardd" -V >/dev/null 2>&1; then
+      if [ -f "$BASE/src/guardd.c" ] && command -v gcc >/dev/null 2>&1; then
+        say "menyusun guardd dari sumber C"
+        gcc -O2 -Wall -Wextra -o "$BIN/guardd" "$BASE/src/guardd.c" \
+            -lsqlite3 -lm || { err "gagal menyusun guardd"; return 1; }
+      else
+        err "binary guardd tidak dapat dijalankan dan compiler gcc tidak tersedia"
+        return 1
+      fi
     fi
   fi
   chmod 755 "$BIN/guardd" "$BIN/guardctl" "$BIN/sentinel-fw.sh" "$BIN/sentinel-av.sh" "$BIN/sentinel-proc.py" "$BIN/sentinel-intel.sh" "$BIN/sentinel-notify.sh" "$BIN/sentinel-ports.py" 2>/dev/null
