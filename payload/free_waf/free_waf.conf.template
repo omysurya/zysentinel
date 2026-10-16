@@ -1,0 +1,22 @@
+# free_waf engine (Nginx free firewall, difork ke Sentinel)
+# Dipasang oleh sentinel-waf.sh freewaf-install, dari payload plugin Sentinel.
+#
+# CARA KERJA: berkas ini masuk ke direktori vhost nginx dan ikut dimuat oleh
+#   include /www/server/panel/vhost/nginx/*.conf;
+# di nginx.conf. Isinya mendeklarasikan shared dict + hook Lua di level http.
+#
+# BATAS KERAS (nginx menolak start bila dilanggar):
+#  - access_by_lua_file hanya boleh SATU per level. Jangan aktifkan
+#    luawaf.conf panel bersamaan dengan berkas ini.
+#  - lua_package_path hanya boleh SATU per level. Path dirantai di
+#    nginx.conf utama, bukan di sini.
+
+lua_shared_dict free_waf 20m;
+lua_shared_dict free_waf_drop_ip 10m;
+lua_shared_dict free_waf_drop_sum 10m;
+# buffer statistik (throttled write ke total.json)
+lua_shared_dict free_waf_stat 5m;
+lua_shared_dict free_waf_stat_lock 1m;
+
+init_by_lua_file   /www/server/free_waf/init.lua;
+access_by_lua_file /www/server/free_waf/waf.lua;

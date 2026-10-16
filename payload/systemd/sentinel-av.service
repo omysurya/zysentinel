@@ -1,0 +1,23 @@
+[Unit]
+Description=ZySentinel Antivirus scheduled scan
+Documentation=file:/www/docs/
+After=network.target clamav-daemon.service sentinel.service
+
+[Service]
+Type=oneshot
+ExecStart=/www/server/sentinel/bin/sentinel-av.sh scan-all
+ExecStartPost=/www/server/sentinel/bin/sentinel-av.sh check-sys
+RemainAfterExit=no
+
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+
+TimeoutStartSec=2h
+User=root
+
+StandardOutput=append:/www/server/sentinel/log/av.log
+StandardError=append:/www/server/sentinel/log/av.log
+
+[Install]
+WantedBy=multi-user.target

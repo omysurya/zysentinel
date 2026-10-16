@@ -1,0 +1,16 @@
+[Unit]
+Description=ZySentinel Process Watchdog (Runtime EDR Guard)
+After=network.target sentinel.service
+Wants=sentinel.service
+
+[Service]
+Type=simple
+ExecStart=/www/server/panel/pyenv/bin/python3 /www/server/sentinel/bin/sentinel-proc.py daemon
+Restart=always
+RestartSec=3
+KillMode=process
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

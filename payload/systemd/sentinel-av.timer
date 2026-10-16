@@ -1,0 +1,11 @@
+[Unit]
+Description=Jalankan pemindaian terjadwal ZySentinel Antivirus setiap hari
+
+[Timer]
+OnCalendar=*-*-* 03:30:00
+Persistent=true
+RandomizedDelaySec=120
+Unit=sentinel-av.service
+
+[Install]
+WantedBy=timers.target

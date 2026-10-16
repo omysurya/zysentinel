@@ -1,0 +1,16 @@
+{
+	"title": "ZySentinel",
+	"tip": "lib",
+	"name": "sentinel",
+	"type": "Security",
+	"ps": "ZySentinel — monitoring, port access control, kernel firewall, WAF, EDR process guard & whitelist, threat intel, dan antivirus untuk aaPanel",
+	"versions": "1.6",
+	"shell": "install.sh",
+	"checks": "/www/server/sentinel/bin/guardd",
+	"author": "ZySentinel",
+	"home": "ZySens",
+	"date": "2026-10-16",
+	"default": false,
+	"display": 0,
+	"id": 2
+}

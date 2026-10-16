@@ -1,0 +1,4360 @@
+<style>
+/* PENTING: berkas ini adalah FRAGMEN dasbor plugin, bukan dokumen HTML utuh.
+   Jangan pernah menambahkan deklarasi doctype atau tag html, head, maupun body.
+   Alasan: bt.send() di BTPanel/static/vite/oldjs/public_backup.js menganggap
+   balasan yang DIAWALI deklarasi doctype sebagai sesi kedaluwarsa, lalu
+   mengalihkan ke /login TANPA memanggil callback -- akibatnya bt.open() tidak
+   pernah jalan dan dasbor "tidak membuka apa apa". Semua plugin yang berfungsi
+   (bt_hids, free_waf, gdrive, psync_api) juga berupa fragmen diawali style. */
+
+/* ============================================================
+   TEMA TERPUSAT
+   Satu sumber nilai, bukan nilai fallback yang tersebar. Warna
+   aksen tunggal (hijau), radius konsisten, bayangan berlapis halus,
+   durasi transisi pendek supaya terasa cepat, bukan berkilau.
+   ============================================================ */
+.sn-wrap{
+  --accent:#12a150;            /* aksen tunggal */
+  --accent-dark:#0e8a45;
+  --accent-soft:#e7f6ec;
+  --ink:#1f2430;               /* teks utama */
+  --ink-2:#5b6472;             /* teks sekunder */
+  --ink-3:#8a919e;             /* teks redup */
+  --bg:#f4f6f9;                /* latar dialog */
+  --surface:#ffffff;           /* kartu */
+  --line:#e6e9ef;              /* garis 1px */
+  --line-2:#eef1f5;            /* garis dalam */
+  --shadow:0 1px 2px rgba(16,24,40,.04),0 8px 24px rgba(16,24,40,.06);
+  --shadow-hi:0 2px 6px rgba(16,24,40,.06),0 16px 40px rgba(16,24,40,.10);
+  --radius:12px;
+  --radius-sm:8px;
+  --t:140ms cubic-bezier(.4,0,.2,1);
+  font-size:14px;color:var(--ink);padding:0;
+  -webkit-font-smoothing:antialiased;
+}
+.sn-wrap,.sn-wrap *{box-sizing:border-box}
+
+/* ---- kerangka dialog ---- */
+.sn-modal{position:fixed;inset:0;z-index:9000;display:none;background:var(--bg)}
+.sn-modal.on{display:block;animation:sn-fade .16s ease}
+@keyframes sn-fade{from{opacity:.4}to{opacity:1}}
+.sn-mback{position:absolute;inset:0;background:rgba(15,20,30,.42);backdrop-filter:blur(2px)}
+.sn-mbox{position:relative;margin:22px auto;border-radius:16px;box-shadow:var(--shadow-hi);
+  background:var(--bg);overflow:hidden;max-width:calc(100% - 44px);
+  width:min(1780px,100%);max-height:calc(100vh - 60px);display:flex;flex-direction:column}
+.sn-mhead{display:flex;align-items:center;gap:14px;padding:16px 24px;background:var(--surface);border-bottom:1px solid var(--line)}
+/* Tombol tutup. Wajib punya ukuran dan cursor, kalau tidak ia cuma
+   teks kecil yang mudah terlewat dan dianggap tidak bisa diklik. */
+.sn-mclose{flex:0 0 auto;width:32px;height:32px;line-height:30px;text-align:center;
+  border:1px solid var(--line);border-radius:var(--radius-sm);background:#fff;color:var(--ink-2);
+  font-size:17px;cursor:pointer;user-select:none;-webkit-user-select:none;position:relative;z-index:2;
+  transition:background var(--t),color var(--t),border-color var(--t)}
+.sn-mclose:hover{background:#f44336;border-color:#f44336;color:#fff}
+.sn-mclose:active{transform:scale(.96)}
+.sn-mhead h2{margin:0;font-size:18px;font-weight:650;letter-spacing:-.2px;color:var(--ink)}
+.sn-mtabs{display:flex;gap:4px;padding:0 20px;background:var(--surface);border-bottom:1px solid var(--line)}
+.sn-mtabs span{display:inline-block;padding:11px 18px;cursor:pointer;font-size:14px;color:var(--ink-2);
+  border-radius:10px 10px 0 0;background:transparent;border:0;font-weight:500;
+  position:relative;transition:color var(--t),background var(--t);user-select:none;-webkit-user-select:none}
+.sn-mtabs span:hover{background:var(--line-2);color:var(--ink)}
+.sn-mtabs span.on{color:var(--accent);font-weight:650;background:var(--accent-soft)}
+.sn-mtabs span.on::after{content:"";position:absolute;left:14px;right:14px;bottom:-1px;height:3px;
+  border-radius:3px 3px 0 0;background:var(--accent)}
+.sn-mbody{flex:1;overflow:auto;padding:20px 24px;min-height:0}
+.sn-mfoot{padding:12px 24px;background:var(--surface);border-top:1px solid var(--line);display:flex;align-items:center;gap:12px;font-size:12.5px;color:var(--ink-2)}
+.sn-page{display:none}.sn-page.on{display:block;animation:sn-slide .18s ease}
+@keyframes sn-slide{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+/* ---- kartu ---- */
+.sn-card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+  padding:18px 22px;margin-bottom:14px;box-shadow:var(--shadow);transition:box-shadow var(--t)}
+.sn-card>h3{margin:0 0 12px;font-size:15px;font-weight:650;color:var(--ink);
+  display:flex;align-items:center;gap:12px;flex-wrap:wrap;letter-spacing:-.1px}
+.sn-card>h3 .sn-fl{margin-left:auto}
+
+/* statistik dengan grid responsif */
+.sn-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:14px}
+.sn-stat{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);
+  padding:12px 14px;display:flex;align-items:center;gap:12px;min-width:0;overflow:hidden;transition:box-shadow var(--t),transform var(--t)}
+.sn-stat:hover{box-shadow:var(--shadow-hi);transform:translateY(-1px)}
+.sn-stat .ic{width:38px;height:38px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:15px;flex:0 0 38px;color:#fff}
+.sn-stat .tx{min-width:0;flex:1;overflow:hidden}
+.sn-stat .k{color:var(--ink-2);font-size:11.5px;font-weight:600;text-transform:uppercase;letter-spacing:.3px;margin-bottom:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sn-stat .v{font-size:16px;font-weight:700;line-height:1.25;letter-spacing:-.2px;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+/* ---- panel sistem ---- */
+.sn-sys{display:grid;grid-template-columns:1fr 1fr;gap:2px 20px;font-size:13px}
+.sn-sys div{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid var(--line-2)}
+.sn-sys span:first-child{color:var(--ink-2);flex:0 0 auto}
+.sn-sys span:last-child{color:var(--ink);text-align:right;word-break:break-word}
+.sn-bar{height:6px;border-radius:4px;background:var(--line);margin-top:6px;overflow:hidden}
+.sn-bar i{display:block;height:100%;border-radius:4px;background:var(--accent);transition:width .4s ease}
+
+/* ---- defcon & tactical matrix ---- */
+.sn-defcon-banner{border-radius:var(--radius);padding:14px 20px;display:flex;align-items:center;justify-content:space-between;gap:16px;box-shadow:var(--shadow);transition:background var(--t)}
+.sn-defcon-banner.defcon-1{background:linear-gradient(135deg, #b91c1c 0%, #7f1d1d 100%);color:#fff}
+.sn-defcon-banner.defcon-2{background:linear-gradient(135deg, #c2410c 0%, #9a3412 100%);color:#fff}
+.sn-defcon-banner.defcon-3{background:linear-gradient(135deg, #047857 0%, #064e3b 100%);color:#fff}
+.sn-defcon-banner.defcon-4{background:linear-gradient(135deg, #b45309 0%, #78350f 100%);color:#fff}
+.sn-defcon-banner.defcon-5{background:linear-gradient(135deg, #475569 0%, #1e293b 100%);color:#fff}
+.sn-defcon-badge{font-size:15px;font-weight:800;letter-spacing:1px;padding:6px 14px;border-radius:8px;background:rgba(255,255,255,.2);color:#fff;border:1px solid rgba(255,255,255,.3)}
+
+/* ---- tab dalam ---- */
+.sn-tabs{padding:0 0 10px;border-bottom:1px solid var(--line);display:flex;gap:4px;
+  flex-wrap:wrap}
+.sn-tabs span{display:inline-block;padding:7px 13px;cursor:pointer;font-size:13px;
+  color:var(--ink-2);border-radius:var(--radius-sm);font-weight:500;
+  transition:background var(--t),color var(--t);user-select:none;-webkit-user-select:none}
+.sn-tabs span:hover{background:var(--line-2);color:var(--ink)}
+.sn-tabs span.on{color:var(--accent);background:var(--accent-soft);font-weight:650}
+.sn-subpage{display:none}.sn-subpage.on{display:block;padding-top:12px;animation:sn-slide .16s ease}
+
+/* ---- tabel ---- */
+table.sn-tb{width:100%;border-collapse:collapse;background:var(--surface)}
+table.sn-tb th{background:#fafbfd;text-align:left;padding:9px 11px;font-weight:600;
+  color:var(--ink-2);border-bottom:1px solid var(--line);white-space:nowrap;font-size:12.5px}
+table.sn-tb td{padding:8px 11px;border-bottom:1px solid var(--line-2);vertical-align:top;font-size:12.5px}
+table.sn-tb tr:hover td{background:#fbfcfe}
+table.sn-tb th.r,table.sn-tb td.r{text-align:right}
+.sn-mono{font-family:ui-monospace,Consolas,Monaco,monospace;font-size:12px}
+.sn-clip{max-width:330px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sn-ell{display:inline-block;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
+
+/* ---- tombol ---- */
+.sn-btn{display:inline-block;padding:5px 12px;border:1px solid var(--line);background:var(--surface);
+  border-radius:var(--radius-sm);cursor:pointer;font-size:12.5px;color:var(--ink);font-weight:500;
+  transition:background var(--t),border-color var(--t),box-shadow var(--t),transform var(--t);
+  user-select:none;-webkit-user-select:none}
+.sn-btn:hover{background:var(--line-2);box-shadow:var(--shadow)}
+.sn-btn:active{transform:translateY(1px)}
+.sn-btn.pri{background:var(--accent);color:#fff;border-color:var(--accent)}
+.sn-btn.pri:hover{background:var(--accent-dark);border-color:var(--accent-dark)}
+.sn-btn.dgr{background:#e5484d;color:#fff;border-color:#e5484d}
+.sn-btn.dgr:hover{background:#cc3b3f;border-color:#cc3b3f}
+.sn-btn:disabled{opacity:.5;cursor:not-allowed;transform:none}
+.sn-inp{padding:6px 9px;border:1px solid var(--line);border-radius:var(--radius-sm);font-size:12.5px;
+  transition:border-color var(--t),box-shadow var(--t);background:#fff}
+.sn-inp:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+select.sn-inp{cursor:pointer}
+
+.sn-badge{display:inline-block;padding:3px 10px;border-radius:999px;font-size:11.5px;color:#fff;font-weight:600}
+.sn-ok{background:var(--accent)}.sn-warn{background:#e08c00}.sn-off{background:#9aa2ad}.sn-bad{background:#e5484d}
+.sn-lv{display:inline-block;min-width:54px;padding:1px 7px;border-radius:5px;color:#fff;
+  font-size:11px;text-align:center}
+.lv0{background:#9aa2ad}.lv1{background:#e08c00}.lv2{background:#ef5a1e}.lv3{background:#e5484d}
+.sn-sc{font-weight:600}
+.sc0{color:#9aa2ad}.sc1{color:var(--accent)}.sc2{color:#e08c00}.sc3{color:#e5484d}
+
+.sn-note{background:#fef8e7;border:1px solid #f6e3a6;border-radius:var(--radius-sm);padding:10px 13px;
+  font-size:12.5px;color:#6d5b13;margin-bottom:11px;line-height:1.5}
+.sn-note.warn{background:#fdf3e6;border-color:#f4d5a8;color:#8a4b00}
+.sn-note.dgr{background:#fdeceb;border-color:#f3b6b4;color:#8e1b1b}
+.sn-grid2{display:flex;gap:14px;flex-wrap:wrap}
+.sn-grid2>*{flex:1 1 440px;min-width:0}
+.sn-fl{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.sn-empty{padding:26px;text-align:center;color:var(--ink-3)}
+.sn-chart{width:100%;height:300px}
+.sn-pre{margin:0;padding:12px;max-height:360px;overflow:auto;background:#161b22;color:#c9d1d9;
+  border-radius:var(--radius-sm);font-family:ui-monospace,Consolas,Monaco,monospace;font-size:11.5px;line-height:1.6;white-space:pre}
+.sn-refresh{font-size:12px;color:var(--ink-3)}
+.sn-ruleline{margin-bottom:6px;font-size:12.5px;color:var(--ink-2);font-family:ui-monospace,Consolas,monospace}
+
+/* ---- kartu pilihan engine ---- */
+.sn-eng{display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px}
+.sn-engcard{border:2px solid var(--line);border-radius:var(--radius);padding:16px 18px;background:var(--surface);
+  transition:border-color var(--t),box-shadow var(--t);cursor:pointer;position:relative}
+.sn-engcard:hover{box-shadow:var(--shadow-hi)}
+.sn-engcard.on{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.sn-engcard .t{font-size:14.5px;font-weight:650;color:var(--ink);display:flex;align-items:center;gap:8px}
+.sn-engcard .d{font-size:12.5px;color:var(--ink-2);margin:7px 0 11px;line-height:1.55}
+.sn-engcard .st{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+.sn-engcard .pilih{margin-top:12px;display:flex;justify-content:flex-end}
+.sn-engcard.on .t::before{content:"\2713";color:var(--accent);font-weight:700}
+
+/* ---- switch tiga posisi (Monitor | Block | Disable) ---- */
+.sn-switch{display:inline-flex;background:var(--line-2);border:1px solid var(--line);
+  border-radius:999px;padding:3px;gap:2px}
+.sn-switch .o{padding:7px 16px;border-radius:999px;font-size:12.5px;font-weight:600;
+  color:var(--ink-2);cursor:pointer;transition:all var(--t);user-select:none;-webkit-user-select:none}
+.sn-switch .o:hover{color:var(--ink)}
+.sn-tag{display:inline-block;padding:2px 8px;border-radius:6px;font-size:11.5px;font-weight:600;background:var(--line-2);color:var(--ink-2);font-family:ui-monospace,Consolas,monospace}
+.sn-tag.port{background:#e8f4fd;color:#1976d2;border:1px solid #c2e2fa}
+.sn-tag.proto{background:#f3f4f6;color:#374151}
+.sn-tag.crit{background:#fee2e2;color:#991b1b;border:1px solid #fecaca}
+.sn-tag.ok{background:#dcfce7;color:#166534;border:1px solid #bbf7d0}
+.sn-tag.warn{background:#fef3c7;color:#92400e;border:1px solid #fde68a}
+.sn-rule-raw{font-family:ui-monospace,Consolas,monospace;font-size:11px;color:var(--ink-3);margin-top:4px;word-break:break-all;background:#f8fafc;padding:3px 6px;border-radius:4px;border:1px solid var(--line-2)}
+</style>
+
+<div class="sn-wrap">
+
+<div class="sn-modal" id="snModal">
+	<div class="sn-mback" id="snBack"></div>
+	<div class="sn-mbox">
+		<div class="sn-mhead">
+			<h2><span class="sn-icon">🛡️</span> ZySentinel</h2>
+			<span class="sn-mclose" onclick="snTutup()">✕</span>
+			<span id="bGuard" class="sn-badge sn-off">guardd</span>
+			<span id="bAv" class="sn-badge sn-off" title="Antivirus status">clamav</span>
+			<span id="bFw" class="sn-badge sn-off">firewall</span>
+			<span id="bBackend" class="sn-badge sn-off" title="firewall backend in use">backend</span>
+			<span id="bWaf" class="sn-badge sn-off" title="WAF engine status">waf</span>
+			<span id="bPanic" class="sn-badge sn-off">panic: off</span>
+			<span style="flex:1"></span>
+		</div>
+
+		<div class="sn-mtabs">
+			<span class="on" onclick="snTop('dash',this)">Dashboard</span>
+			<span onclick="snTop('antivirus',this)">Antivirus</span>
+			<span onclick="snTop('firewall',this)">Firewall</span>
+			<span onclick="snTop('waf',this)">WAF</span>
+			<span onclick="snTop('conf',this)">Setting</span>
+		</div>
+
+		<div class="sn-mbody">
+
+			<div id="stNote" class="sn-note" style="display:none;margin:0 0 12px"></div>
+
+			<!-- ============================ DASHBOARD ============================ -->
+			<div class="sn-page on" id="top-dash">
+
+				<!-- DEFCON POSTURE BANNER -->
+				<div id="snDefconBanner" class="sn-defcon-banner defcon-3" style="margin-bottom:14px">
+					<div style="display:flex;align-items:center;gap:14px">
+						<div id="snDefconBadge" class="sn-defcon-badge">DEFCON 3</div>
+						<div>
+							<div id="snDefconTitle" style="font-size:15px;font-weight:700;color:#fff;letter-spacing:-.2px">MEMUAT POSTUR KEAMANAN...</div>
+							<div id="snDefconDesc" style="font-size:12.5px;color:rgba(255,255,255,.9);margin-top:2px">Menghubungkan ke kernel defense dan runtime telemetry...</div>
+						</div>
+					</div>
+					<div style="text-align:right;flex:0 0 auto">
+						<span class="sn-btn" onclick="snEliteLoad()" style="background:rgba(255,255,255,.2);color:#fff;border:1px solid rgba(255,255,255,.3)">Segarkan</span>
+					</div>
+				</div>
+
+				<!-- TACTICAL DEFENSE CONTROLS (SAKELAR OPERASIONAL DEFENDER ELIT) -->
+				<div class="sn-card" style="margin-bottom:14px;padding:12px 18px">
+					<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+						<div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap">
+							<div style="display:flex;align-items:center;gap:8px">
+								<span style="font-size:12.5px;font-weight:600;color:var(--ink-2)">Egress (Anti-RevShell):</span>
+								<span id="tgEgress" class="sn-badge sn-ok" style="cursor:pointer;font-weight:700" onclick="snToggleEgress()">AKTIF</span>
+							</div>
+							<div style="display:flex;align-items:center;gap:8px">
+								<span style="font-size:12.5px;font-weight:600;color:var(--ink-2)">Process Guard (EDR):</span>
+								<span id="tgProc" class="sn-badge sn-ok" style="cursor:pointer;font-weight:700" onclick="snToggleProc()">ENFORCE</span>
+							</div>
+							<div style="display:flex;align-items:center;gap:8px">
+								<span style="font-size:12.5px;font-weight:600;color:var(--ink-2)">Global Threat Intel:</span>
+								<span id="tgIntel" class="sn-badge sn-ok" style="font-weight:700">1,681 CIDR</span>
+								<span class="sn-btn" style="padding:2px 8px;font-size:11.5px" onclick="snSyncIntel()">Sync</span>
+							</div>
+							<div style="display:flex;align-items:center;gap:8px">
+								<span style="font-size:12.5px;font-weight:600;color:var(--ink-2)">Persistence FIM:</span>
+								<span id="tgFim" class="sn-badge sn-ok" style="font-weight:700">89 BERSIH</span>
+								<span class="sn-btn" style="padding:2px 8px;font-size:11.5px" onclick="snCheckFim()">Cek FIM</span>
+							</div>
+						</div>
+						<div style="display:flex;align-items:center;gap:10px">
+							<span id="btnPanicToggle" class="sn-btn dgr" style="font-weight:700;padding:4px 12px" onclick="snPanicKancing()">PANIC LOCKDOWN</span>
+						</div>
+					</div>
+				</div>
+
+				<div class="sn-stats" id="snStats"></div>
+
+				<div class="sn-grid2" style="margin-bottom:12px">
+					<div class="sn-card">
+						<h3>Request Trends
+							<span class="sn-fl">
+								<select id="selJam" class="sn-inp" onchange="snGrafik()">
+									<option value="1">Last 1 hour</option>
+									<option value="6">Last 6 hours</option>
+									<option value="12">Last 12 hours</option>
+									<option value="24" selected>Last 24 hours</option>
+									<option value="72">Last 3 days</option>
+									<option value="168">Last 7 days</option>
+								</select>
+								<span class="sn-btn" onclick="snGrafik()">Refresh</span>
+							</span>
+						</h3>
+						<div id="grafikKosong" class="sn-empty" style="display:none">
+							Belum ada data pada rentang waktu ini. ZySentinel baru mulai mengumpulkan statistik sejak dijalankan.
+						</div>
+						<div id="grafik" class="sn-chart"></div>
+					</div>
+
+					<div class="sn-card">
+						<h3>System Information</h3>
+						<div class="sn-sys" id="snSys"></div>
+					</div>
+				</div>
+
+				<div class="sn-card">
+					<div class="sn-tabs">
+						<span class="on" onclick="snSub('bans',this)">Blocked IPs</span>
+						<span onclick="snSub('edr',this)" id="tabEdrBadge">EDR & Anomali</span>
+						<span onclick="snSub('situs',this)">Monitored Sites</span>
+						<span onclick="snSub('vhost',this)">Vhosts</span>
+						<span onclick="snSub('review',this)">Review Queue</span>
+						<span onclick="snSub('notif',this)">Notifications</span>
+						<span onclick="snSub('geo',this)">Origin</span>
+						<span onclick="snSub('feed',this)">Event Feed</span>
+						<span onclick="snSub('aksi',this)">Action Log</span>
+						<span onclick="snSub('riwayat',this)">IP Timeline</span>
+						<span onclick="snSub('log',this)">Daemon Log</span>
+					</div>
+
+					<div class="sn-subpage" id="sub-edr">
+						<div class="sn-fl" style="margin-bottom:11px;justify-content:space-between;flex-wrap:wrap;gap:8px">
+							<span style="font-size:13px;color:var(--ink-2)">Log insiden eksekusi ilegal, webshell, dan anomali proses yang ditindak oleh Sentinel Process Guard (EDR).</span>
+							<span class="sn-fl">
+								<span class="sn-btn pri" onclick="snProcWlAddModal()">+ Tambah Whitelist</span>
+								<span class="sn-btn" onclick="snProcWlManageModal()">Daftar Whitelist (<b id="countEdrWhitelist">4</b>)</span>
+								<span class="sn-btn" onclick="snEdrMuat()">Muat Ulang</span>
+							</span>
+						</div>
+						<table class="sn-tb">
+							<thead><tr>
+								<th style="width:130px">Waktu</th>
+								<th style="width:65px">PID</th>
+								<th style="width:65px">PPID</th>
+								<th style="width:60px">UID</th>
+								<th>Executable</th>
+								<th>Command Line</th>
+								<th>Aturan Pelanggaran</th>
+								<th style="width:110px" class="r">Tindakan</th>
+								<th style="width:115px" class="r">Aksi</th>
+							</tr></thead>
+							<tbody id="tbEdr"><tr><td colspan="9" class="sn-empty">loading</td></tr></tbody>
+						</table>
+					</div>
+
+					<div class="sn-subpage on" id="sub-bans">
+						<div class="sn-fl" style="margin-bottom:11px">
+							<input id="banIP" class="sn-inp" placeholder="IP address, e.g. 1.2.3.4" style="width:200px">
+							<input id="banDetik" class="sn-inp" placeholder="Duration in seconds (optional)" style="width:220px">
+							<span class="sn-btn dgr" onclick="snBan()">Block Now</span>
+							<span class="sn-refresh">IP yang masuk daftar putih akan ditolak.</span>
+						</div>
+						<table class="sn-tb">
+							<thead><tr>
+								<th>IP Address</th><th>Category</th><th class="r">Score</th>
+								<th class="r">Offenses</th><th class="r">Expires In</th><th>Reason</th><th></th>
+							</tr></thead>
+							<tbody id="tbBans"><tr><td colspan="7" class="sn-empty">loading</td></tr></tbody>
+						</table>
+					</div>
+
+					<div class="sn-subpage" id="sub-situs">
+						<table class="sn-tb">
+							<thead><tr>
+								<th>Site</th><th>Document Root</th><th>Status</th>
+								<th>Log Tailed</th><th class="r">Lines Read</th>
+							</tr></thead>
+							<tbody id="tbSitus"><tr><td colspan="5" class="sn-empty">loading</td></tr></tbody>
+						</table>
+						<div class="sn-note" style="margin-top:12px">
+							Daftar log dibaca ulang otomatis setiap <span class="sn-mono" id="rescan">30</span> detik.
+							Menambah atau menghapus situs di panel tidak perlu menyentuh kode ZySentinel dan tidak perlu restart daemon.
+							<b id="situsLain"></b>
+						</div>
+					</div>
+
+					<div class="sn-subpage" id="sub-vhost">
+						<div class="sn-fl" style="margin-bottom:11px">
+							<span class="sn-refresh">Traffic, error, and attacks per vhost</span>
+							<select id="selVhostJam" class="sn-inp" onchange="snVhostMuat()">
+								<option value="1">Last 1 hour</option>
+								<option value="6">Last 6 hours</option>
+								<option value="24" selected>Last 24 hours</option>
+								<option value="72">Last 3 days</option>
+								<option value="168">Last 7 days</option>
+								<option value="720">Last 30 days</option>
+							</select>
+							<span class="sn-btn" onclick="snVhostMuat()">Refresh</span>
+							<span class="sn-refresh">Klik nama vhost untuk melihat penyerangnya</span>
+						</div>
+						<table class="sn-tb">
+							<thead><tr>
+								<th>Vhost</th><th class="r">Requests</th><th class="r">Data</th>
+								<th class="r">2xx</th><th class="r">4xx</th><th class="r">5xx</th>
+								<th class="r">429</th><th class="r">Attacks</th>
+								<th class="r">Attacker IPs</th><th class="r">Peak Score</th>
+							</tr></thead>
+							<tbody id="tbVhost"><tr><td colspan="10" class="sn-empty">loading</td></tr></tbody>
+						</table>
+						<div class="sn-note" style="margin-top:12px">
+							<b>4xx dan 5xx sengaja tidak dijumlahkan.</b> 4xx sering hal yang wajar:
+							401 dari autentikasi, 404 dari path yang memang tidak ada, 403 dari WAF
+							yang bekerja. Yang menunjukkan ada yang perlu diperbaiki adalah
+							<b>5xx</b>, karena itu kegagalan server. Kalau keduanya dijumlahkan,
+							hampir semua vhost akan terlihat 100 persen error dan informasi
+							yang berguna hilang.
+						</div>
+						<div id="vhostDetail" style="margin-top:14px"></div>
+					</div>
+
+					<div class="sn-subpage" id="sub-notif">
+						<div class="sn-note" id="notifNote">loading</div>
+						<div class="sn-fl" style="margin:12px 0">
+							<input id="notifUrl" class="sn-inp" style="width:420px"
+								placeholder="https://... webhook URL">
+							<span class="sn-btn pri" onclick="snNotifSimpan()">Save</span>
+							<span class="sn-btn" onclick="snNotifUji()">Send Test</span>
+						</div>
+						<div class="sn-grid2" style="margin-bottom:12px">
+							<div>
+								<div style="font-weight:600;margin:2px 0 6px">Event Filter</div>
+								<div class="sn-fl">
+									<select id="notifKind" class="sn-inp">
+										<option value="semua">All (ban and throttle)</option>
+										<option value="ban">Ban only</option>
+										<option value="throttle">Throttle only</option>
+									</select>
+								</div>
+							</div>
+							<div>
+								<div style="font-weight:600;margin:2px 0 6px">Retry Limit</div>
+								<div class="sn-fl">
+									<input id="notifMaks" class="sn-inp" style="width:80px" placeholder="max">
+									<span class="sn-refresh">times before giving up</span>
+								</div>
+							</div>
+						</div>
+						<div style="font-weight:600;margin:14px 0 6px">Recent Notifications</div>
+						<table class="sn-tb">
+							<thead><tr>
+								<th>Time</th><th>Kind</th><th>IP Address</th>
+								<th>Message</th><th>Status</th><th class="r">Tries</th>
+							</tr></thead>
+							<tbody id="tbNotif"><tr><td colspan="6" class="sn-empty">loading</td></tr></tbody>
+						</table>
+						<div class="sn-note" style="margin-top:12px">
+							<b>The daemon never sends anything itself.</b> It only writes to a
+							queue table; a separate script sends it from a systemd timer every
+							10 seconds. That separation is deliberate: one slow webhook would
+							otherwise hold up log reading, and the daemon reads logs every two
+							seconds, so a single unresponsive address could make ZySentinel stop
+							seeing attacks entirely.
+							<div style="margin-top:7px">
+								Failed notifications are <b>not deleted</b>. They are retried on the
+								next cycle until the retry limit is reached, so a temporary network
+								outage does not lose alerts. After the limit, the row stays visible
+								in the table above but is no longer attempted.
+							</div>
+							<div style="margin-top:7px">
+								<span class="sn-mono">NOTIFY_TOKEN</span> is never shown on this page
+								and never written to the log. Only whether it is set. The token file
+								is mode 600 for the same reason it behaves like a password.
+							</div>
+						</div>
+					</div>
+
+					<div class="sn-subpage" id="sub-review">
+						<div class="sn-fl" style="margin-bottom:11px">
+							<span class="sn-btn pri" onclick="snRevMuat('tunggu')">Waiting</span>
+							<span class="sn-btn" onclick="snRevMuat('setuju')">Approved</span>
+							<span class="sn-btn" onclick="snRevMuat('tolak')">Dismissed</span>
+							<span class="sn-refresh" id="revKet">-</span>
+						</div>
+						<table class="sn-tb">
+							<thead><tr>
+								<th>IP Address</th><th>Country</th><th class="r">Score</th>
+								<th class="r">Waiting For</th><th>Reason</th><th>Decision</th><th></th>
+							</tr></thead>
+							<tbody id="tbRev"><tr><td colspan="7" class="sn-empty">loading</td></tr></tbody>
+						</table>
+						<div class="sn-note" style="margin-top:12px">
+							<b>This queue does not block anyone.</b> An IP in this list is only
+							recorded; its packets still pass normally. This is the middle ground
+							between "block nothing" and "block everything over the threshold":
+							you can see who would be blocked, then decide one by one.
+							<div style="margin-top:7px">
+								<b>Approve</b> blocks the IP immediately, same as pressing
+								Block Now in the Blocked IPs tab. <b>Dismiss</b> releases it
+								from the queue and it is never blocked. A dismissed IP can be
+								queued again later if its score rises high enough, so dismiss
+								only IPs you are sure are not attackers.
+							</div>
+							<div style="margin-top:7px">
+								The queue only fills while blocking mode is off. The threshold is
+								<span class="sn-mono">review_score</span> in
+								<span class="sn-mono">guardd.conf</span>; set it to 0 to turn
+								the queue off entirely.
+							</div>
+						</div>
+					</div>
+
+					<div class="sn-subpage" id="sub-geo">
+						<div class="sn-fl" style="margin-bottom:11px">
+							<span class="sn-refresh">Attacker origin, grouped by country</span>
+							<select id="selGeoJam" class="sn-inp" onchange="snGeoMuat()">
+								<option value="24">Last 24 hours</option>
+								<option value="72">Last 3 days</option>
+								<option value="168" selected>Last 7 days</option>
+								<option value="720">Last 30 days</option>
+							</select>
+							<span class="sn-btn" onclick="snGeoMuat()">Refresh</span>
+						</div>
+						<div class="sn-note" id="geoNote" style="display:none"></div>
+						<table class="sn-tb">
+							<thead><tr>
+								<th>Code</th><th>Country</th><th class="r">Attacker IPs</th>
+								<th class="r">Events</th><th class="r">Peak Score</th><th></th><th></th>
+							</tr></thead>
+							<tbody id="tbGeo"><tr><td colspan="7" class="sn-empty">loading</td></tr></tbody>
+						</table>
+						<div class="sn-note" style="margin-top:12px">
+							Negara diambil dari <span class="sn-mono">GeoLite2-City.mmdb</span> milik
+							panel, dibaca di server dan disimpan di cache. Tidak ada permintaan ke
+							services pihak ketiga, jadi IP penyerang tidak pernah keluar dari
+							mesin ini.
+							<div style="margin-top:7px">
+								Polanya berguna untuk membedakan dua serangan yang berbeda:
+								<b>tersebar ke banyak negara</b> dengan skor relatif rendah
+								umumnya botnet atau pemindai umum. <b>Tersebar ke satu
+								negara dengan skor tinggi</b> lebih mungkin serangan terarah.
+							</div>
+						</div>
+
+						<div class="sn-card" style="margin-top:14px">
+							<h3>Country Block
+								<span class="sn-fl">
+									<span class="sn-badge sn-off" id="geoBanBadge">off</span>
+								</span>
+							</h3>
+							<div class="sn-note dgr">
+								<b>Memblokir satu negara bisa memutus pengunjung sah.</b>
+								IP di Indonesia bisa saja terdaftar di negara lain, dan sebaliknya.
+								GeoLite2 adalah petunjuk arah, bukan bukti. Aturan ini hanya berlaku
+								di port web 80/443 — SSH dan port panel tidak tersentuh, jadi
+								kesalahan masih bisa diperbaiki. Whitelist dan allow list selalu
+								menang.
+							</div>
+							<div class="sn-fl" style="margin:11px 0">
+								<span class="sn-refresh">Mode</span>
+								<select id="geoBanMode" class="sn-inp">
+									<option value="block">Block selected countries</option>
+									<option value="allow">Allow only selected (block the rest)</option>
+								</select>
+								<select id="geoBanNegara" class="sn-inp" style="width:340px"></select>
+								<span class="sn-btn pri" onclick="snGeoBanTambah()">Add to list</span>
+							</div>
+							<div id="geoBanTerpilih" class="sn-fl" style="margin-bottom:11px"></div>
+							<div class="sn-fl">
+								<span class="sn-btn pri" onclick="snGeoBanSimpan()">Apply</span>
+								<span class="sn-btn dgr" onclick="snGeoBanOff()">Turn Off</span>
+								<span class="sn-refresh" id="geoBanStatus">memuat</span>
+							</div>
+							<div class="sn-note" style="margin-top:11px">
+								Blok CIDR diambil dari
+								<span class="sn-mono">GeoLite2-Country.json</span> milik panel
+								(kode negara yang sama dengan tabel di atas, beda format).
+								Menyalakan perlu mengetik <b>GEO</b> untuk konfirmasi.
+							</div>
+						</div>
+					</div>
+
+					<div class="sn-subpage" id="sub-aksi">
+						<div class="sn-fl" style="margin-bottom:11px">
+							<span class="sn-refresh">Setiap tindakan terhadap sebuah IP, otomatis maupun manual</span>
+							<span class="sn-btn" onclick="snAksiMuat()">Refresh</span>
+						</div>
+						<table class="sn-tb">
+							<thead><tr>
+								<th>Time</th><th>IP Address</th><th>Action</th>
+								<th>Source</th><th class="r">Duration</th><th>Reason</th>
+							</tr></thead>
+							<tbody id="tbAksi"><tr><td colspan="6" class="sn-empty">loading</td></tr></tbody>
+						</table>
+						<div class="sn-note" style="margin-top:12px">
+							Jejak ini yang dipakai untuk <b>rekonsiliasi</b>: tindakan apa yang
+							sudah dilakukan terhadap sebuah IP, kapan, oleh sistem atau oleh
+							operator, dan dengan alasan apa. <span class="sn-mono">auto</span>
+							berarti guardd yang memutuskan sendiri berdasarkan ambang skor;
+							<span class="sn-mono">panel</span> berarti operator yang menekan
+							tombolnya. Tanpa catatan ini, yang terlihat hanya keadaan sekarang,
+							bukan urutan keputusannya.
+						</div>
+					</div>
+
+					<div class="sn-subpage" id="sub-feed">
+						<div class="sn-fl" style="margin-bottom:11px">
+							<span class="sn-refresh">Latest 300 events</span>
+							<span class="sn-btn" onclick="snFeed()">Refresh</span>
+						</div>
+						<table class="sn-tb">
+							<thead><tr>
+								<th>Time</th><th>IP Address</th><th>Level</th><th>Category</th>
+								<th class="r">Score</th><th>Site</th><th>URI</th><th>User Agent</th>
+								<th>Action</th>
+							</tr></thead>
+							<tbody id="tbFeed"><tr><td colspan="9" class="sn-empty">loading</td></tr></tbody>
+						</table>
+					</div>
+
+					<div class="sn-subpage" id="sub-riwayat">
+						<div class="sn-fl" style="margin-bottom:11px">
+							<span class="sn-btn" onclick="snRiwayat()">Refresh</span>
+							<span class="sn-refresh">IP dengan skor lebih dari nol dalam 24 jam terakhir</span>
+						</div>
+						<table class="sn-tb">
+							<thead><tr>
+								<th>IP Address</th><th class="r">Hits / Minute</th>
+								<th class="r">Peak Score</th><th>Last Seen</th><th></th>
+							</tr></thead>
+							<tbody id="tbRiwayat"><tr><td colspan="5" class="sn-empty">loading</td></tr></tbody>
+						</table>
+					</div>
+
+					<div class="sn-subpage" id="sub-log">
+						<div class="sn-fl" style="margin-bottom:11px">
+							<span class="sn-btn" onclick="snLog()">Refresh</span>
+							<span class="sn-refresh">Last 80 lines</span>
+						</div>
+						<pre class="sn-pre" id="preLog">loading</pre>
+					</div>
+				</div>
+			</div>
+
+			<!-- ============================ ANTIVIRUS ============================ -->
+			<div class="sn-page" id="top-antivirus">
+
+				<!-- Kartu Status Ringkasan Antivirus -->
+				<div class="sn-card" style="margin-bottom:14px">
+					<h3>Antivirus &amp; Integrity Protection
+						<span class="sn-fl">
+							<span id="avStatusBadge" class="sn-badge sn-off">loading</span>
+							<span class="sn-btn" onclick="snAvDbUpdate()">Update Database</span>
+							<span class="sn-btn pri" onclick="snAvScanAll()">Scan All Vhosts</span>
+							<span class="sn-btn" onclick="snAvMuat()">Refresh</span>
+						</span>
+					</h3>
+					<div class="sn-sys" id="avSysInfo">
+						<div><span>Engine</span><span id="avEngineVer">-</span></div>
+						<div><span>Daemon (clamd)</span><span id="avClamd">-</span></div>
+						<div><span>Signature DB</span><span id="avDbAge">-</span></div>
+						<div><span>Scheduled Scan</span><span id="avTimer">-</span></div>
+						<div><span>Quarantined Files</span><span id="avQTotal">0</span></div>
+						<div><span>Today Detections</span><span id="avTodayDet">0</span></div>
+					</div>
+					<div class="sn-note" style="margin-top:11px" id="avDeepscanNote">
+						Perlindungan malware aktif menggantikan imunify360 berbasis ClamAV realtime + scheduled deep scan.
+						Pemeriksaan integritas mendeteksi penambahan, modifikasi, dan penghapusan kode web (anti-tamper).
+					</div>
+				</div>
+
+				<!-- Sub-tabs Antivirus -->
+				<div class="sn-card">
+					<div class="sn-tabs" style="margin-bottom:14px">
+						<span class="on" onclick="snAvSub('vhost',this)">Vhosts (<b id="avVhostCount">0</b>)</span>
+						<span onclick="snAvSub('integ',this)">Integrity Monitor (<b id="avIntegCount">0</b>)</span>
+						<span onclick="snAvSub('quar',this)">Quarantine (<b id="avQuarCount">0</b>)</span>
+						<span onclick="snAvSub('logs',this)">Scan Logs</span>
+					</div>
+
+					<!-- Subpage 1: Vhosts Scan -->
+					<div class="sn-subpage on" id="avsub-vhost">
+						<div class="sn-fl" style="margin-bottom:11px">
+							<span class="sn-refresh">Pemindaian malware dan pembuatan baseline integritas per vhost aktif</span>
+							<span style="flex:1"></span>
+							<span class="sn-btn" onclick="snAvSitesMuat()">Refresh Sites</span>
+						</div>
+						<table class="sn-tb">
+							<thead>
+								<tr>
+									<th>Vhost Site</th>
+									<th>Document Root</th>
+									<th>Baseline (Anti-Tamper)</th>
+									<th>Last Scan</th>
+									<th>Infected</th>
+									<th class="r">Actions</th>
+								</tr>
+							</thead>
+							<tbody id="tbAvSites">
+								<tr><td colspan="6" class="sn-empty">loading</td></tr>
+							</tbody>
+						</table>
+					</div>
+
+					<!-- Subpage 2: Integrity Monitor -->
+					<div class="sn-subpage" id="avsub-integ">
+						<div class="sn-fl" style="margin-bottom:11px">
+							<span class="sn-refresh">Deteksi perubahan kode web terhadap baseline SHA-256 yang tersimpan</span>
+							<span style="flex:1"></span>
+							<select id="selAvIntegSite" class="sn-inp" onchange="snAvIntegMuat()" style="width:200px">
+								<option value="">Semua Vhost</option>
+							</select>
+							<span class="sn-btn" onclick="snAvIntegMuat()">Refresh Integrity</span>
+						</div>
+						<table class="sn-tb">
+							<thead>
+								<tr>
+									<th>Change Type</th>
+									<th>File Path</th>
+									<th>Previous Hash</th>
+									<th>Current Hash</th>
+								</tr>
+							</thead>
+							<tbody id="tbAvInteg">
+								<tr><td colspan="4" class="sn-empty">loading</td></tr>
+							</tbody>
+						</table>
+					</div>
+
+					<!-- Subpage 3: Quarantine -->
+					<div class="sn-subpage" id="avsub-quar">
+						<div class="sn-fl" style="margin-bottom:11px">
+							<span class="sn-refresh" style="color:var(--warn,#ff9800)">Berkas terisolasi berizin ketat (600). Restore hanya jika Anda yakin berkas adalah false-positive.</span>
+							<span style="flex:1"></span>
+							<span class="sn-btn dgr" onclick="snAvQuarPurge()">Purge All</span>
+							<span class="sn-btn" onclick="snAvQuarMuat()">Refresh</span>
+						</div>
+						<table class="sn-tb">
+							<thead>
+								<tr>
+									<th>Quarantine ID / Waktu</th>
+									<th>Malware Signature</th>
+									<th>Original Path</th>
+									<th class="r">Size</th>
+									<th class="r">Actions</th>
+								</tr>
+							</thead>
+							<tbody id="tbAvQuar">
+								<tr><td colspan="5" class="sn-empty">loading</td></tr>
+							</tbody>
+						</table>
+					</div>
+
+					<!-- Subpage 4: Scan Logs -->
+					<div class="sn-subpage" id="avsub-logs">
+						<div class="sn-fl" style="margin-bottom:11px">
+							<select id="selAvLogKind" class="sn-inp" onchange="snAvLogsMuat()" style="width:220px">
+								<option value="scan" selected>Scan Log (scan.log)</option>
+								<option value="summary">Daily Summary (summary.log)</option>
+								<option value="event">Realtime Detections (realtime.log)</option>
+								<option value="av">ZySentinel AV Log (av.log)</option>
+							</select>
+							<select id="selAvLogLimit" class="sn-inp" onchange="snAvLogsMuat()" style="width:120px">
+								<option value="40">40 baris</option>
+								<option value="80" selected>80 baris</option>
+								<option value="150">150 baris</option>
+								<option value="300">300 baris</option>
+							</select>
+							<span class="sn-btn" onclick="snAvLogsMuat()">Refresh Log</span>
+						</div>
+						<pre class="sn-pre" id="avLogPre" style="max-height:480px;overflow:auto">loading</pre>
+					</div>
+
+				</div>
+
+			</div>
+
+			<!-- ================================ WAF ================================= -->
+			<div class="sn-page" id="top-waf">
+
+				<div class="sn-card">
+					<h3>WAF Control
+						<span class="sn-fl">
+							<span class="sn-badge sn-off" id="engModeBadge">loading</span>
+							<div class="sn-switch" id="snModeSwitch">
+								<span class="o" data-m="monitor" onclick="snModeSet('monitor')">Monitor</span>
+								<span class="o" data-m="block" onclick="snModeSet('block')">Block</span>
+								<span class="o" data-m="disable" onclick="snModeSet('disable')">Disable</span>
+							</div>
+						</span>
+					</h3>
+					<div class="sn-note">
+						<b>Monitor</b> mencatat saja. <b>Block</b> aktif memblokir menurut rule.
+						<b>Disable</b> mematikan engine. Switch berlaku untuk engine yang sedang
+						aktif, di semua vhost yang dilindungi. <span class="sn-refresh" id="engModeNote"></span>
+					</div>
+				</div>
+
+				<div class="sn-card">
+					<div class="sn-tabs">
+						<span class="on" onclick="snWafTab('coraza',this)">Coraza</span>
+						<span onclick="snWafTab('lua',this)">LUA (Free Nginx)</span>
+					</div>
+
+					<!-- ==================== WAF: CORAZA ==================== -->
+					<div class="sn-subpage on" id="w-eng">
+						<div class="sn-eng" id="snEngCard">
+							<div class="sn-empty">loading</div>
+						</div>
+						<div class="sn-card" style="margin-top:14px">
+							<h3>Coraza Assets
+								<span class="sn-fl">
+									<span class="sn-badge sn-off" id="corazaBadge">loading</span>
+									<span class="sn-btn pri" onclick="snCorazaUnduh()">Download</span>
+								</span>
+							</h3>
+							<div class="sn-sys" id="corazaInfo"></div>
+							<div class="sn-note" style="margin-top:11px">
+								Unduhan diambil dari sumber resmi: <b>coreruleset/coreruleset</b>
+								(release OWASP CRS) dan <b>corazawaf/coraza-nginx</b> (source konektor).
+								Idempoten — tidak mengunduh ulang bila versi sudah sama. Tanpa internet,
+								unduhan gagal dengan pesan jelas dan aset lama tidak diubah.
+							</div>
+						</div>
+						<div class="sn-card">
+							<h3>OWASP Rule Groups &amp; Protected Vhosts</h3>
+							<div class="sn-grid2">
+								<div>
+									<div style="font-weight:600;margin:2px 0 7px">Protected Vhosts</div>
+									<table class="sn-tb">
+										<thead><tr><th>Web Server</th><th>Site</th><th>Status</th><th></th></tr></thead>
+										<tbody id="tbWafVhost"><tr><td colspan="4" class="sn-empty">loading</td></tr></tbody>
+									</table>
+									<div class="sn-note" style="margin-top:11px">
+										Menyalakan WAF untuk vhost nginx butuh konektor (ModSecurity atau
+										Coraza) terpasang di nginx. Selama belum ada, pilihan hanya disimpan
+										dan dipasang otomatis nanti. Vhost apache aman dinyalakan kapan saja
+										karena dibungkus <span class="sn-mono">&lt;IfModule&gt;</span>.
+									</div>
+								</div>
+								<div>
+									<div style="font-weight:600;margin:2px 0 7px">OWASP Rule Groups</div>
+									<table class="sn-tb">
+										<thead><tr><th>Rule Group</th><th>Status</th><th></th></tr></thead>
+										<tbody id="tbWafRule"><tr><td colspan="3" class="sn-empty">loading</td></tr></tbody>
+									</table>
+								</div>
+							</div>
+						</div>
+					</div>
+
+					<!-- ==================== WAF: LUA (free_waf) ==================== -->
+					<div class="sn-subpage" id="w-lua">
+						<div class="sn-note" id="nwNote">loading</div>
+						<div class="sn-fl" style="margin:0 0 12px">
+							<span class="sn-btn pri" onclick="snNwInstall()">Install Engine</span>
+							<span class="sn-btn dgr" onclick="snNwRemove()">Remove Engine</span>
+							<span class="sn-btn" onclick="snNwMuat()">Check Status</span>
+							<span style="font-weight:600;margin-left:12px">Engine Detail</span>
+						</div>
+						<pre class="sn-pre" id="nwDetail" style="margin-bottom:14px">loading</pre>
+
+						<div class="sn-card">
+							<h3>Engine Status</h3>
+							<div class="sn-sys" id="fwEngine"></div>
+						</div>
+
+						<div class="sn-card">
+							<h3>Global Switch
+								<span class="sn-fl">
+									<span class="sn-btn pri" id="btnFwOpen" onclick="snFwOpen()">Enable WAF</span>
+									<span class="sn-btn" id="btnFwMonitor" onclick="snFwMonitor()">Mode: monitor</span>
+								</span>
+							</h3>
+							<div class="sn-note" id="fwGlobalNote">loading</div>
+						</div>
+
+				<div class="sn-grid2" style="margin-bottom:12px">
+					<div class="sn-card">
+						<h3>Protection Modules</h3>
+						<table class="sn-tb" id="tbFwModul"></table>
+					</div>
+					<div class="sn-card">
+						<h3>Global CC Limit</h3>
+						<div class="sn-fl" style="margin-bottom:10px">
+							<input id="fwCcLimit" class="sn-inp" style="width:110px" placeholder="limit">
+							<span class="sn-refresh">requests per</span>
+							<input id="fwCcCycle" class="sn-inp" style="width:90px" placeholder="cycle (s)">
+							<span class="sn-refresh">block</span>
+							<input id="fwCcEnd" class="sn-inp" style="width:90px" placeholder="end (s)">
+							<span class="sn-btn pri" onclick="snFwCc()">Save</span>
+						</div>
+						<div class="sn-refresh" id="fwCcNow">-</div>
+						<div class="sn-note" style="margin-top:11px">
+							Setiap perubahan konfigurasi diikuti reload nginx otomatis agar worker
+							membaca ulang <span class="sn-mono">config.json</span>. Engine Lua membaca
+							berkas itu sekali saat start, bukan per request.
+						</div>
+					</div>
+				</div>
+
+				<div class="sn-card">
+					<h3>Protected Sites</h3>
+					<table class="sn-tb">
+						<thead><tr><th>Site</th><th>Status</th><th>CC</th><th>Limit</th><th></th></tr></thead>
+						<tbody id="tbFwSites"><tr><td colspan="5" class="sn-empty">loading</td></tr></tbody>
+					</table>
+				</div>
+
+				<div class="sn-card">
+					<div class="sn-tabs">
+						<span class="on" onclick="snFwTab('ip_black',this)">IP Blacklist</span>
+						<span onclick="snFwTab('ip_white',this)">IP Whitelist</span>
+						<span onclick="snFwTab('url_black',this)">URL Blacklist</span>
+						<span onclick="snFwTab('url_white',this)">URL Whitelist</span>
+					</div>
+					<div class="sn-fl" style="margin:11px 0">
+						<input id="fwListVal" class="sn-inp" style="width:260px" placeholder="IP address or URL pattern">
+						<span class="sn-btn pri" onclick="snFwListAdd()">Add</span>
+					</div>
+					<table class="sn-tb">
+						<thead><tr><th>Value</th><th></th></tr></thead>
+						<tbody id="tbFwList"><tr><td colspan="2" class="sn-empty">loading</td></tr></tbody>
+					</table>
+				</div>
+					</div>
+				</div>
+			</div>
+
+			<!-- ============================= FIREWALL ============================== -->
+			<div class="sn-page" id="top-firewall">
+
+				<div class="sn-card">
+					<h3>Firewall Backend
+						<span class="sn-fl">
+							<span class="sn-badge sn-off" id="fwbBadge">loading</span>
+							<span class="sn-btn" onclick="snFwAllMuat()">Refresh</span>
+						</span>
+					</h3>
+					<div class="sn-sys" id="fwbInfo"></div>
+					<div class="sn-note" style="margin-top:11px">
+						Jenis firewall yang dipakai OS ini menentukan perintah yang bekerja.
+						ZySentinel TIDAK menghapus atau memindahkan aturan milik firewall lain —
+						hanya mengelola chain dan set miliknya sendiri.
+					</div>
+				</div>
+
+				<!-- PORT ACCESS CONTROL (INBOUND & OUTBOUND FIREWALL) -->
+				<div class="sn-card" id="cardPortFw" style="margin-bottom:14px">
+					<h3>Port Access Control (Inbound &amp; Outbound)
+						<span class="sn-fl">
+							<span id="portFwStatusBadge" class="sn-badge sn-ok" style="cursor:pointer" onclick="snPortToggleGlobal()" title="Klik untuk sakelar status global port firewall">ACTIVE</span>
+							<span class="sn-btn pri" onclick="snPortRuleModal()">+ Tambah Aturan Port</span>
+							<span class="sn-btn" onclick="snPortResetConfirm()">Reset Standar Preinstall</span>
+							<span class="sn-btn" onclick="snPortApplyKernel()">Terapkan ke Kernel</span>
+							<span class="sn-btn" onclick="snPortLoad()">Refresh</span>
+						</span>
+					</h3>
+
+					<div class="sn-tabs" style="margin:12px 0 10px">
+						<span class="on" onclick="snPortTab('inbound', this)" id="tabPortInbound">
+							Inbound (Trafik Masuk) <b id="countPortInbound">(4)</b>
+						</span>
+						<span onclick="snPortTab('outbound', this)" id="tabPortOutbound">
+							Outbound (Trafik Keluar) <b id="countPortOutbound">(1)</b>
+						</span>
+					</div>
+
+					<div id="notePortInbound" class="sn-note" style="margin-bottom:12px">
+						<b>Kebijakan Trafik Masuk (Inbound):</b> Hanya port yang terdaftar dan diaktifkan di bawah yang diizinkan (Whitelisted). Port lainnya ditolak otomatis di tingkat kernel untuk mencegah scanning dan eksploitasi port liar.
+					</div>
+					<div id="notePortOutbound" class="sn-note" style="margin-bottom:12px;display:none">
+						<b>Kebijakan Trafik Keluar (Outbound):</b> Secara standar mengizinkan seluruh koneksi keluar (Allow All Outbound) agar server bebas mengakses repositori OS, pembaruan paket, dan API publik. Anda dapat membatasi port tujuan tertentu jika diperlukan.
+					</div>
+
+					<table class="sn-tb">
+						<thead>
+							<tr>
+								<th style="width:40px">#</th>
+								<th style="width:90px">Arah</th>
+								<th style="width:80px">Protokol</th>
+								<th style="width:130px">Port / Rentang</th>
+								<th style="width:100px">Tindakan</th>
+								<th>Sumber / Tujuan</th>
+								<th>Keterangan / Layanan</th>
+								<th style="width:95px" class="r">Status</th>
+								<th style="width:100px" class="r">Aksi</th>
+							</tr>
+						</thead>
+						<tbody id="tbPortRules">
+							<tr><td colspan="9" class="sn-empty">Memuat daftar aturan port...</td></tr>
+						</tbody>
+					</table>
+					<div class="sn-refresh" id="portFwSummary" style="margin-top:9px"></div>
+				</div>
+
+				<div class="sn-card">
+					<h3>Active Kernel Rules
+						<span class="sn-fl">
+							<span class="sn-btn pri" onclick="snFw('install')">Reinstall Rules</span>
+							<span class="sn-btn" onclick="snFw('flush')">Flush All Sets</span>
+							<span class="sn-btn dgr" onclick="snFw('remove')">Remove Rules</span>
+						</span>
+					</h3>
+					<div class="sn-grid2">
+						<div>
+							<div style="font-weight:600;margin:2px 0 6px">Order in INPUT Chain</div>
+							<div id="fwUrutanBox" style="margin-bottom:10px">
+								<pre class="sn-pre" id="fwUrutan">loading</pre>
+							</div>
+						</div>
+						<div>
+							<div style="font-weight:600;margin:2px 0 6px">Kernel Set Contents</div>
+							<div id="fwSetBox" style="margin-bottom:10px">
+								<pre class="sn-pre" id="fwSet">loading</pre>
+							</div>
+							<div style="font-weight:600;margin:10px 0 6px">Security Packet Counters</div>
+							<div id="fwHitBox">
+								<pre class="sn-pre" id="fwHit">loading</pre>
+							</div>
+						</div>
+					</div>
+
+					<div style="font-weight:600;margin:16px 0 8px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+						<span style="font-size:14px;color:var(--ink)">Rules in SENTINEL Chain (Kernel Inspection Flow)</span>
+						<span class="sn-refresh">Prioritas dievaluasi dari atas ke bawah (Top-to-Bottom)</span>
+					</div>
+
+					<table class="sn-tb" style="margin-top:6px">
+						<thead>
+							<tr>
+								<th style="width:45px">#</th>
+								<th style="width:90px">Tindakan</th>
+								<th style="width:130px">Protokol / Port</th>
+								<th style="width:170px">Kriteria / Match</th>
+								<th>Fungsi Pertahanan &amp; Aturan Kernel</th>
+							</tr>
+						</thead>
+						<tbody id="tbChainRules">
+							<tr><td colspan="5" class="sn-empty">Memuat aturan rantai kernel...</td></tr>
+						</tbody>
+					</table>
+					<div id="fwChainRawFallback" style="display:none"></div>
+					<div class="sn-refresh" style="margin-top:10px">
+						sentinel-fw.timer memasang ulang aturan otomatis setiap 5 menit untuk menjaga integritas netfilter.
+					</div>
+				</div>
+
+				<div class="sn-card">
+					<h3>Managed Rules
+						<span class="sn-fl">
+							<input id="fwrVal" class="sn-inp" style="width:200px" placeholder="IP or CIDR">
+							<span class="sn-btn dgr" onclick="snFwrBan()">Ban</span>
+							<span class="sn-btn pri" onclick="snFwrAllow()">Allow</span>
+							<span class="sn-btn" onclick="snFwrGeoForm()">Block Country</span>
+						</span>
+					</h3>
+					<div class="sn-note">
+						Aturan yang dikelola ZySentinel sendiri: <b>ban</b> (blokir sementara),
+						<b>allow</b> (kecualikan permanen), dan <b>geo</b> (blokir seluruh negara).
+						Ini bukan aturan iptables mentah — hanya IP/negara di daftar ini yang
+						disentuh, sehingga kesalahan tidak bisa mengunci SSH atau panel.
+					</div>
+					<div id="fwrGeoBox" style="display:none;margin-bottom:11px"></div>
+					<table class="sn-tb">
+						<thead><tr>
+							<th>Rule</th><th>Type</th><th>Scope</th><th>Reason</th>
+							<th class="r">Expires In</th><th class="r">Source</th><th></th>
+						</tr></thead>
+						<tbody id="tbFwr"><tr><td colspan="7" class="sn-empty">loading</td></tr></tbody>
+					</table>
+					<div class="sn-refresh" id="fwrRingkas" style="margin-top:9px"></div>
+				</div>
+
+				<div class="sn-card">
+					<h3>Allow List (never blocked)
+						<span class="sn-fl">
+							<input id="allowIP" class="sn-inp" placeholder="IP address or CIDR" style="width:220px">
+							<span class="sn-btn pri" onclick="snAllow()">Add</span>
+						</span>
+					</h3>
+					<div class="sn-grid2">
+						<div>
+							<div style="font-weight:600;margin:2px 0 6px">ZySentinel Allow List</div>
+							<table class="sn-tb">
+								<thead><tr><th>Address</th><th></th></tr></thead>
+								<tbody id="tbAllow"><tr><td colspan="2" class="sn-empty">loading</td></tr></tbody>
+							</table>
+						</div>
+						<div>
+							<div style="font-weight:600;margin:2px 0 6px">aaPanel Allow List</div>
+							<table class="sn-tb">
+								<thead><tr><th>Address</th><th>Source</th></tr></thead>
+								<tbody id="tbPanel"><tr><td colspan="2" class="sn-empty">loading</td></tr></tbody>
+							</table>
+						</div>
+					</div>
+					<div class="sn-note" style="margin-top:11px">
+						IP di sini tidak akan pernah diblokir, dan langsung dicabut dari ipset bila
+						sedang diblokir. Daftar ini selalu menang atas ban dan geo-ban.
+					</div>
+				</div>
+			</div>
+
+			<!-- ============================== SETTING ============================== -->
+			<div class="sn-page" id="top-conf">
+
+				<div class="sn-card">
+					<div class="sn-tabs">
+						<span class="on" onclick="snSub2('atur',this)">Settings</span>
+						<span onclick="snSub2('laju',this)">Rate Limits</span>
+						<span onclick="snSub2('panic',this)">Panic</span>
+					</div>
+
+					<div class="sn-subpage on" id="c-atur">
+						<div class="sn-note">
+							Nilai ambang di bawah ini dikalibrasi dari log produksi server ini, bukan ditebak.
+							Perubahan menulis ke <span class="sn-mono">guardd.conf</span> lalu me-restart daemon.
+							<b>Perhatikan jarak aman:</b> skor tertinggi dari crawler yang sah adalah 117,
+							sedangkan skor keenam penyerang asli 153 sampai 240. Ambang ban 150 duduk di tengah-tengahnya.
+						</div>
+						<div class="sn-grid2">
+							<div>
+								<div style="font-weight:600;margin:2px 0 7px">Score Thresholds</div>
+								<table class="sn-tb" id="tbAmbang"></table>
+							</div>
+							<div>
+								<div style="font-weight:600;margin:2px 0 7px">Weights and Category Caps</div>
+								<table class="sn-tb" id="tbBobot"></table>
+							</div>
+						</div>
+						<div style="font-weight:600;margin:14px 0 7px">Blocking Mode</div>
+						<div class="sn-note">
+							<b>Monitor only (enforce = 0)</b> berarti ZySentinel hanya menghitung dan mencatat, tidak pernah memblokir siapa pun.
+							Aturan throttle di kernel tetap ada, tetapi tidak ada IP yang masuk ke dalam set, sehingga tidak ada yang dibatasi.
+							Mode ini cocok untuk beberapa hari pertama setelah pemasangan.
+							<b>Aktifkan (enforce = 1)</b> setelah melihat daftar IP yang akan diblokir dan memastikan semuanya memang penyerang.
+						</div>
+						<div class="sn-fl">
+							<span class="sn-btn pri" onclick="snSetConf('enforce','0',this)">Monitor Only</span>
+							<span class="sn-btn dgr" onclick="snSetConf('enforce','1',this)">Enable Blocking</span>
+							<span class="sn-btn" onclick="snSvc('restart')">Restart Daemon</span>
+						</div>
+					</div>
+
+					<div class="sn-subpage" id="c-laju">
+						<div class="sn-note">
+							Batas laju ini hanya berlaku untuk IP yang <b>masuk daftar throttle</b>,
+							bukan untuk semua pengunjung. IP biasa tetap tidak dibatasi lajunya.
+							<div style="margin-top:7px">
+								<b>rps</b> menahan ledakan sesaat. <b>rpm</b> menahan penyalahgunaan
+								yang berlangsung lama. Keduanya perlu: penyerang dengan 4 rps terus-menerus
+								tidak pernah tersentuh aturan 5 rps, padahal totalnya 240 per menit.
+							</div>
+						</div>
+						<div class="sn-grid2">
+							<div>
+								<div style="font-weight:600;margin:2px 0 7px">Rate Limit</div>
+								<table class="sn-tb" id="tbLaju"></table>
+							</div>
+							<div>
+								<div style="font-weight:600;margin:2px 0 7px">Example</div>
+								<table class="sn-tb">
+									<thead><tr><th>rps</th><th>rpm (auto)</th><th>Meaning</th></tr></thead>
+									<tbody id="tbContoh"></tbody>
+								</table>
+								<div class="sn-note" style="margin-top:11px">
+									Nilai di tabel kiri dibaca <span class="sn-mono">sentinel-fw.sh</span>,
+									bukan daemon. Setelah diubah, aturan kernel dipasang ulang otomatis.
+									<span class="sn-mono">systemctl restart sentinel</span> TIDAK dijalankan,
+									karena tidak diperlukan dan hanya menambah jeda.
+								</div>
+							</div>
+						</div>
+					</div>
+
+					<div class="sn-subpage" id="c-panic">
+						<div id="pnKondisi" class="sn-note">loading</div>
+						<div class="sn-fl" style="margin:12px 0">
+							<span class="sn-btn dgr" onclick="snPanic()">Enable Panic</span>
+							<span class="sn-btn pri" onclick="snUnpanic()">Disable Panic</span>
+							<span class="sn-btn" onclick="snPanicMuat()">Check Status</span>
+						</div>
+						<div style="font-weight:600;margin:14px 0 6px">Kernel Rules While Panic Is Active</div>
+						<pre class="sn-pre" id="pnRules">not active</pre>
+					</div>
+				</div>
+			</div>
+
+		</div>
+
+		<div class="sn-mfoot">
+			<span id="stUmur" class="sn-refresh">-</span>
+			<span style="flex:1"></span>
+			<span class="sn-refresh">Server IP</span>
+			<span class="sn-mono" id="stIP">-</span>
+		</div>
+	</div>
+</div>
+
+</div>
+
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-8DBL8LPYQZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  // Dukungan analitik lintas domain, IP address publik/lokal, dan custom host
+  gtag('config', 'G-8DBL8LPYQZ', {
+    'cookie_domain': 'auto',
+    'cookie_flags': 'SameSite=Lax',
+    'send_page_view': true,
+    'page_location': window.location.href,
+    'page_title': 'ZySentinel Dashboard'
+  });
+
+  // Kirim event penanda server aktif dan versi ZySentinel
+  gtag('event', 'sentinel_active', {
+    'app_version': '1.6',
+    'server_host': window.location.hostname || 'unknown-ip'
+  });
+
+  (function(){
+    if (!document.getElementById('gtag-sentinel')) {
+      var gs = document.createElement('script');
+      gs.id = 'gtag-sentinel';
+      gs.async = true;
+      gs.src = 'https://www.googletagmanager.com/gtag/js?id=G-8DBL8LPYQZ';
+      document.head.appendChild(gs);
+    }
+  })();
+</script>
+
+<script src="/static/js/echarts.min.js"></script>
+<script>
+var SN_GRAF = null;
+var SN_TIMER = null;
+/* Indeks layer.open dialog konfirmasi panic. null berarti tidak ada
+   dialog itu yang terbuka. Disimpan supaya snTutup() bisa menutupnya
+   tanpa(layer.closeAll() tanpa argumen) yang ikut menutup dialog panel
+   milik plugin lain. */
+var SN_PANIC_LAYER = null;
+var SN_SUB = {};
+var SN_SUB2 = {};
+var SN_WAFTAB = 'coraza';
+var SN_SYS_T = 0;
+
+function snAjax(method, data, cb){
+	var d = data || {};
+	d.method = method;
+	d.s = method;
+	$.ajax({
+		url: '/plugin?action=a&name=sentinel&s=' + method,
+		type: 'POST',
+		data: d,
+		timeout: 60000,
+		success: function(r){
+			if(r && r.status === true){ cb(r.msg); }
+			else {
+				layer && layer.msg ? layer.msg((r && r.msg) || 'gagal', {time:3500}) : alert((r && r.msg) || 'gagal');
+				cb(null);
+			}
+		},
+		error: function(){ cb(null); }
+	});
+}
+
+/* ---------- kerangka dialog ---------- */
+function snBuka(){
+	var m = $('#snModal');
+	/* Bibit dari plugin yang terpasang dua kali. jQuery hanya
+	   menyasar elemen pertama, jadi sisa-sisanya akan tetap di layar
+	   apa pun yang terjadi pada elemen pertama. */
+	$('.sn-modal').not(m).remove();
+	m.addClass('on').show(0);
+	document.body.style.overflow = 'hidden';
+	/* interval dibuat ulang setiap buka. Tanpa ini timer lama tetap jalan
+	   setelah dialog ditutup: 6 request sia-sia per menit ke server
+	   selama halaman panel masih terbuka. */
+	if(SN_TIMER){ clearInterval(SN_TIMER); SN_TIMER = null; }
+	/* Pagar jeda snSysMuat() direset. Tanpa ini, dialog yang dibuka
+	   ulang dalam 4 detik akan menampilkan panel sistem kosong karena
+	   pemuatnya menolak bekerja demi hemat permintaan. */
+	SN_SYS_T = 0;
+	SN_TIMER = setInterval(function(){
+		/* PENJAGA. Kalau panel melepas fragmen plugin ini dari DOM,
+		   dialog sudah tidak ada tapi timer masih hidup, sehingga
+		   request tetap terkirim dan lencana tetap berubah untuk
+		   elemen yang sudah tidak terlihat. Keadaan itu persis yang
+		   terlihat sebagai "dialog sisa" padahal lencana di dalamnya
+		   terus berdenyut. Di sini dijaga supaya berhenti sendiri. */
+		var m = document.getElementById('snModal');
+		if(!m || !document.body.contains(m)){
+			clearInterval(SN_TIMER);
+			SN_TIMER = null;
+			return;
+		}
+		/* Kalau elemennya ada tapi disembunyikan paksa dari luar
+		   (misalnya disembunyikan panel), rapikan juga agar tidak
+		   menggantung di belakang layar. */
+		if(m.style.display === 'none' && !m.className.match(/\bon\b/)){
+			clearInterval(SN_TIMER);
+			SN_TIMER = null;
+			return;
+		}
+		snStatus();
+		snBans();
+		snPanikRefresh();
+		/* Aturan kernel disegarkan hanya saat tab Firewall terlihat.
+		   Di luar itu permintaannya tidak akan terlihat hasilnya
+		   karena elemennya tertutup, jadi tidak perlu dikirim. */
+		if($('#top-firewall').hasClass('on')){ snFwBackendMuat(); snFwMuat(); snFwrMuat(); }
+		if($('#top-antivirus').hasClass('on')){ snAvMuat(); }
+	}, 10000);
+	/* Pemuatan awal setelah jeda pendek. Jeda ini penting: saat dialog
+	   baru dibuka, tabel kernel masih di luar viewport pada layar kecil,
+	   dan mengisi elemen sebelum punya tinggi tidak menghasilkan
+	   scrollbar yang benar.
+
+	   Semua panel dimuat di sini, bukan hanya engine dan kernel. Kalau
+	   hanya sebagian, reopening dialog akan menampilkan header dengan
+	   area isi kosong sampai interval 10 detik kemudian menyentuhnya. */
+	setTimeout(function(){
+		snStatus();     /* statistik, lencana, grafik */
+		snSysMuat();    /* panel informasi sistem */
+		snBans();       /* tabel IP yang diblokir */
+		snPanicMuat();  /* kondisi panic */
+		snEngineMuat(); /* kartu engine + switch mode WAF */
+		snLuaMuat();    /* kartu LUA free_waf */
+		snFwMuat();     /* urutan aturan kernel */
+		snAvLencana();  /* lencana antivirus clamav */
+	}, 500);
+}
+function snTutupLapis(){
+	/* Dialog ZySentinel berada DI DALAM lapisan layui-layer milik panel.
+	   Menutup dialog kita saja akan menyisakan lapisan panel yang
+	   kosong bergelar "ZySentinel" beserta tombol silangnya. Itu yang
+	   terlihat sebagai "dialog sisa".
+
+	   Tidak ada plugin lain yang menutup lapisan panel dari dalam,
+	   karena halaman mereka bukan dialog. Halaman ini justru dialog
+	   penuh, jadi tombol tutupnya harus menutup keduanya.
+
+	   Indeks lapis diambil dari atribut times atau dari id elemen
+	   (layui-layer6 memakai indeks 6), karena kita tidak memegang nilai
+	   balasan layer.open milik panel. */
+	var host = $('#snModal').closest('.layui-layer');
+	if(!host.length) return;
+	var el = host.get(0);
+	var n = parseInt(String(el.id || el.getAttribute('times') || '')
+		.replace(/[^0-9]/g, ''), 10);
+	var beres = false;
+	if(!isNaN(n) && n > 0 && window.layer && layer.close){
+		try{
+			layer.close(n);
+			/* layer.close() menghapus elemen secara asinkron. Kalau masih
+			   ada setelah satu detik, paksa buang beserta tirainya. */
+			setTimeout(function(){
+				if(document.body.contains(el)){
+					$('#layui-layer-shade-' + n).remove();
+					el.parentNode.removeChild(el);
+				}
+			}, 1000);
+			beres = true;
+		}catch(e){ beres = false; }
+	}
+	if(!beres){
+		if(!isNaN(n) && n > 0) $('#layui-layer-shade-' + n).remove();
+		el.parentNode.removeChild(el);
+	}
+}
+function snTutup(){
+	/* Sembunyikan DUA CARA: class dan inline style.
+
+	   Kenapa dua? .sn-modal memakai position:fixed, dan elemen fixed
+	   keluar dari pemotongan overflow:hidden milik container plugin
+	   milik panel. Kalau container itu disembunyikan dengan display:none
+	   dialog ikut hilang. Tapi kalau disembunyikan dengan collapse atau
+	   overflow, dialog tetap berdiri sendiri di layar karena sudah
+	   lepas ke viewport.
+
+	   Inline style mengalahkan class. Dengan menulis display:none
+	   langsung, dialog hilang apa pun yang dilakukan browser pada
+	   class, sehingga tidak mungkin tertinggal. */
+	var m = $('#snModal');
+	m.removeClass('on');
+	m.css('display', 'none');
+	/* Bila ada salinan lain akibat plugin terpasang dua kali,
+	   sembunyikan semuanya. */
+	$('.sn-modal').css('display', 'none').removeClass('on');
+	document.body.style.overflow = '';
+	/* Hentikan timer. Kalau tidak, request tetap terkirim setelah dialog
+	   ditutup dan hasilnya tidak pernah terlihat. */
+	if(SN_TIMER){ clearInterval(SN_TIMER); SN_TIMER = null; }
+	/* Tutup dialog layer milik ZySentinel yang mungkin masih menggantung.
+	   Dialog konfirmasi biasa (layer.confirm) sudah tertutup oleh user,
+	   tapi dialog panic memakai shadeClose:false sehingga hanya bisa
+	   ditutup lewat tombolnya. Kalau dialog utama ditutup duluan, dialog
+	   itu akan tetap di layar tanpa tombol yang bisaDicapai.
+
+	   SENGAJA TIDAK memakai layer.closeAll() tanpa argumen: itu menutup
+	   semua dialog panel termasuk milik plugin lain. Dialog milik
+	   ZySentinel ditutup satu per satu lewat indeksnya. */
+	if(SN_PANIC_LAYER !== null && SN_PANIC_LAYER !== undefined){
+		try{ layer.close(SN_PANIC_LAYER); }catch(e){}
+		SN_PANIC_LAYER = null;
+	}
+	layer.closeAll('loading');
+	snTutupLapis();
+	// Reset global note when dialog closes
+	$('#fwGlobalNote').html('loading');
+	$('#nwNote').html('loading');
+	$('#pnKondisi').html('loading');
+	/* Kembalikan ke tab awal supaya dibuka lagi tidak langsung tampil
+	   isi tab terakhir yang mungkin sudah basi.
+
+	   PENTING: addClass() menerima NAMA CLASS, bukan selector. Menulis
+	   addClass('#top-dash') akan menambah class yang namanya persis
+	   "#top-dash" ke setiap elemen .sn-page, bukan memberi class "on"
+	   ke elemen ber-id top-dash. Akibatnya semua halaman kehilangan
+	   class on, dan karena .sn-page{display:none} seluruh isi dialog
+	   hilang: yang tersisa hanya header dan tombol tutup. */
+	$('.sn-mtabs span').removeClass('on').eq(0).addClass('on');
+	$('.sn-page').removeClass('on');
+	$('#top-dash').addClass('on');
+	/* Status sub-tab ikut direset supaya saat tab dibuka lagi, pemuat
+	   yang sesuai yang dipanggil dan bukan sisa tab terakhir. */
+	SN_SUB.aktif = 'bans';
+	SN_REV_STATUS = 'tunggu';
+	/* Config kini default ke sub-tab Engine. DOM-nya harus ikut direset:
+	   kalau hanya penanda state yang diubah, tab yang terlihat dan
+	   pemuat yang dipanggil jadi tidak sinkron. */
+	SN_SUB2.aktif = 'atur';
+	$('#top-conf .sn-tabs span').removeClass('on').eq(0).addClass('on');
+	$('#top-conf .sn-subpage').removeClass('on');
+	$('#c-atur').addClass('on');
+	/* WAF kembali ke sub-tab Coraza saat dibuka lagi. */
+	SN_WAFTAB = 'coraza';
+	$('#top-waf .sn-tabs span').removeClass('on').eq(0).addClass('on');
+	$('#top-waf .sn-subpage').removeClass('on');
+	$('#w-eng').addClass('on');
+	/* Antivirus kembali ke sub-tab Vhosts saat dibuka lagi */
+	SN_AV_TAB = 'vhost';
+	if(window.SN_AV_POLL){ clearInterval(window.SN_AV_POLL); window.SN_AV_POLL = null; }
+	$('#top-antivirus .sn-tabs span').removeClass('on').eq(0).addClass('on');
+	$('#top-antivirus .sn-subpage').removeClass('on');
+	$('#avsub-vhost').addClass('on');
+}
+function snTop(nama, el){
+	$('.sn-mtabs span').removeClass('on');
+	$(el).addClass('on');
+	$('.sn-page').removeClass('on');
+	$('#top-' + nama).addClass('on');
+	if(nama === 'dash'){
+		if(SN_SUB[SN_SUB.aktif]){ SN_SUB[SN_SUB.aktif](); }
+		snSysMuat();
+	}
+	else if(nama === 'antivirus'){
+		snAvMuat();
+	}
+	else if(nama === 'firewall'){
+		snFwAllMuat();
+	}
+	else if(nama === 'waf'){
+		/* Satu pemuatan menutup dua sub-tab: Coraza memakai data
+		   get_waf_engine (+ switch mode), LUA memakai get_freewaf.
+		   Keduanya dipanggil supaya berpindah sub-tab tidak
+		   menampilkan isi kosong. */
+		snEngineMuat();   /* kartu engine + snModeMuat (badge switch) */
+		snLuaMuat();      /* kartu LUA free_waf */
+		snNwMuat();
+		snWafMuat();
+		snWafLencana();
+	}
+	else {
+		var k = SN_SUB2.aktif;
+		if(k && SN_SUB2[k]){ SN_SUB2[k](); }
+	}
+}
+function snWafTab(nama, el){
+	$('#top-waf .sn-tabs span').removeClass('on');
+	$(el).addClass('on');
+	$('#top-waf .sn-subpage').removeClass('on');
+	if(nama === 'lua'){ $('#w-lua').addClass('on'); }
+	else { $('#w-eng').addClass('on'); }
+	SN_WAFTAB = nama;
+}
+function snSub(nama, el){
+	$('#top-dash .sn-tabs span').removeClass('on');
+	$(el).addClass('on');
+	$('#top-dash .sn-subpage').removeClass('on');
+	$('#sub-' + nama).addClass('on');
+	SN_SUB.aktif = nama;
+	if(SN_SUB[nama]){ SN_SUB[nama](); }
+	if(SN_GRAF && SN_SUB.aktif !== 'log'){ 
+		// Debounce resize - only resize if enough time passed
+		clearTimeout(SN_GRAF._resizeTO);
+		SN_GRAF._resizeTO = setTimeout(function(){ SN_GRAF.resize(); }, 100); 
+	}
+}
+function snSub2(nama, el){
+	$('#top-conf .sn-tabs span').removeClass('on');
+	$(el).addClass('on');
+	$('#top-conf .sn-subpage').removeClass('on');
+	$('#c-' + nama).addClass('on');
+	SN_SUB2.aktif = nama;
+	if(SN_SUB2[nama]){ SN_SUB2[nama](); }
+}
+
+function ukuranAngka(n){
+	n = Number(n) || 0;
+	var satuan = ['B','KB','MB','GB','TB'], i = 0;
+	while(n >= 1024 && i < satuan.length - 1){ n = n / 1024; i++; }
+	return (i === 0 ? n : n.toFixed(1)) + ' ' + satuan[i];
+}
+function waktu(ts){
+	if(!ts) return '-';
+	var d = new Date(Number(ts) * 1000);
+	function p(x){ return x < 10 ? '0' + x : '' + x; }
+	return d.getFullYear() + '-' + p(d.getMonth()+1) + '-' + p(d.getDate()) + ' ' +
+	       p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds());
+}
+function kelasSkor(s){
+	s = Number(s) || 0;
+	if(s >= 150) return 'sc3';
+	if(s >= 60) return 'sc2';
+	if(s >= 20) return 'sc1';
+	return 'sc0';
+}
+function kelasLevel(l){
+	l = Number(l) || 0;
+	if(l >= 3) return 'lv3';
+	if(l == 2) return 'lv2';
+	if(l == 1) return 'lv1';
+	return 'lv0';
+}
+function teksLevel(l){
+	l = Number(l) || 0;
+	return ['normal','watching','rate limited','blocked'][l] || 'normal';
+}
+function kosong(tbl, kolom, pesan){
+	$(tbl).html('<tr><td colspan="' + kolom + '" class="sn-empty">' + pesan + '</td></tr>');
+}
+
+var SN_ELITE_DATA = null;
+
+function snEliteLoad(){
+	snAjax('get_elite_posture', {}, function(res){
+		if(!res) return;
+		var p = res;
+		SN_ELITE_DATA = p;
+
+		// 1. Update DEFCON Banner
+		var ban = $('#snDefconBanner');
+		ban.removeClass('defcon-1 defcon-2 defcon-3 defcon-4 defcon-5').addClass('defcon-' + p.defcon);
+		$('#snDefconBadge').text('DEFCON ' + p.defcon);
+		$('#snDefconTitle').text(p.defcon_title);
+		$('#snDefconDesc').text(p.defcon_desc);
+
+		// 2. Update Tactical Controls
+		var eg = p.egress_guard;
+		if(eg && eg.active){
+			$('#tgEgress').removeClass('sn-off sn-bad').addClass('sn-badge sn-ok').text('AKTIF');
+		} else {
+			$('#tgEgress').removeClass('sn-ok').addClass('sn-badge sn-off').text('NONAKTIF');
+		}
+
+		var pr = p.proc_guard;
+		if(pr && pr.active && pr.mode === 'enforce'){
+			$('#tgProc').removeClass('sn-off sn-bad').addClass('sn-badge sn-ok').text('ENFORCE');
+		} else if(pr && pr.mode === 'audit'){
+			$('#tgProc').removeClass('sn-ok sn-bad').addClass('sn-badge sn-off').text('AUDIT');
+		} else {
+			$('#tgProc').removeClass('sn-ok').addClass('sn-badge sn-bad').text('OFF');
+		}
+
+		var ti = p.threat_intel;
+		if(ti && ti.count > 0){
+			$('#tgIntel').removeClass('sn-off sn-bad').addClass('sn-badge sn-ok').text(ti.count.toLocaleString() + ' CIDR');
+		} else {
+			$('#tgIntel').removeClass('sn-ok').addClass('sn-badge sn-bad').text('KOSONG');
+		}
+
+		var fim = p.sys_persistence;
+		if(fim && fim.status === 'clean'){
+			$('#tgFim').removeClass('sn-bad sn-off').addClass('sn-badge sn-ok').text('89 BERSIH');
+		} else {
+			$('#tgFim').removeClass('sn-ok').addClass('sn-badge sn-bad').text((fim ? fim.changes : 1) + ' ANOMALI');
+		}
+
+		if(p.panic_on){
+			$('#btnPanicToggle').text('CABUT PANIC').removeClass('dgr').addClass('sn-ok');
+		} else {
+			$('#btnPanicToggle').text('PANIC LOCKDOWN').removeClass('sn-ok').addClass('dgr');
+		}
+
+		if(SN_SUB.aktif === 'edr'){
+			snEdrMuat();
+		}
+	});
+}
+
+function snToggleEgress(){
+	var curr = $('#tgEgress').text();
+	var next = (curr === 'AKTIF' ? 'off' : 'on');
+	layer.confirm('Ubah status Egress Guard (Anti-Reverse Shell) ke ' + next.toUpperCase() + '?', {
+		title: 'Konfirmasi Egress Guard',
+		icon: 3
+	}, function(idx){
+		layer.close(idx);
+		var load = layer.load(1);
+		snAjax('set_egress_guard', {status: next}, function(r){
+			layer.close(load);
+			layer.msg(r && r.msg ? r.msg : 'Berhasil memperbarui Egress Guard');
+			snEliteLoad();
+		});
+	});
+}
+
+function snToggleProc(){
+	var curr = $('#tgProc').text().toLowerCase();
+	var next = 'enforce';
+	if(curr === 'enforce') next = 'audit';
+	else if(curr === 'audit') next = 'off';
+	else next = 'enforce';
+
+	layer.confirm('Ubah mode Process Watchdog (Anti-RCE) ke mode ' + next.toUpperCase() + '?', {
+		title: 'Konfirmasi Process Guard',
+		icon: 3
+	}, function(idx){
+		layer.close(idx);
+		var load = layer.load(1);
+		snAjax('set_proc_guard', {mode: next}, function(r){
+			layer.close(load);
+			layer.msg(r && r.msg ? r.msg : 'Berhasil mengubah mode Process Guard');
+			snEliteLoad();
+		});
+	});
+}
+
+function snSyncIntel(){
+	var load = layer.load(1);
+	snAjax('update_threat_intel', {}, function(r){
+		layer.close(load);
+		layer.msg(r && r.msg ? r.msg : 'Threat Intel diperbarui');
+		snEliteLoad();
+	});
+}
+
+function snCheckFim(){
+	var load = layer.load(1);
+	snAjax('av_check_persistence', {}, function(r){
+		layer.close(load);
+		layer.alert(r && r.msg ? r.msg : 'Pemeriksaan integritas selesai.', {title: 'Hasil FIM Persistensi Sistem'});
+		snEliteLoad();
+	});
+}
+
+function snEdrMuat(){
+	snAjax('get_elite_posture', {}, function(res){
+		if(res) {
+			SN_ELITE_DATA = res;
+			renderEdrTable(res.recent_alerts);
+			if(res.proc_whitelist_count !== undefined){
+				$('#countEdrWhitelist').text(res.proc_whitelist_count);
+			}
+		}
+	});
+
+	function renderEdrTable(alerts){
+		if(!alerts || alerts.length === 0){
+			kosong('#tbEdr', 9, 'Tidak ada anomali atau eksekusi proses ilegal yang terdeteksi. Sistem terpantau aman.');
+			return;
+		}
+		var h = '';
+		for(var i = 0; i < alerts.length; i++){
+			var a = alerts[i];
+			var actBadge = '<span class="sn-badge sn-bad">' + (a.action || 'AUDIT') + '</span>';
+			if(a.action === 'KILLED'){
+				actBadge = '<span class="sn-badge" style="background:#dc2626;color:#fff;font-weight:700">SIGKILL</span>';
+			} else if(a.action === 'WHITELISTED'){
+				actBadge = '<span class="sn-badge sn-ok" style="font-weight:700">WHITELIST</span>';
+			}
+
+			var aksiCol = '';
+			if(a.action === 'WHITELISTED'){
+				aksiCol = '<span class="sn-tag ok" title="Proses ini diizinkan oleh aturan whitelist">Diizinkan</span>';
+			} else {
+				aksiCol = '<span class="sn-btn pri" onclick="snQuickWhitelistModal(\'' + a.id + '\',\'' + encodeURIComponent(a.exe||'') + '\',\'' + encodeURIComponent(a.cmdline||'') + '\',\'' + encodeURIComponent(a.rule||'') + '\')">+ Whitelist</span>';
+			}
+
+			h += '<tr>'
+				+ '<td class="sn-mono" style="white-space:nowrap">' + waktu(a.ts) + '</td>'
+				+ '<td class="sn-mono">' + a.pid + '</td>'
+				+ '<td class="sn-mono">' + (a.ppid || '-') + '</td>'
+				+ '<td class="sn-mono">' + (a.uid || 1002) + '</td>'
+				+ '<td class="sn-mono sn-clip" title="' + String(a.exe || '').replace(/"/g, '&quot;') + '">' + (a.exe || '-') + '</td>'
+				+ '<td class="sn-mono sn-clip" title="' + String(a.cmdline || '').replace(/"/g, '&quot;') + '">' + (a.cmdline || '-') + '</td>'
+				+ '<td><span class="sn-badge sn-off" style="font-weight:600">' + (a.rule || '-') + '</span></td>'
+				+ '<td class="r">' + actBadge + '</td>'
+				+ '<td class="r">' + aksiCol + '</td>'
+				+ '</tr>';
+		}
+		$('#tbEdr').html(h);
+	}
+}
+
+/* ---------- Manajemen Whitelist EDR & Anomali ---------- */
+function snQuickWhitelistModal(alertId, exeEnc, cmdEnc, ruleEnc){
+	var exe = decodeURIComponent(exeEnc || '');
+	var cmd = decodeURIComponent(cmdEnc || '');
+	var rule = decodeURIComponent(ruleEnc || '');
+
+	var defaultPattern = cmd;
+	var defaultType = 'cmdline_match';
+	var defaultName = 'Whitelist ' + (rule || 'Proses');
+
+	if(!defaultPattern && exe){
+		defaultPattern = exe;
+		defaultType = 'exe_exact';
+	}
+
+	var modalHtml = '<div style="padding:18px 24px 20px;font-size:13px">'
+		+ '<div style="margin-bottom:12px">'
+			+ '<label style="font-weight:600;display:block;margin-bottom:6px">Nama Aturan Whitelist:</label>'
+			+ '<input id="modWlName" class="sn-inp" style="width:100%" value="' + defaultName.replace(/"/g, '&quot;') + '" placeholder="Contoh: Auto Deploy Git Pull">'
+		+ '</div>'
+		+ '<div style="margin-bottom:12px">'
+			+ '<label style="font-weight:600;display:block;margin-bottom:6px">Tipe Pencocokan (Match Type):</label>'
+			+ '<select id="modWlType" class="sn-inp" style="width:100%" onchange="snWlTypeChange(this.value)">'
+				+ '<option value="cmdline_match"' + (defaultType === 'cmdline_match' ? ' selected' : '') + '>Pola Perintah (Cmdline Substring - Disarankan)</option>'
+				+ '<option value="exe_exact"' + (defaultType === 'exe_exact' ? ' selected' : '') + '>Jalur Executable Persis (Exe Path)</option>'
+				+ '<option value="basename">Nama Biner Sahaja (Basename)</option>'
+				+ '<option value="cwd_match">Direktori Kerja Web (CWD)</option>'
+			+ '</select>'
+		+ '</div>'
+		+ '<div style="margin-bottom:12px">'
+			+ '<label id="lblModWlPattern" style="font-weight:600;display:block;margin-bottom:6px">Pola / Kata Kunci Pencocokan:</label>'
+			+ '<input id="modWlPattern" class="sn-inp" style="width:100%" value="' + defaultPattern.replace(/"/g, '&quot;') + '" placeholder="Contoh: git stash && git pull">'
+			+ '<div class="sn-refresh" style="font-size:11px;margin-top:4px">Proses yang memuat pola ini tidak akan dimatikan (SIGKILL) dan ditandai sebagai WHITELISTED.</div>'
+		+ '</div>'
+		+ '<div style="margin-bottom:16px">'
+			+ '<label style="font-weight:600;display:block;margin-bottom:6px">Keterangan / Rujukan:</label>'
+			+ '<input id="modWlRemark" class="sn-inp" style="width:100%" value="Diizinkan dari insiden EDR ID ' + alertId + '" placeholder="Alasan pengecualian">'
+		+ '</div>'
+		+ '</div>';
+
+	layer.open({
+		type: 1,
+		title: 'Tambah Pengecualian Whitelist EDR',
+		area: ['540px', 'auto'],
+		content: modalHtml,
+		btn: ['Simpan & Izinkan', 'Batal'],
+		yes: function(idx){
+			var name = ($('#modWlName').val() || '').trim();
+			var type = $('#modWlType').val();
+			var pattern = ($('#modWlPattern').val() || '').trim();
+			var remark = ($('#modWlRemark').val() || '').trim();
+
+			if(!pattern){
+				layer.msg('Pola pencocokan wajib diisi', {time: 2000});
+				return false;
+			}
+
+			layer.close(idx);
+			layer.msg('Menyimpan aturan whitelist...', {time:0, shade:[0.3, '#000']});
+			snAjax('add_proc_whitelist', {
+				name: name,
+				type: type,
+				pattern: pattern,
+				remark: remark
+			}, function(res){
+				layer.closeAll('loading');
+				if(res){
+					layer.msg(res, {time: 3000});
+					snEdrMuat();
+					snProcWlUpdateCount();
+				}
+			});
+			return false;
+		}
+	});
+}
+
+function snProcWlAddModal(){
+	snQuickWhitelistModal('MANUAL', '', '', 'Aturan Mandiri');
+}
+
+function snProcWlManageModal(){
+	var load = layer.load(1);
+	snAjax('get_proc_whitelist', {}, function(res){
+		layer.close(load);
+		var rules = res || [];
+		var rows = '';
+		for(var i = 0; i < rules.length; i++){
+			var r = rules[i];
+			var typeBadge = '<span class="sn-tag proto">' + (r.type || 'cmdline').replace('_match','') + '</span>';
+			var statusBadge = r.enabled
+				? '<span class="sn-badge sn-ok" style="cursor:pointer" onclick="snProcWlToggle(\'' + r.id + '\')" title="Klik untuk menonaktifkan">AKTIF</span>'
+				: '<span class="sn-badge sn-off" style="cursor:pointer" onclick="snProcWlToggle(\'' + r.id + '\')" title="Klik untuk mengaktifkan">OFF</span>';
+			var delBtn = '<span class="sn-btn dgr" onclick="snProcWlDelete(\'' + r.id + '\',\'' + encodeURIComponent(r.name) + '\')">Hapus</span>';
+
+			rows += '<tr>'
+				+ '<td class="sn-mono" style="color:var(--muted)">' + (i + 1) + '</td>'
+				+ '<td><b>' + (r.name || '-') + '</b></td>'
+				+ '<td>' + typeBadge + '</td>'
+				+ '<td class="sn-mono sn-clip" title="' + String(r.pattern||'').replace(/"/g,'&quot;') + '"><span class="sn-ell">' + (r.pattern || '-') + '</span></td>'
+				+ '<td class="sn-clip" title="' + String(r.remark||'').replace(/"/g,'&quot;') + '"><span class="sn-ell">' + (r.remark || '-') + '</span></td>'
+				+ '<td class="r">' + statusBadge + '</td>'
+				+ '<td class="r">' + delBtn + '</td>'
+				+ '</tr>';
+		}
+		if(!rows){
+			rows = '<tr><td colspan="7" class="sn-empty">Belum ada aturan whitelist EDR. Klik "+ Tambah Whitelist" untuk membuat.</td></tr>';
+		}
+
+		var contentHtml = '<div style="padding:16px 20px 20px">'
+			+ '<div class="sn-fl" style="margin-bottom:12px;justify-content:space-between">'
+				+ '<span style="font-size:12.5px;color:var(--ink-2)">Proses yang cocok dengan aturan di bawah ini akan diizinkan berjalan (tidak dikenai SIGKILL).</span>'
+				+ '<span class="sn-btn pri" onclick="layer.close(window.SN_WL_LAYER); snProcWlAddModal()">+ Tambah Baru</span>'
+			+ '</div>'
+			+ '<div style="max-height:420px;overflow-y:auto">'
+				+ '<table class="sn-tb">'
+					+ '<thead><tr>'
+						+ '<th style="width:35px">#</th>'
+						+ '<th>Nama Aturan</th>'
+						+ '<th style="width:85px">Tipe</th>'
+						+ '<th>Pola / Nilai</th>'
+						+ '<th>Keterangan</th>'
+						+ '<th style="width:75px" class="r">Status</th>'
+						+ '<th style="width:75px" class="r">Aksi</th>'
+					+ '</tr></thead>'
+					+ '<tbody>' + rows + '</tbody>'
+				+ '</table>'
+			+ '</div>'
+			+ '</div>';
+
+		window.SN_WL_LAYER = layer.open({
+			type: 1,
+			title: 'Kelola Whitelist Proses EDR & Anomali',
+			area: ['780px', 'auto'],
+			content: contentHtml,
+			btn: ['Tutup'],
+			yes: function(idx){
+				layer.close(idx);
+			}
+		});
+	});
+}
+
+function snProcWlToggle(ruleId){
+	snAjax('toggle_proc_whitelist', {id: ruleId}, function(res){
+		if(res){
+			layer.msg(res, {time: 2500});
+			if(window.SN_WL_LAYER) layer.close(window.SN_WL_LAYER);
+			snProcWlManageModal();
+			snProcWlUpdateCount();
+		}
+	});
+}
+
+function snProcWlDelete(ruleId, nameEnc){
+	var name = decodeURIComponent(nameEnc || '');
+	layer.confirm('Hapus aturan whitelist "' + name + '"? Proses yang cocok akan kembali dikenai tindakan penegakan EDR.', function(idx){
+		layer.close(idx);
+		snAjax('del_proc_whitelist', {id: ruleId}, function(res){
+			if(res){
+				layer.msg(res, {time: 2500});
+				if(window.SN_WL_LAYER) layer.close(window.SN_WL_LAYER);
+				snProcWlManageModal();
+				snProcWlUpdateCount();
+			}
+		});
+	});
+}
+
+function snProcWlUpdateCount(){
+	snAjax('get_proc_whitelist', {}, function(res){
+		if(res && Array.isArray(res)){
+			$('#countEdrWhitelist').text(res.length);
+		}
+	});
+}
+
+function snWlTypeChange(val){
+	if(val === 'cmdline_match'){
+		$('#lblModWlPattern').text('Pola Perintah (Substring Argumen / Command):');
+	} else if(val === 'exe_exact'){
+		$('#lblModWlPattern').text('Jalur Penuh File Binary Executable:');
+	} else if(val === 'basename'){
+		$('#lblModWlPattern').text('Nama File Binary (Contoh: git, node, php):');
+	} else if(val === 'cwd_match'){
+		$('#lblModWlPattern').text('Direktori Kerja Root (Contoh: /www/wwwroot/...):');
+	}
+}
+
+/* ---------- kartu statistik defender elit ---------- */
+function snStats(s, m){
+	var g = '#1a9c4e', r = '#f44336', o = '#ff9800', b = '#2f7fe0';
+	var p = SN_ELITE_DATA;
+	var intelText = (p && p.threat_intel ? p.threat_intel.count.toLocaleString() + ' CIDR' : '1,681 CIDR');
+	var edrText = (p && p.proc_guard ? p.proc_guard.mode.toUpperCase() + ' (' + p.proc_guard.kills + ' Kills)' : 'ENFORCE (0 Kills)');
+	var edrColor = (p && p.proc_guard && p.proc_guard.kills > 0 ? r : g);
+	var egressText = (p && p.egress_guard && p.egress_guard.active ? 'TERKUNCI' : 'BEBAS');
+	var fimText = (p && p.sys_persistence && p.sys_persistence.status === 'clean' ? '89 Bersih' : 'Anomali!');
+	var fimColor = (p && p.sys_persistence && p.sys_persistence.status === 'clean' ? g : r);
+
+	var kartu = [
+		['Global Threat Intel', intelText, g, '&#127760;'],
+		['Anti-RCE Watchdog', edrText, edrColor, '&#9889;'],
+		['Egress Defense', egressText, b, '&#128274;'],
+		['Active IP Bans', (s.bans_active || 0) + ' IP', r, '&#128683;'],
+		['Persistence FIM', fimText, fimColor, '&#128193;'],
+		['Total Requests', s.total_req || 0, b, '&#128065;'],
+		['Lines Read', s.lines || 0, g, '&#128196;'],
+		['Memory', m.rss_mb + ' MB', b, '&#128190;']
+	];
+	var h = '';
+	for(var i = 0; i < kartu.length; i++){
+		var val = kartu[i][1];
+		var valStr = String(val);
+		var fsize = (valStr.length > 12) ? 'font-size:13.5px;' : (valStr.length > 8 ? 'font-size:15px;' : 'font-size:16px;');
+		h += '<div class="sn-stat"><div class="ic" style="background:' + kartu[i][2] + '">' + kartu[i][3] + '</div>'
+			+ '<div class="tx"><div class="k" title="' + kartu[i][0] + '">' + kartu[i][0] + '</div>'
+			+ '<div class="v" style="' + fsize + '" title="' + valStr + '">' + val + '</div></div></div>';
+	}
+	$('#snStats').html(h);
+}
+
+/* ---------- panel sistem ---------- */
+function snSysMuat(){
+	snAjax('get_sysinfo', {}, function(m){
+		if(!m) return;
+		var now = Date.now();
+		/* Perhitungan CPU sudah memakai cache di sisi server, jadi aman
+		   dipanggil sering. Debounce di sini hanya supaya tidak memicu
+		   dua permintaan kalau tab diklik berkali-kili dengan cepat. */
+		if(now - SN_SYS_T < 4000){ return; }
+		SN_SYS_T = now;
+		var mem = '<div style="flex:1 1 100%"><div style="display:flex;justify-content:space-between">'
+			+ '<span>Memory</span><span>' + m.mem_pakai + ' / ' + m.mem_total + ' MB (' + m.mem_persen + '%)</span></div>'
+			+ '<div class="sn-bar"><i style="width:' + Math.min(100, m.mem_persen) + '%"></i></div></div>';
+		var baris = [
+			['System', m.os],
+			['Kernel', m.kernel],
+			['Daemon Uptime', m.uptime_daemon],
+			['System Uptime', m.uptime_mesin],
+			['Load Average', m.load],
+			['CPU', m.core + ' core (' + m.cpu + '%)'],
+			['ZySentinel Version', m.versi],
+			['Daemon PID', m.pid],
+			['Monitored Sites', m.host],
+			['Server IP', m.ip]
+		];
+		var h = '';
+		for(var i = 0; i < baris.length; i++){
+			h += '<div><span>' + baris[i][0] + '</span><span>' + baris[i][1] + '</span></div>';
+		}
+		$('#snSys').html(h + mem);
+	});
+}
+
+/* ---------- status ---------- */
+function snStatus(){
+	snEliteLoad();
+	snAjax('get_status', {}, function(m){
+		if(!m) return;
+		var s = m.status;
+		snStats(s, m);
+		$('#rescan').text(s.rescan_interval || 30);
+		$('#stIP').text(m.self_ip || '-');
+
+		var g = $('#bGuard'), f = $('#bFw');
+		g.text('guardd ' + m.guardd_service);
+		g.attr('class', 'sn-badge ' + (m.guardd_service == 'active' ? 'sn-ok' : 'sn-bad'));
+		f.text('firewall ' + m.fw_service);
+		f.attr('class', 'sn-badge ' + (m.fw_service == 'active' ? 'sn-ok' : 'sn-bad'));
+		snBackendLencana();
+		snWafLencana();
+		snAvLencana();
+
+		var nota = $('#stNote');
+		if(m.guardd_service !== 'active'){
+			nota.html('<b>guardd tidak berjalan.</b> Aturan kernel masih ada, tetapi ban dan throttle dari ZySentinel tidak akan bertambah. '
+				+ 'Coba: <span class="sn-mono">systemctl status sentinel.service</span>').show();
+		} else if(Number(s.enforce) === 0){
+			nota.html('<b>Mode monitor saja.</b> ZySentinel menghitung dan mencatat tetapi tidak memblokir siapa pun. '
+				+ 'Aturan kernel sudah terpasang, tetapi tidak ada IP yang masuk ke dalam set. '
+				+ 'Periksa tab <b>Blocked IPs</b> selama beberapa hari, lalu aktifkan pemblokiran dari tab '
+				+ '<b>Config &rsaquo; Settings</b> setelah yakin daftar itu benar.').show();
+		} else {
+			nota.hide();
+		}
+		snGrafik();
+	});
+}
+
+/* ---------- grafik ---------- */
+function snGrafik(){
+	if(typeof echarts === 'undefined'){
+		/* <script src> eksternal dimuat tidak sinkron oleh jQuery (domManip/_evalUrl),
+		   jadi inline script bisa jalan lebih dulu. Tunggu echarts siap. */
+		if((window.SN_E_TUNGGU = (window.SN_E_TUNGGU || 0) + 1) <= 40){ setTimeout(snGrafik, 250); return; }
+		$('#grafikKosong').text('pustaka grafik tidak termuat').show();
+		return;
+	}
+	var jam = $('#selJam').val();
+	snAjax('get_chart', {hours: jam}, function(m){
+		if(!m) return;
+		var el = document.getElementById('grafik');
+		if(!m.series.length){
+			$('#grafikKosong').show();
+			el.style.display = 'none';
+			return;
+		}
+		$('#grafikKosong').hide();
+		el.style.display = 'block';
+
+		var nama = ['scan','brute','badua','distinct','flood','lainnya'];
+		var data = [[],[],[],[],[],[]];
+		for(var i = 0; i < m.series.length; i++){
+			var v = m.series[i].v;
+			data[0].push([i, v.req]);
+			data[1].push([i, v.bytes]);
+			data[2].push([i, v.s2 || 0]);
+			data[3].push([i, v.s3 || 0]);
+			data[4].push([i, v.s4 || 0]);
+			data[5].push([i, v.s5 || 0]);
+		}
+		var label = [];
+		for(var j = 0; j < m.series.length; j++){
+			var t = new Date(m.series[j].ts * 1000);
+			label.push((t.getMonth()+1) + '/' + t.getDate() + ' ' +
+				(t.getHours() < 10 ? '0' : '') + t.getHours() + ':' +
+				(t.getMinutes() < 10 ? '0' : '') + t.getMinutes());
+		}
+		if(!SN_GRAF){ SN_GRAF = echarts.init(el); }
+		SN_GRAF.setOption({
+			tooltip: {trigger: 'axis'},
+			legend: {data: ['Requests','2xx','3xx','4xx','5xx'], top: 0},
+			grid: {left: 58, right: 20, top: 40, bottom: 45},
+			xAxis: {type: 'category', data: label, axisLabel: {fontSize: 10}},
+			yAxis: [
+				{type: 'value', name: 'requests', minInterval: 1},
+				{type: 'value', name: 'bytes', splitLine: {show: false}}
+			],
+			dataZoom: [{type: 'inside'}, {type: 'slider', height: 14, bottom: 6}],
+			series: [
+				{name: 'Requests', type: 'line', smooth: true, data: data[0], itemStyle: {color: '#1a9c4e'}},
+				{name: '2xx', type: 'line', smooth: true, data: data[2], itemStyle: {color: '#4caf50'}},
+				{name: '3xx', type: 'line', smooth: true, data: data[3], itemStyle: {color: '#00bcd4'}},
+				{name: '4xx', type: 'line', smooth: true, data: data[4], itemStyle: {color: '#ff9800'}},
+				{name: '5xx', type: 'line', smooth: true, data: data[5], itemStyle: {color: '#f44336'}}
+			]
+		});
+	});
+}
+
+/* ---------- blocked IPs ---------- */
+function snBans(){
+	snAjax('get_bans', {}, function(m){
+		if(!m) return;
+		var isi = m.aktif || [];
+		var gabung = {};
+		for(var i = 0; i < isi.length; i++){
+			gabung[isi[i].ip] = {
+				ip: isi[i].ip, kind: isi[i].kind || '-', score: isi[i].score || 0,
+				offenses: isi[i].offenses || 1, sisa: isi[i].sisa || 0,
+				reason: isi[i].reason || '-'
+			};
+		}
+		for(var j = 0; j < (m.set_ban || []).length; j++){
+			if(!gabung[m.set_ban[j]]) gabung[m.set_ban[j]] = {ip: m.set_ban[j], kind: '-', score: 0, offenses: 0, sisa: 0, reason: 'in ban ipset'};
+		}
+		var baris = '';
+		for(var ip in gabung){
+			var b = gabung[ip];
+			baris += '<tr><td class="sn-mono">' + ip + '</td>'
+				+ '<td>' + (b.kind || '-') + '</td>'
+				+ '<td class="r sn-sc ' + kelasSkor(b.score) + '">' + (b.score || '-') + '</td>'
+				+ '<td class="r">' + (b.offenses || 1) + '</td>'
+				+ '<td class="r">' + (b.sisa > 0 ? b.sisa + ' s' : '-') + '</td>'
+				+ '<td class="sn-clip" title="' + String(b.reason).replace(/"/g, '') + '"><span class="sn-ell">' + b.reason + '</span></td>'
+				+ '<td><span class="sn-btn dgr" onclick="snUnban(\'' + ip + '\')">Unblock</span></td></tr>';
+		}
+		if(baris){ $('#tbBans').html(baris); }
+		else { kosong('#tbBans', 7, 'No IP is currently blocked.'); }
+	});
+}
+function snBan(){
+	var ip = $('#banIP').val().trim();
+	if(!ip){ layer.msg('Alamat IP belum diisi', {time:2000}); return; }
+	snAjax('ban_ip', {ip: ip, secs: $('#banDetik').val().trim()}, function(m){
+		if(m){ layer.msg(m, {time:2500}); $('#banIP').val(''); $('#banDetik').val(''); snBans(); }
+	});
+}
+function snUnban(ip){
+	layer.confirm('Unblock ' + ip + '?', function(idx){
+		layer.close(idx);
+		snAjax('unban_ip', {ip: ip}, function(m){ if(m){ layer.msg(m, {time:2500}); snBans(); } });
+	});
+}
+
+/* ---------- monitored sites ---------- */
+function snSitus(){
+	snAjax('get_sites', {}, function(m){
+		if(!m) return;
+		var b = '';
+		for(var i = 0; i < m.situs.length; i++){
+			var s = m.situs[i];
+			var st = s.status == '1' ? 'active' : 'stopped';
+			b += '<tr><td>' + s.name + '</td>'
+				+ '<td class="sn-mono sn-clip"><span class="sn-ell">' + s.path + '</span></td>'
+				+ '<td>' + st + '</td>'
+				+ '<td>' + (s.dipantau ? '<span class="sn-badge sn-ok">yes</span>' : '<span class="sn-badge sn-off">no</span>') + '</td>'
+				+ '<td class="r">' + s.baris + '</td></tr>';
+		}
+		if(b){ $('#tbSitus').html(b); } else { kosong('#tbSitus', 5, 'Tidak ada situs di panel.'); }
+		var lain = m.lainnya || [];
+		$('#situsLain').text(lain.length
+			? 'Log yang ditail tapi tidak terdaftar sebagai situs: ' + lain.join(', ') + '.'
+			: 'Semua log yang ditail berasal dari situs terdaftar.');
+	});
+}
+
+/* ---------- allow list ---------- */
+function snAllowMuat(){
+	snAjax('get_allow', {}, function(m){
+		if(!m) return;
+		var b = '';
+		for(var i = 0; i < m.daftar.length; i++){
+			b += '<tr><td class="sn-mono">' + m.daftar[i] + '</td>'
+				+ '<td><span class="sn-btn dgr" onclick="snDelAllow(\'' + m.daftar[i] + '\')">Remove</span></td></tr>';
+		}
+		if(b){ $('#tbAllow').html(b); } else { kosong('#tbAllow', 2, 'Allow list ZySentinel kosong. Tambahkan jika ada backend sah yang sering mendapat 401.'); }
+		var p = '';
+		for(var j = 0; j < m.panel.length; j++){
+			p += '<tr><td class="sn-mono">' + m.panel[j] + '</td><td>aapanel.ipv4.whitelist</td></tr>';
+		}
+		if(p){ $('#tbPanel').html(p); } else { kosong('#tbPanel', 2, 'Daftar putih panel kosong.'); }
+	});
+}
+function snAllow(){
+	var ip = $('#allowIP').val().trim();
+	if(!ip){ layer.msg('Alamat IP belum diisi', {time:2000}); return; }
+	snAjax('allow_ip', {ip: ip}, function(m){
+		if(m){ layer.msg(m, {time:2500}); $('#allowIP').val(''); snAllowMuat(); }
+	});
+}
+function snDelAllow(ip){
+	layer.confirm('Remove ' + ip + ' from allow list? Ban sebelumnya untuk IP ini akan berlaku lagi.', function(idx){
+		layer.close(idx);
+		snAjax('del_allow', {ip: ip}, function(m){ if(m){ layer.msg(m, {time:2500}); snAllowMuat(); } });
+	});
+}
+
+/* ---------- event feed ---------- */
+function snFeed(){
+	snAjax('get_events', {limit: 300}, function(m){
+		if(!m) return;
+		var b = '';
+		for(var i = 0; i < m.length; i++){
+			var e = m[i];
+			/* IP bisa kosong pada baris lama (host/path '-'). Tombol aksi
+			   hanya muncul bila IP-nya sah, supaya tidak menawarkan aksi
+			   yang pasti gagal. */
+			var ip = String(e.ip || '').replace(/[^0-9.]/g, '');
+			var aksi = ip
+				? '<td class="sn-fl" style="flex-wrap:nowrap">'
+					+ '<span class="sn-btn pri" onclick="snFeedAllow(\'' + ip + '\')">Allow</span>'
+					+ '<span class="sn-btn dgr" onclick="snFeedBan(\'' + ip + '\')">Block</span>'
+					+ '</td>'
+				: '<td class="sn-refresh">-</td>';
+			b += '<tr><td class="sn-mono">' + waktu(e.ts) + '</td>'
+				+ '<td class="sn-mono">' + e.ip + '</td>'
+				+ '<td><span class="sn-lv ' + kelasLevel(e.level) + '">' + teksLevel(e.level) + '</span></td>'
+				+ '<td>' + e.kind + '</td>'
+				+ '<td class="r sn-sc ' + kelasSkor(e.score) + '">' + e.score + '</td>'
+				+ '<td>' + (e.host || '-') + '</td>'
+				+ '<td class="sn-mono sn-clip" title="' + String(e.path||'').replace(/"/g,'') + '"><span class="sn-ell">' + (e.path || '-') + '</span></td>'
+				+ '<td class="sn-clip" title="' + String(e.ua||'').replace(/"/g,'') + '"><span class="sn-ell">' + (e.ua || '-') + '</span></td>'
+				+ aksi + '</tr>';
+		}
+		if(b){ $('#tbFeed').html(b); } else { kosong('#tbFeed', 9, 'No event recorded yet.'); }
+	});
+}
+
+/* Aksi langsung dari Event Feed: blokir atau izinkan satu IP tanpa
+   harus pindah tab. Keduanya memakai endpoint yang sama dengan tab
+   Firewall (ban_ip / allow_ip), lalu menyegarkan feed dan tabel
+   Firewall supaya keadaannya tetap sinkron. */
+function snFeedBan(ip){
+	layer.confirm('Blokir ' + ip + ' sekarang? IP akan masuk daftar ban '
+		+ 'ZySentinel dan diblokir di kernel.', function(idx){
+		layer.close(idx);
+		snAjax('ban_ip', {ip: ip}, function(m){
+			if(m){
+				layer.msg(m, {time:3000});
+				snFeed(); snBans(); snFwrMuat(); snStatus();
+			}
+		});
+	});
+}
+function snFeedAllow(ip){
+	layer.confirm('Izinkan ' + ip + '? IP akan masuk daftar putih dan tidak '
+		+ 'pernah diblokir, serta langsung dicabut dari set ban.', function(idx){
+		layer.close(idx);
+		snAjax('allow_ip', {ip: ip}, function(m){
+			if(m){
+				layer.msg(m, {time:3000});
+				snFeed(); snAllowMuat(); snFwrMuat(); snBans();
+			}
+		});
+	});
+}
+
+/* ---------- IP timeline ---------- */
+function snRiwayat(){
+	snAjax('get_timeline', {hours: 24}, function(m){
+		if(!m) return;
+		var b = '';
+		for(var i = 0; i < m.length; i++){
+			var r = m[i];
+			b += '<tr><td class="sn-mono">' + r.ip + '</td>'
+				+ '<td class="r">' + r.n + '</td>'
+				+ '<td class="r sn-sc ' + kelasSkor(r.puncak) + '">' + r.puncak + '</td>'
+				+ '<td class="sn-mono">' + waktu(r.terakhir) + '</td>'
+				+ '<td><span class="sn-btn" onclick="snIsiBan(\'' + r.ip + '\')">Block</span></td></tr>';
+		}
+		if(b){ $('#tbRiwayat').html(b); } else { kosong('#tbRiwayat', 5, 'Tidak ada IP dengan skor lebih dari nol dalam 24 jam terakhir.'); }
+	});
+}
+function snIsiBan(ip){
+	/* Dipakai dari tab lain (misalnya daftar penyerang per vhost).
+	   Dialihkan ke tab Blocked IPs supaya IP itu terlihat di form ban,
+	   bukan terkubur di tabel yang sedang dibaca. */
+	$('#banIP').val(ip);
+	$('#top-dash .sn-tabs span').removeClass('on');
+	$('#top-dash .sn-tabs span').eq(0).addClass('on');
+	$('#top-dash .sn-subpage').removeClass('on');
+	$('#sub-bans').addClass('on');
+	SN_SUB.aktif = 'bans';
+	layer.msg('IP ' + ip + ' masuk form ban. Tekan Block Now untuk memblokir.', {time:3000});
+}
+
+/* ---------- settings ---------- */
+var SN_BIDANG = [
+	['watch_score', 'Watch Threshold', 'Mulai dicatat sebagai diawasi'],
+	['throttle_score', 'Rate Limit Threshold', 'Masuk daftar throttle 5 permintaan per detik'],
+	['ban_score', 'Block Threshold', 'Masuk daftar blokir penuh']
+];
+var SN_BOBOT = [
+	['weight_scan', 'Scanner Path Weight'],
+	['weight_brute', 'Login Attempt Weight'],
+	['weight_badua', 'Suspicious User Agent Weight'],
+	['weight_distinct', 'Distinct 4xx Path Weight'],
+	['cap_scan', 'Scanner Counter Cap'],
+	['cap_brute', 'Login Counter Cap'],
+	['cap_badua', 'User Agent Counter Cap'],
+	['cap_distinct', 'Path Counter Cap'],
+	['ban_seconds', 'Block Duration (seconds)'],
+	['ban_seconds_max', 'Max Block Duration (seconds)'],
+	['max_ips', 'Max IPs Tracked']
+];
+
+function snConf(){
+	snAjax('get_conf', {}, function(m){
+		if(!m) return;
+		var b = '';
+		for(var i = 0; i < SN_BIDANG.length; i++){
+			var k = SN_BIDANG[i][0];
+			b += '<tr><td>' + SN_BIDANG[i][1] + '<div style="font-weight:400;color:#9aa0a6;font-size:11.5px">' + SN_BIDANG[i][2] + '</div></td>'
+				+ '<td style="width:130px"><input class="sn-inp" style="width:100%" id="c_' + k + '" value="' + (m[k] === undefined ? '' : m[k]) + '"></td>'
+				+ '<td style="width:90px"><span class="sn-btn pri" onclick="snSimpan(\'' + k + '\')">Save</span></td></tr>';
+		}
+		$('#tbAmbang').html(b);
+		var c = '';
+		for(var j = 0; j < SN_BOBOT.length; j++){
+			var k2 = SN_BOBOT[j][0];
+			c += '<tr><td>' + SN_BOBOT[j][1] + '</td>'
+				+ '<td style="width:130px"><input class="sn-inp" style="width:100%" id="c_' + k2 + '" value="' + (m[k2] === undefined ? '' : m[k2]) + '"></td>'
+				+ '<td style="width:90px"><span class="sn-btn pri" onclick="snSimpan(\'' + k2 + '\')">Save</span></td></tr>';
+		}
+		$('#tbBobot').html(c);
+	});
+}
+function snSimpan(k){ snSetConf(k, $('#c_' + k).val(), $('#c_' + k)); }
+function snSetConf(k, v, el){
+	snAjax('set_conf', {key: k, value: v}, function(m){
+		if(m){ layer.msg(m, {time:3000}); snConf(); snStatus(); }
+	});
+}
+function snSvc(aksi){
+	snAjax('service_action', {action: aksi}, function(m){
+		if(m){ layer.msg(m, {time:2500}); setTimeout(snStatus, 2500); }
+	});
+}
+
+/* ---------- rate limits ---------- */
+var SN_LAJU = [
+	['throttle_rps', 'rps', 'requests per second'],
+	['throttle_burst', 'burst', 'extra requests allowed at once'],
+	['throttle_rpm', 'rpm', 'requests per minute']
+];
+
+function rpmOtomatis(){
+	var rps = parseInt($('#c_throttle_rps').val(), 10);
+	if(isNaN(rps) || rps < 1) return '';
+	return String(rps * 60);
+}
+function snLaju(){
+	snAjax('get_conf', {}, function(m){
+		if(!m) return;
+		var b = '';
+		for(var i = 0; i < SN_LAJU.length; i++){
+			var k = SN_LAJU[i][0];
+			var nilai = (m[k] === undefined || m[k] === null) ? '' : m[k];
+			b += '<tr><td style="width:190px"><b>' + SN_LAJU[i][1] + '</b>'
+				+ '<div style="font-weight:400;color:#9aa0a6;font-size:11.5px">' + SN_LAJU[i][2] + '</div></td>'
+				+ '<td style="width:130px"><input class="sn-inp" style="width:100%" id="c_' + k + '" value="' + nilai + '"></td>'
+				+ '<td style="width:96px"><span class="sn-btn pri" onclick="snSimpan(\'' + k + '\')">Save</span></td></tr>';
+		}
+		$('#tbLaju').html(b);
+		/* rpm diisi ulang dengan hasil perkalian saat tabel dibangun,
+		   supaya kolom rpm tidak pernah tampak kosong. */
+		var otomatis = rpmOtomatis();
+		if(otomatis !== ''){ $('#c_throttle_rpm').val(otomatis).attr('data-otomatis', otomatis); }
+		snContoh();
+	});
+}
+function rpmIkuti(){
+	var f = $('#c_throttle_rpm');
+	if(!f.length) return;
+	var kandidat = rpmOtomatis();
+	if(kandidat === '') return;
+	var sekarang = parseInt(f.val(), 10);
+	var lama = parseInt(f.attr('data-otomatis'), 10);
+	/* Ditimpa hanya kalau nilai sekarang masih sama dengan hasil
+	   otomatis sebelumnya. Kalau operator sudah mengetiknya sendiri,
+	   kerjaannya tidak boleh hilang diam-diam. */
+	if(isNaN(sekarang) || (isNaN(lama) ? true : sekarang === lama)){
+		f.val(kandidat);
+	}
+	f.attr('data-otomatis', kandidat);
+	snContoh();
+}
+function snContoh(){
+	var rps = parseInt($('#c_throttle_rps').val(), 10);
+	var rpm = parseInt($('#c_throttle_rpm').val(), 10);
+	if(isNaN(rps)) rps = 0;
+	if(isNaN(rpm)) rpm = 0;
+	var baris = '';
+	if(rps > 0 && rpm > 0){
+		baris += '<tr><td>' + rps + ' rps</td><td>' + rpm + ' rpm</td>'
+			+ '<td>burst dibatasi ' + rps + '/detik, total dibatasi ' + rpm + '/menit</td></tr>';
+	}
+	if(rpm > 0 && rps > 0 && rpm <= rps){
+		baris += '<tr><td colspan="3" style="color:#e53e3e">Warning: rpm (' + rpm
+			+ ') is lower than or equal to rps (' + rps + '). The per-second rule '
+			+ 'always limits first, so the per-minute rule never takes effect.</td></tr>';
+	}
+	if(rpm > 0 && rps > 0 && rpm === rps * 60){
+		baris += '<tr><td colspan="3" style="color:#e53e3e">Note: rpm (' + rpm
+			+ ') is exactly rps x 60 (' + rps + ' x 60). Both rules are therefore '
+			+ 'identical and the per-minute rule adds nothing. Enter a different rpm '
+			+ 'if you want to cap sustained traffic separately.</td></tr>';
+	}
+	if(rpm === 0){
+		baris += '<tr><td colspan="3">Aturan per menit dimatikan (rpm = 0). Hanya rps yang berlaku.</td></tr>';
+	}
+	$('#tbContoh').html(baris || '<tr><td colspan="3" class="sn-empty">isi nilai rps</td></tr>');
+}
+
+/* ---------- panic ---------- */
+function snPanicMuat(){
+	snAjax('get_panic', {}, function(m){
+		if(!m) return;
+		var lencana = $('#bPanic');
+		if(m.aktif){
+			lencana.text('panic: ACTIVE');
+			lencana.attr('class', 'sn-badge sn-bad');
+			$('#pnKondisi').removeClass('warn dgr').addClass('dgr')
+				.css('background', '#ffebee').css('border-color', '#ef9a9a');
+			$('#pnKondisi').html('<b>PANIC AKTIF.</b> Seluruh akses web diblokir'
+				+ (m.ports ? ' pada port <span class="sn-mono">' + m.ports + '</span>' : '')
+				+ (m.since ? ' sejak ' + m.since : '') + '. '
+				+ 'Yang masih bisa diakses: SSH, port panel, whitelist, dan jaringan privat.');
+			$('#pnRules').text((m.baris && m.baris.length) ? m.baris.join('\n') : 'aturan tidak terbaca');
+		} else {
+			lencana.text('panic: off');
+			lencana.attr('class', 'sn-badge sn-ok');
+			$('#pnKondisi').removeClass('warn dgr').css('background', '#fff8e1').css('border-color', '#ffe082');
+			$('#pnKondisi').html('<b>Panic tidak aktif.</b> Semua situs dapat diakses normal. '
+				+ 'Menyalakan panic akan memblokir <b>seluruh akses web</b> di server ini, '
+				+ 'bukan hanya satu situs.');
+			$('#pnRules').text('not active');
+		}
+	});
+}
+function snPanic(){
+	snAjax('get_panic', {}, function(m){
+		if(!m) return;
+		if(m.aktif){ snUnpanic(); return; }
+		var daftar = '<ul style="margin:8px 0 0 18px">'
+			+ '<li>Semua situs di server ini akan <b>tidak dapat diakses</b>.</li>'
+			+ '<li>Yang tetap jalan: SSH, port panel, whitelist, jaringan privat.</li>'
+			+ '<li>Database dan service internal tidak ikut diblokir.</li>'
+			+ '<li>Untuk mencabut: tombol di halaman ini, atau dari server jalankan '
+			+ '<span class="sn-mono">sentinel-fw.sh panic-off</span>.</li></ul>'
+			+ '<div style="margin-top:9px">Type <b>PANIC</b> below to confirm:</div>'
+			+ '<input id="pnKonf" class="sn-inp" style="width:150px;margin-top:5px" placeholder="PANIC">';
+		/* Indeks dialog disimpan supaya snTutup() bisa menutup tepat
+		   dialog ini. shadeClose:false karena tidak boleh keliru
+		   menutup dialog panel lain. */
+		SN_PANIC_LAYER = layer.open({
+			type: 1, title: 'Enable panic?', shadeClose: false, area: ['520px', 'auto'],
+			content: '<div style="padding:16px;font-size:13px">' + daftar + '</div>',
+			btn: ['Enable Panic', 'Cancel'],
+			yes: function(i){
+				var v = ($('#pnKonf').val() || '').trim();
+				if(v !== 'PANIC'){
+					layer.msg('Harus mengetik PANIC dengan huruf besar semua', {time:3000});
+					return false;
+				}
+				layer.close(i);
+				SN_PANIC_LAYER = null;
+				layer.msg('memproses, tunggu sebentar', {time: 0, shade: [0.3, '#000']});
+				snAjax('set_panic', {action: 'on', confirm: v}, function(r){
+					layer.closeAll('loading');
+					if(r){ layer.msg(r, {time:4500}); snPanicMuat(); snStatus(); }
+				});
+				return false;
+			}
+		});
+	});
+}
+function snUnpanic(){
+	layer.confirm('Cabut panic dan buka kembali seluruh akses web?', function(idx){
+		layer.close(idx);
+		layer.msg('memproses, tunggu sebentar', {time: 0, shade: [0.3, '#000']});
+		snAjax('set_panic', {action: 'off'}, function(r){
+			layer.closeAll('loading');
+			if(r){ layer.msg(r, {time:3500}); snPanicMuat(); snStatus(); }
+		});
+	});
+}
+
+/* ---------- kernel ---------- */
+/* snFwMuat hanya MEMBACA aturan. Jangan sampai namanya tertukar dengan
+   snFw(aksi) di bawah: dua-duanya pernah dipanggil dari onclick, dan
+   mencampurkannya membuat tombol "Reinstall Rules" hanya menampilkan
+   informasi tanpa menjalankan apa pun. */
+function snParseIptablesRule(line){
+	var action = 'PASS';
+	var actionBadge = '<span class="sn-tag ok">RETURN</span>';
+	if(line.indexOf('-j DROP') !== -1){
+		action = 'DROP';
+		actionBadge = '<span class="sn-tag crit">DROP</span>';
+	} else if(line.indexOf('-j RETURN') !== -1){
+		action = 'RETURN';
+		actionBadge = '<span class="sn-tag ok">RETURN (PASS)</span>';
+	} else if(line.indexOf('-j ACCEPT') !== -1){
+		action = 'ACCEPT';
+		actionBadge = '<span class="sn-tag ok">ACCEPT</span>';
+	} else if(line.indexOf('-j REJECT') !== -1){
+		action = 'REJECT';
+		actionBadge = '<span class="sn-tag crit">REJECT</span>';
+	} else if(line.indexOf('-j LOG') !== -1){
+		action = 'LOG';
+		actionBadge = '<span class="sn-tag warn">LOG</span>';
+	}
+
+	var protoPort = '<span class="sn-tag off">ALL</span>';
+	var protoMatch = line.match(/-p\s+(\w+)/);
+	var portMatch = line.match(/--dports?\s+([\d,:-]+)/);
+	if(protoMatch){
+		var pr = protoMatch[1].toUpperCase();
+		protoPort = '<span class="sn-tag proto">' + pr + '</span>';
+		if(portMatch){
+			protoPort += ' <span class="sn-tag port">' + portMatch[1] + '</span>';
+		}
+	} else if(portMatch){
+		protoPort = '<span class="sn-tag port">' + portMatch[1] + '</span>';
+	}
+
+	var criteria = '<span class="sn-refresh">Universal Match</span>';
+	var matchSet = line.match(/--match-set\s+([^\s]+)\s+(src|dst)/);
+	var srcMatch = line.match(/-s\s+([^\s]+)/);
+	var dstMatch = line.match(/-d\s+([^\s]+)/);
+	var connlim = line.match(/--connlimit-above\s+(\d+)/);
+	var hashlim = line.match(/--hashlimit-upto\s+([^\s]+)/);
+
+	if(matchSet){
+		criteria = '<span class="sn-mono" style="font-size:11px">ipset: <b>' + matchSet[1] + '</b> (' + matchSet[2] + ')</span>';
+	} else if(srcMatch){
+		criteria = '<span class="sn-mono" style="font-size:11px">src: <b>' + srcMatch[1] + '</b></span>';
+	} else if(dstMatch){
+		criteria = '<span class="sn-mono" style="font-size:11px">dst: <b>' + dstMatch[1] + '</b></span>';
+	} else if(connlim){
+		criteria = '<span class="sn-tag warn">> ' + connlim[1] + ' conns / IP</span>';
+	} else if(hashlim){
+		criteria = '<span class="sn-tag proto">&le; ' + hashlim[1] + '</span>';
+	}
+
+	var comment = (line.match(/--comment\s+"([^"]+)"/) || [])[1] || '';
+	var title = 'Kernel Netfilter Filter';
+	var desc = 'Evaluasi aturan rantai kernel netfilter.';
+
+	if(comment === 'sentinel:intel-drop'){
+		title = 'Global Threat Intelligence Feed (Spamhaus)';
+		desc = 'Blokir instan seluruh lalu lintas dari IP/CIDR botnet dan sindikat kejahatan siber global.';
+	} else if(comment === 'sentinel:ban-drop'){
+		title = 'ZySentinel Active Penalty Bans';
+		desc = 'Blokir paket dari penyerang brute-force, web scanner, atau eksploitasi aktif.';
+	} else if(comment === 'sentinel:review'){
+		title = 'ZySentinel Review Allow Bypass';
+		desc = 'Daftar IP dalam peninjauan verifikasi dilewati sementara dari pemblokiran agresif.';
+	} else if(comment === 'sentinel:throttle-drop'){
+		title = 'ZySentinel Rate-Limit Enforcer';
+		desc = 'Potong paket permintaan yang melebihi batas burst frekuensi tinggi ke port web.';
+	} else if(comment === 'sentinel:syn-guard'){
+		title = 'Anti-SYN Flood DDoS Guard';
+		desc = 'Mencegah kehabisan buffer koneksi TCP akibat flooding paket SYN dari sumber yang sama.';
+	} else if(comment === 'sentinel:conn-guard'){
+		title = 'Web Connection Flooding Protection';
+		desc = 'Batasi konkurensi koneksi baru port 80/443 per alamat IP guna mencegah soket exhaustion.';
+	} else if(comment === 'sentinel:global-fuse'){
+		title = 'Global DDoS Circuit Breaker (Fuse)';
+		desc = 'Sekring darurat kernel jika total request server melampaui batas toleransi ekstrem.';
+	} else if(line.indexOf('aapanel.ipv4.whitelist') !== -1){
+		title = 'aaPanel Trusted Admin Whitelist';
+		desc = 'Melewati seluruh filter kernel untuk alamat IP administrator dan panel aaPanel.';
+	} else if(line.indexOf('127.0.0.0/8') !== -1 || line.indexOf('10.0.0.0/8') !== -1 || line.indexOf('172.16.0.0/12') !== -1 || line.indexOf('192.168.0.0/16') !== -1 || line.indexOf('169.254.0.0/16') !== -1){
+		title = 'Local & Private Subnet Safe Pass';
+		desc = 'Menjamin lalu lintas loopback internal server dan jaringan privat lokal tidak pernah terganggu.';
+	} else if(srcMatch && line.indexOf('-j RETURN') !== -1){
+		title = 'Whitelisted Host Bypass';
+		desc = 'Pengecualian khusus untuk alamat IP ' + srcMatch[1] + ' agar selalu diizinkan lolos.';
+	} else if(hashlim && line.indexOf('-j RETURN') !== -1){
+		title = 'Traffic Rate Normalization Pass';
+		desc = 'Trafik web dengan laju normal (di bawah batas ambang) diizinkan melintas ke aplikasi.';
+	} else if(line === '-A SENTINEL -j RETURN'){
+		title = 'Default Chain Fallback (Clean Traffic Pass)';
+		desc = 'Paket yang bersih dari seluruh kriteria ancaman di atas diizinkan melanjutkan ke aplikasi tujuan.';
+	}
+
+	return {
+		action: action,
+		actionBadge: actionBadge,
+		protoPort: protoPort,
+		criteria: criteria,
+		title: title,
+		desc: desc
+	};
+}
+
+function snFwMuat(){
+	snAjax('get_fw', {}, function(m){
+		if(!m) return;
+
+		/* 1. Urutan dalam Rantai INPUT */
+		if(m.urutan_input && m.urutan_input.length > 0){
+			var uHtml = '<div style="display:flex;flex-direction:column;gap:5px">';
+			for(var u = 0; u < m.urutan_input.length; u++){
+				var rawU = m.urutan_input[u];
+				var num = rawU.split(':')[0] || (u + 1);
+				var rest = rawU.replace(/^[0-9]+:/, '').trim();
+				var badgeColor = rest.indexOf('SENTINEL') !== -1 ? 'ok' : (rest.indexOf('IN_BT') !== -1 ? 'proto' : 'off');
+				uHtml += '<div style="display:flex;align-items:center;gap:8px;font-size:12px;background:rgba(255,255,255,0.03);padding:4px 8px;border-radius:4px;border:1px solid rgba(255,255,255,0.06)">'
+					+ '<span class="sn-tag off" style="min-width:24px;text-align:center">#' + num + '</span>'
+					+ '<span class="sn-tag ' + badgeColor + '">' + (rest.indexOf('SENTINEL') !== -1 ? 'ZY-SENTINEL' : (rest.indexOf('IN_BT') !== -1 ? 'aaPanel IN_BT' : 'RULE')) + '</span>'
+					+ '<span class="sn-mono" style="color:var(--muted);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">' + rest + '</span>'
+					+ '</div>';
+			}
+			uHtml += '</div>';
+			$('#fwUrutanBox').html(uHtml);
+		} else {
+			$('#fwUrutanBox').html('<div class="sn-refresh">Rantai INPUT tidak terbaca</div>');
+		}
+
+		/* 2. Isi Kernel IPSet */
+		var sHtml = '<div style="display:flex;flex-wrap:wrap;gap:6px">';
+		var adaSet = false;
+		for(var k in (m.jumlah_set || {})){
+			adaSet = true;
+			var cnt = m.jumlah_set[k];
+			var clr = (k.indexOf('ban') !== -1) ? 'crit' : ((k.indexOf('throttle') !== -1) ? 'warn' : 'proto');
+			sHtml += '<div class="sn-tag ' + clr + '" style="font-size:12px;padding:4px 8px">'
+				+ '<b>' + k + '</b>: ' + cnt + ' entri'
+				+ '</div>';
+		}
+		if(!adaSet) sHtml += '<span class="sn-refresh">Belum ada kernel set aktif</span>';
+		sHtml += '</div>';
+		$('#fwSetBox').html(sHtml);
+
+		/* 3. Penghitung Paket Keamanan */
+		if(m.penghitung && m.penghitung.length > 0){
+			var hHtml = '<div style="display:flex;flex-direction:column;gap:4px">';
+			for(var c = 0; c < m.penghitung.length; c++){
+				var hitStr = m.penghitung[c].trim();
+				var hitParts = hitStr.split(/\s+/);
+				var pkts = hitParts[0] || '0';
+				var bytes = hitParts[1] || '0';
+				var cmt = (hitStr.match(/comment "([^"]+)"/) || [])[1] || hitParts.slice(2).join(' ');
+				hHtml += '<div style="display:flex;align-items:center;justify-content:space-between;font-size:11.5px;padding:3px 6px;background:rgba(255,255,255,0.02);border-radius:4px">'
+					+ '<span class="sn-mono" style="color:var(--ink)"><b>' + cmt + '</b></span>'
+					+ '<span class="sn-tag off">' + pkts + ' pkts / ' + bytes + ' B</span>'
+					+ '</div>';
+			}
+			hHtml += '</div>';
+			$('#fwHitBox').html(hHtml);
+		} else {
+			$('#fwHitBox').html('<div class="sn-refresh">Belum ada hit counter aktif</div>');
+		}
+
+		/* 4. Tabel Terstruktur Rantai SENTINEL */
+		var chain = m.chain || [];
+		var rows = '';
+		var ruleIdx = 0;
+		for(var i = 0; i < chain.length; i++){
+			var line = chain[i].trim();
+			if(!line || line.indexOf('-N ') === 0) continue;
+			ruleIdx++;
+			var ruleInfo = snParseIptablesRule(line);
+			rows += '<tr>'
+				+ '<td class="sn-mono" style="color:var(--muted)">' + ruleIdx + '</td>'
+				+ '<td>' + ruleInfo.actionBadge + '</td>'
+				+ '<td>' + ruleInfo.protoPort + '</td>'
+				+ '<td>' + ruleInfo.criteria + '</td>'
+				+ '<td>'
+					+ '<div style="font-weight:600;color:var(--ink)">' + ruleInfo.title + '</div>'
+					+ '<div style="font-size:11.5px;color:var(--muted);margin-top:2px">' + ruleInfo.desc + '</div>'
+					+ '<div class="sn-rule-raw" title="Perintah asli iptables">' + line + '</div>'
+				+ '</td>'
+				+ '</tr>';
+		}
+		if(rows){
+			$('#tbChainRules').html(rows);
+		} else {
+			kosong('#tbChainRules', 5, 'Rantai pertahanan SENTINEL di tingkat kernel belum aktif.');
+		}
+	});
+}
+
+/* ---------- Port Access Control (Inbound & Outbound) ---------- */
+var SN_PORT_CUR_TAB = 'inbound';
+var SN_PORT_DATA = null;
+
+function snPortLoad(){
+	snAjax('get_port_firewall', {}, function(res){
+		if(!res) return;
+		SN_PORT_DATA = res;
+		var cfg = res.config || {};
+		var isActive = !!res.is_active || (cfg.active && (res.kernel_in_active || res.kernel_out_active));
+		var badge = $('#portFwStatusBadge');
+		if(cfg.active){
+			badge.text(isActive ? 'ACTIVE (ENFORCED)' : 'ENABLED (STANDBY)')
+				 .attr('class', 'sn-badge sn-ok')
+				 .attr('title', 'Port Firewall aktif di kernel. Klik untuk menonaktifkan.');
+		} else {
+			badge.text('DISABLED (BYPASS)')
+				 .attr('class', 'sn-badge sn-off')
+				 .attr('title', 'Port Firewall nonaktif (bypass). Klik untuk mengaktifkan.');
+		}
+
+		var inList = cfg.inbound || [];
+		var outList = cfg.outbound || [];
+		$('#countPortInbound').text('(' + inList.length + ')');
+		$('#countPortOutbound').text('(' + outList.length + ')');
+
+		var sshPort = cfg.detected_ssh_port || 2244;
+		var pnlPort = cfg.detected_panel_port || 15960;
+		$('#portFwSummary').html('<b>Deteksi Port Kritis:</b> SSH Port: <code>' + sshPort + '</code> | aaPanel Port: <code>' + pnlPort + '</code> | Kernel Inbound: <b>' + (res.kernel_in_active ? 'AKTIF' : 'NONAKTIF') + '</b> | Kernel Outbound: <b>' + (res.kernel_out_active ? 'AKTIF' : 'NONAKTIF') + '</b>');
+
+		snPortRender(SN_PORT_CUR_TAB);
+	});
+}
+
+function snPortTab(tab, el){
+	SN_PORT_CUR_TAB = tab;
+	$('#cardPortFw .sn-tabs span').removeClass('on');
+	$(el).addClass('on');
+	if(tab === 'inbound'){
+		$('#notePortInbound').show();
+		$('#notePortOutbound').hide();
+	} else {
+		$('#notePortInbound').hide();
+		$('#notePortOutbound').show();
+	}
+	snPortRender(tab);
+}
+
+function snPortRender(direction){
+	if(!SN_PORT_DATA || !SN_PORT_DATA.config){
+		$('#tbPortRules').html('<tr><td colspan="9" class="sn-empty">Memuat aturan...</td></tr>');
+		return;
+	}
+	var list = SN_PORT_DATA.config[direction] || [];
+	if(list.length === 0){
+		kosong('#tbPortRules', 9, 'Belum ada aturan ' + direction + '. Klik "+ Tambah Aturan Port" untuk menambahkan.');
+		return;
+	}
+	var h = '';
+	for(var i = 0; i < list.length; i++){
+		var r = list[i];
+		var dirBadge = (direction === 'inbound')
+			? '<span class="sn-tag proto">INBOUND</span>'
+			: '<span class="sn-tag warn">OUTBOUND</span>';
+		var actBadge = (r.action === 'ACCEPT')
+			? '<span class="sn-tag ok">ALLOW</span>'
+			: '<span class="sn-tag crit">DROP</span>';
+		var statusBadge = r.enabled
+			? '<span class="sn-badge sn-ok" style="cursor:pointer" onclick="snPortToggle(\'' + r.id + '\')" title="Klik untuk menonaktifkan">AKTIF</span>'
+			: '<span class="sn-badge sn-off" style="cursor:pointer" onclick="snPortToggle(\'' + r.id + '\')" title="Klik untuk mengaktifkan">OFF</span>';
+		var protoBadge = '<span class="sn-tag proto">' + (r.protocol || 'tcp').toUpperCase() + '</span>';
+		var portText = (r.port === 'all' || r.port === '1-65535')
+			? '<span class="sn-tag ok">SEMUA (1-65535)</span>'
+			: '<span class="sn-tag port">' + r.port + '</span>';
+		var targetNet = direction === 'inbound' ? (r.source || '0.0.0.0/0') : (r.dest || '0.0.0.0/0');
+		var targetDisplay = (targetNet === '0.0.0.0/0')
+			? '<span class="sn-refresh">Semua Alamat (0.0.0.0/0)</span>'
+			: '<span class="sn-mono"><code>' + targetNet + '</code></span>';
+		var systemTag = r.system ? '<span class="sn-tag ok" style="font-size:10px;margin-left:6px" title="Aturan standar baseline dilindungi">BASELINE</span>' : '';
+		var aksiBtn = r.system
+			? '<span class="sn-refresh" title="Aturan standar baseline dilindungi">-</span>'
+			: '<span class="sn-btn dgr" onclick="snPortDelete(\'' + r.id + '\',\'' + r.port + '\')">Hapus</span>';
+
+		h += '<tr>'
+			+ '<td class="sn-mono" style="color:var(--muted)">' + (i + 1) + '</td>'
+			+ '<td>' + dirBadge + '</td>'
+			+ '<td>' + protoBadge + '</td>'
+			+ '<td>' + portText + '</td>'
+			+ '<td>' + actBadge + '</td>'
+			+ '<td>' + targetDisplay + '</td>'
+			+ '<td><b>' + (r.remark || '-') + '</b>' + systemTag + '</td>'
+			+ '<td class="r">' + statusBadge + '</td>'
+			+ '<td class="r">' + aksiBtn + '</td>'
+			+ '</tr>';
+	}
+	$('#tbPortRules').html(h);
+}
+
+function snPortToggle(ruleId){
+	snAjax('toggle_port_rule', {id: ruleId}, function(res){
+		if(res){
+			layer.msg(res, {time: 2500});
+			snPortLoad();
+			snFwMuat();
+		}
+	});
+}
+
+function snPortDelete(ruleId, port){
+	layer.confirm('Hapus aturan port ' + port + '? Aturan ini akan dicabut dari konfigurasi dan kernel.', function(idx){
+		layer.close(idx);
+		snAjax('del_port_rule', {id: ruleId}, function(res){
+			if(res){
+				layer.msg(res, {time: 2500});
+				snPortLoad();
+				snFwMuat();
+			}
+		});
+	});
+}
+
+function snPortToggleGlobal(){
+	var cur = $('#portFwStatusBadge').text();
+	var pesan = cur.indexOf('ACTIVE') !== -1 || cur.indexOf('ENABLED') !== -1
+		? 'Nonaktifkan Port Firewall (Bypass)? Seluruh filter port masuk/keluar akan dilepas dari kernel.'
+		: 'Aktifkan Port Firewall? Kebijakan Inbound Whitelist & Outbound akan ditegakkan di kernel netfilter.';
+	layer.confirm(pesan, function(idx){
+		layer.close(idx);
+		snAjax('toggle_port_firewall_status', {}, function(res){
+			if(res){
+				layer.msg(res, {time: 3000});
+				snPortLoad();
+				snFwMuat();
+			}
+		});
+	});
+}
+
+function snPortResetConfirm(){
+	layer.confirm('Reset seluruh aturan port ke standar baseline preinstall?<br><br><b>Standar Baseline:</b><br>- Inbound: Izinkan hanya HTTP (80), HTTPS (443), SSH terdeteksi, dan port aaPanel terdeteksi.<br>- Outbound: Izinkan semua trafik keluar (Allow All).', {title: 'Konfirmasi Reset Port Firewall'}, function(idx){
+		layer.close(idx);
+		layer.msg('Mereset konfigurasi...', {time:0, shade:[0.3, '#000']});
+		snAjax('reset_port_firewall', {}, function(res){
+			layer.closeAll('loading');
+			if(res){
+				layer.msg(res, {time: 3500});
+				snPortLoad();
+				snFwMuat();
+			}
+		});
+	});
+}
+
+function snPortApplyKernel(){
+	layer.confirm('Terapkan dan pasang rantai aturan port ke kernel netfilter sekarang?', function(idx){
+		layer.close(idx);
+		layer.msg('Menerapkan aturan ke kernel...', {time:0, shade:[0.3, '#000']});
+		snAjax('apply_port_firewall', {}, function(res){
+			layer.closeAll('loading');
+			if(res){
+				layer.msg(res, {time: 3000});
+				snPortLoad();
+				snFwMuat();
+			}
+		});
+	});
+}
+
+function snPortRuleModal(){
+	var sshPort = (SN_PORT_DATA && SN_PORT_DATA.config && SN_PORT_DATA.config.detected_ssh_port) ? SN_PORT_DATA.config.detected_ssh_port : 2244;
+	var pnlPort = (SN_PORT_DATA && SN_PORT_DATA.config && SN_PORT_DATA.config.detected_panel_port) ? SN_PORT_DATA.config.detected_panel_port : 15960;
+
+	var modalHtml = '<div style="padding:18px 24px 20px;font-size:13px">'
+		+ '<div style="margin-bottom:12px">'
+			+ '<label style="font-weight:600;display:block;margin-bottom:6px">Arah Lalu Lintas (Direction):</label>'
+			+ '<select id="modPortDir" class="sn-inp" style="width:100%" onchange="snPortModalDirChange(this.value)">'
+				+ '<option value="inbound"' + (SN_PORT_CUR_TAB === 'inbound' ? ' selected' : '') + '>Inbound (Trafik Masuk ke Server)</option>'
+				+ '<option value="outbound"' + (SN_PORT_CUR_TAB === 'outbound' ? ' selected' : '') + '>Outbound (Trafik Keluar dari Server)</option>'
+			+ '</select>'
+		+ '</div>'
+		+ '<div style="margin-bottom:12px">'
+			+ '<label style="font-weight:600;display:block;margin-bottom:6px">Pintasan Port Cepat (Quick Preset):</label>'
+			+ '<div style="display:flex;flex-wrap:wrap;gap:6px">'
+				+ '<span class="sn-btn" onclick="snSetModPort(80,\'tcp\',\'Web HTTP Server\')">HTTP (80)</span>'
+				+ '<span class="sn-btn" onclick="snSetModPort(443,\'tcp\',\'Web HTTPS Server\')">HTTPS (443)</span>'
+				+ '<span class="sn-btn" onclick="snSetModPort(' + sshPort + ',\'tcp\',\'SSH Terminal\')">SSH (' + sshPort + ')</span>'
+				+ '<span class="sn-btn" onclick="snSetModPort(' + pnlPort + ',\'tcp\',\'aaPanel Panel\')">aaPanel (' + pnlPort + ')</span>'
+				+ '<span class="sn-btn" onclick="snSetModPort(3306,\'tcp\',\'MySQL / MariaDB\')">MySQL (3306)</span>'
+				+ '<span class="sn-btn" onclick="snSetModPort(5432,\'tcp\',\'PostgreSQL\')">Postgres (5432)</span>'
+				+ '<span class="sn-btn" onclick="snSetModPort(6379,\'tcp\',\'Redis In-Memory\')">Redis (6379)</span>'
+				+ '<span class="sn-btn" onclick="snSetModPort(53,\'tcp/udp\',\'DNS Service\')">DNS (53)</span>'
+			+ '</div>'
+		+ '</div>'
+		+ '<div class="sn-grid2" style="margin-bottom:12px;gap:12px">'
+			+ '<div>'
+				+ '<label style="font-weight:600;display:block;margin-bottom:6px">Nomor Port / Rentang:</label>'
+				+ '<input id="modPortNum" class="sn-inp" style="width:100%" placeholder="Contoh: 8080 atau 8000-8090">'
+			+ '</div>'
+			+ '<div>'
+				+ '<label style="font-weight:600;display:block;margin-bottom:6px">Protokol:</label>'
+				+ '<select id="modPortProto" class="sn-inp" style="width:100%">'
+					+ '<option value="tcp">TCP</option>'
+					+ '<option value="udp">UDP</option>'
+					+ '<option value="tcp/udp">TCP &amp; UDP</option>'
+					+ '<option value="all">ALL Protocols</option>'
+				+ '</select>'
+			+ '</div>'
+		+ '</div>'
+		+ '<div class="sn-grid2" style="margin-bottom:12px;gap:12px">'
+			+ '<div>'
+				+ '<label style="font-weight:600;display:block;margin-bottom:6px">Tindakan (Action):</label>'
+				+ '<select id="modPortAction" class="sn-inp" style="width:100%">'
+					+ '<option value="ACCEPT">ACCEPT (Izinkan)</option>'
+					+ '<option value="DROP">DROP (Tolak / Blokir)</option>'
+				+ '</select>'
+			+ '</div>'
+			+ '<div>'
+				+ '<label id="lblModPortNet" style="font-weight:600;display:block;margin-bottom:6px">Alamat Sumber IP / CIDR:</label>'
+				+ '<input id="modPortNet" class="sn-inp" style="width:100%" value="0.0.0.0/0" placeholder="0.0.0.0/0 atau 192.168.1.0/24">'
+			+ '</div>'
+		+ '</div>'
+		+ '<div style="margin-bottom:16px">'
+			+ '<label style="font-weight:600;display:block;margin-bottom:6px">Keterangan / Layanan (Remark):</label>'
+			+ '<input id="modPortRemark" class="sn-inp" style="width:100%" placeholder="Contoh: API Gateway Port 8080">'
+		+ '</div>'
+		+ '</div>';
+
+	layer.open({
+		type: 1,
+		title: 'Tambah Aturan Port Access Control',
+		area: ['540px', 'auto'],
+		content: modalHtml,
+		btn: ['Simpan & Terapkan', 'Batal'],
+		yes: function(idx){
+			var dir = $('#modPortDir').val();
+			var port = ($('#modPortNum').val() || '').trim();
+			var proto = $('#modPortProto').val();
+			var act = $('#modPortAction').val();
+			var net = ($('#modPortNet').val() || '0.0.0.0/0').trim();
+			var remark = ($('#modPortRemark').val() || '').trim();
+
+			if(!port){
+				layer.msg('Nomor port atau rentang port wajib diisi', {time: 2000});
+				return false;
+			}
+
+			var payload = {
+				direction: dir,
+				port: port,
+				protocol: proto,
+				action: act,
+				remark: remark
+			};
+			if(dir === 'inbound'){
+				payload.source = net;
+			} else {
+				payload.dest = net;
+			}
+
+			layer.close(idx);
+			layer.msg('Menyimpan aturan...', {time:0, shade:[0.3, '#000']});
+			snAjax('add_port_rule', payload, function(res){
+				layer.closeAll('loading');
+				if(res){
+					layer.msg(res, {time: 3000});
+					snPortLoad();
+					snFwMuat();
+				}
+			});
+			return false;
+		}
+	});
+}
+
+function snSetModPort(port, proto, remark){
+	$('#modPortNum').val(port);
+	if(proto) $('#modPortProto').val(proto);
+	if(remark && !$('#modPortRemark').val()) $('#modPortRemark').val(remark);
+}
+
+function snPortModalDirChange(val){
+	if(val === 'inbound'){
+		$('#lblModPortNet').text('Alamat Sumber IP / CIDR:');
+	} else {
+		$('#lblModPortNet').text('Alamat Tujuan IP / CIDR:');
+	}
+}
+
+function snFw(aksi){
+	var nama = {
+		install: 'Pasang ulang aturan kernel?',
+		flush: 'Kosongkan semua IP yang sedang diblokir dan dibatasi? Ban akan hilang.',
+		remove: 'Lepas semua aturan kernel ZySentinel?'
+	}[aksi];
+	if(!nama){ layer.msg('aksi tidak dikenal', {time:2000}); return; }
+	layer.confirm(nama, function(idx){
+		layer.close(idx);
+		snAjax('fw_action', {action: aksi}, function(m){
+			if(m){ layer.msg('selesai', {time:2000}); snFwAllMuat(); snStatus(); }
+		});
+	});
+}
+
+/* ---------- Tab Firewall ---------- */
+/* Memuat backend OS, port firewall (inbound & outbound), aturan kernel milik sentinel,
+   dan aturan terkelola (ban/allow/geo). Satu pemanggil supaya membuka
+   tab selalu menampilkan keadaan lengkap, bukan sebagian. */
+function snFwAllMuat(){
+	snFwBackendMuat();
+	snPortLoad();
+	snFwMuat();
+	snFwrMuat();
+	snAllowMuat();
+}
+
+/* --- kartu backend firewall OS --- */
+function snFwBackendMuat(){
+	snAjax('get_fw_backend', {}, function(m){
+		if(!m) return;
+		var l = $('#fwbBadge');
+		var nama = m.backend || '?';
+		if(nama === 'iptables-nft' || nama === 'iptables-legacy'){
+			l.text(nama); l.attr('class', 'sn-badge sn-ok');
+		} else if(nama === 'ufw-active' || nama === 'firewalld-active'){
+			l.text(nama); l.attr('class', 'sn-badge sn-warn');
+		} else {
+			l.text(nama); l.attr('class', 'sn-badge sn-bad');
+		}
+		var baris = [
+			['Backend', m.backend || '-'],
+			['Hook parent', m.hook || '-'],
+			['Binary', m.binary || '-'],
+			['ufw', m.ufw || 'tidak-terpasang'],
+			['firewalld', m.firewalld || 'tidak-terpasang'],
+			['Backend split', m.split || 'tidak-ada'],
+			['Hook in IN_BT', m.hook_in_bt || '-'],
+			['Hook in INPUT', m.hook_in_input || '-']
+		];
+		var h = '';
+		for(var i = 0; i < baris.length; i++){
+			h += '<div><span>' + baris[i][0] + '</span><span>' + baris[i][1] + '</span></div>';
+		}
+		$('#fwbInfo').html(h);
+	});
+}
+
+/* --- aturan terkelola: ban + allow + geo dalam satu tabel --- */
+function snFwrMuat(){
+	snAjax('get_fw_rules', {}, function(m){
+		if(!m) return;
+		var b = '';
+		for(var i = 0; i < m.length; i++){
+			var r = m[i];
+			var warna = r.type === 'ban' ? 'sn-bad'
+				: (r.type === 'allow' ? 'sn-ok' : 'sn-warn');
+			var sisa = (r.sisa > 0) ? (r.sisa + ' s') : (r.type === 'ban' ? 'permanen' : '-');
+			var hapus = (r.type === 'geo')
+				? '<span class="sn-btn dgr" onclick="snFwrGeoOff()">Turn off</span>'
+				: '<span class="sn-btn dgr" onclick="snFwrHapus(\'' + r.type + '\',\'' + r.rule + '\')">Remove</span>';
+			b += '<tr><td class="sn-mono">' + r.rule + '</td>'
+				+ '<td><span class="sn-badge ' + warna + '">' + r.type + '</span></td>'
+				+ '<td>' + (r.scope || '-') + '</td>'
+				+ '<td class="sn-clip"><span class="sn-ell">' + (r.reason || '-') + '</span></td>'
+				+ '<td class="r sn-mono">' + sisa + '</td>'
+				+ '<td>' + (r.sumber || '-') + '</td>'
+				+ '<td>' + hapus + '</td></tr>';
+		}
+		if(b){ $('#tbFwr').html(b); }
+		else { kosong('#tbFwr', 7, 'Belum ada aturan terkelola. Tambahkan ban, allow, atau blokir negara.'); }
+		snFwrRingkas(m);
+	});
+}
+function snFwrRingkas(m){
+	var n = { ban:0, allow:0, geo:0 };
+	for(var i = 0; i < m.length; i++){ n[m[i].type] = (n[m[i].type] || 0) + 1; }
+	$('#fwrRingkas').text('Total: ' + (n.ban||0) + ' ban, ' + (n.allow||0)
+		+ ' allow, ' + (n.geo||0) + ' geo.');
+}
+function snFwrBan(){
+	var ip = $('#fwrVal').val().trim();
+	if(!ip){ layer.msg('Alamat IP belum diisi', {time:2000}); return; }
+	snAjax('ban_ip', {ip: ip}, function(m){
+		if(m){ layer.msg(m, {time:3000}); $('#fwrVal').val(''); snFwrMuat(); snStatus(); }
+	});
+}
+function snFwrAllow(){
+	var ip = $('#fwrVal').val().trim();
+	if(!ip){ layer.msg('Alamat IP belum diisi', {time:2000}); return; }
+	snAjax('allow_ip', {ip: ip}, function(m){
+		if(m){ layer.msg(m, {time:3000}); $('#fwrVal').val(''); snFwrMuat(); snAllowMuat(); }
+	});
+}
+function snFwrHapus(tipe, nilai){
+	layer.confirm('Hapus aturan ' + tipe + ' untuk ' + nilai + '?', function(idx){
+		layer.close(idx);
+		var ep = (tipe === 'allow') ? 'del_allow' : 'unban_ip';
+		snAjax(ep, {ip: nilai}, function(m){
+			if(m){ layer.msg(m, {time:2500}); snFwrMuat(); snAllowMuat(); snStatus(); }
+		});
+	});
+}
+/* --- blokir negara dari tab Firewall --- */
+function snFwrGeoForm(){
+	var box = $('#fwrGeoBox');
+	if(box.is(':visible')){ box.hide(); return; }
+	box.html('loading').show();
+	snAjax('get_geo_list', {}, function(l){
+		if(!l){ box.html('gagal memuat daftar negara').show(); return; }
+		var o = '';
+		for(var i = 0; i < l.length; i++){
+			o += '<option value="' + l[i].kode + '">' + l[i].kode + ' (' + l[i].blok + ' blok)</option>';
+		}
+		box.html('<div class="sn-fl"><span class="sn-refresh">Country code</span>'
+			+ '<select id="fwrGeoKode" class="sn-inp" style="width:260px">' + o + '</select>'
+			+ '<span class="sn-btn pri" onclick="snFwrGeoOn()">Block</span>'
+			+ '<span class="sn-btn" onclick="snFwrGeoOff()">Unblock all</span>'
+			+ '<span class="sn-refresh" id="fwrGeoNote"></span></div>');
+		snAjax('get_geo_ban', {}, function(g){
+			if(!g){ return; }
+			$('#fwrGeoNote').text(g.mode === 'off'
+				? 'tidak ada negara diblokir'
+				: ('aktif: ' + g.mode + ', ' + g.blok + ' blok, negara: ' + (g.negara || '-')));
+		});
+	});
+}
+function snFwrGeoOn(){
+	var kode = $('#fwrGeoKode').val();
+	if(!kode){ layer.msg('Pilih negara dulu', {time:2000}); return; }
+	layer.confirm('Blokir seluruh negara ' + kode + ' di port web? '
+		+ 'Ini bisa memutus pengunjung sah dari sana. SSH dan panel tidak tersentuh.',
+		function(idx){
+			layer.close(idx);
+			layer.msg('menerapkan, tunggu sebentar', {time:0, shade:[0.3,'#000']});
+			snAjax('set_geo_ban', {action:'on', mode:'block', negara:kode, confirm:'GEO'},
+				function(m){
+					layer.closeAll('loading');
+					if(m){ layer.msg(m, {time:4000}); snFwrMuat(); $('#fwrGeoBox').hide(); }
+				});
+		});
+}
+function snFwrGeoOff(){
+	layer.confirm('Matikan geo-ban dan buka kembali semua negara?', function(idx){
+		layer.close(idx);
+		snAjax('set_geo_ban', {action:'off'}, function(m){
+			if(m){ layer.msg(m, {time:3000}); snFwrMuat(); $('#fwrGeoBox').hide(); }
+		});
+	});
+}
+
+/* ---------- daemon log ---------- */
+function snLog(){
+	snAjax('get_logs', {limit: 80}, function(m){
+		if(!m) return;
+		$('#preLog').text(m.join('\n'));
+	});
+}
+
+/* ---------- backend firewall ---------- */
+function snBackendLencana(){
+	snAjax('get_fw_backend', {}, function(m){
+		if(!m) return;
+		var l = $('#bBackend');
+		var nama = m.backend || '?';
+		/* ufw dan firewalld tidak terpasang di mesin ini, jadi lencana
+		   praktis selalu iptables-nft. Kalau suatu saat berubah, warnanya
+		   ikut berubah supaya langsung terlihat. */
+		if(nama === 'iptables-nft' || nama === 'iptables-legacy'){
+			l.text(nama); l.attr('class', 'sn-badge sn-ok');
+		} else if(nama === 'ufw-active' || nama === 'firewalld-active'){
+			l.text(nama); l.attr('class', 'sn-badge sn-warn');
+			l.attr('title', 'frontend lain aktif. ZySentinel menumpang di INPUT posisi 1, tidak menghapus aturan lain.');
+		} else {
+			l.text(nama); l.attr('class', 'sn-badge sn-bad');
+		}
+		if(m.split && m.split !== 'tidak-ada'){
+			l.attr('title', 'PERINGATAN: tabel INPUT berisi aturan di backend lain (' + m.split + '). Hook mungkin tidak tersentuh paket.');
+		}
+	});
+}
+
+/* ---------- WAF ---------- */
+function snWafLencana(){
+	snAjax('get_waf', {}, function(m){
+		if(!m) return;
+		var l = $('#bWaf');
+		var e = (m.engine && m.engine.nginx) || '?';
+		if(e === 'modsecurity' || e === 'coraza'){
+			l.text('waf: ' + e); l.attr('class', 'sn-badge sn-ok');
+		} else {
+			l.text('waf: off'); l.attr('class', 'sn-badge sn-off');
+			l.attr('title', 'nginx berjalan tanpa konektor WAF. Pilihan vhost hanya disimpan.');
+		}
+	});
+}
+
+function snWafMuat(){
+	snAjax('get_waf', {}, function(m){
+		if(!m) return;
+		var e = m.engine || {};
+		var ket = {
+			'none': 'TIDAK ADA konektor',
+			'modsecurity': 'ModSecurity aktif',
+			'coraza': 'Coraza aktif',
+			'tidak-terpasang': 'server TIDAK TERPASANG',
+			'terpasang-tanpa-waf': 'terpasang, tanpa konektor WAF',
+			'terpasang-dengan-waf': 'terpasang DENGAN konektor WAF'
+		};
+		$('#wafEngineNote').html(
+			'<b>nginx:</b> ' + (ket[e.nginx] || e.nginx) + '. '
+			+ '<b>apache:</b> ' + (ket[e.apache] || e.apache) + '. '
+			+ '<b>openlitespeed:</b> ' + (ket[e.openlitespeed] || e.openlitespeed) + '. '
+			+ 'Rule OWASP tersedia: ' + (e.owasp === 'ada' ? 'ya' : 'TIDAK') + '.');
+
+		var vh = '';
+		for(var i = 0; i < (m.vhosts || []).length; i++){
+			var v = m.vhosts[i];
+			var ingin = (m.ingin || {})['vhost.' + v.ws + '.' + v.site];
+			var tanda = '';
+			if(v.keadaan === 'on'){
+				tanda = '<span class="sn-badge sn-ok">on</span>';
+			} else if(ingin === 'on'){
+				tanda = '<span class="sn-badge sn-warn" title="disimpan, menunggu konektor">pending</span>';
+			} else {
+				tanda = '<span class="sn-badge sn-off">off</span>';
+			}
+			var tombol = v.keadaan === 'on'
+				? '<span class="sn-btn dgr" onclick="snWafVhost(\'' + v.ws + '\',\'' + v.site + '\',\'off\')">Off</span>'
+				: '<span class="sn-btn pri" onclick="snWafVhost(\'' + v.ws + '\',\'' + v.site + '\',\'on\')">On</span>';
+			vh += '<tr><td>' + v.ws + '</td><td>' + v.site + '</td><td>' + tanda + '</td><td>' + tombol + '</td></tr>';
+		}
+		if(vh){ $('#tbWafVhost').html(vh); }
+		else { kosong('#tbWafVhost', 4, 'Tidak ada vhost.'); }
+
+		var rl = '';
+		for(var j = 0; j < (m.rules || []).length; j++){
+			var r = m.rules[j];
+			var st = r.keadaan === 'on'
+				? '<span class="sn-badge sn-ok">on</span>'
+				: '<span class="sn-badge sn-off">off</span>';
+			var aksi = '';
+			if(r.kunci === 'ya'){
+				aksi = '<span class="sn-refresh" title="konfigurasi inti, tidak boleh diubah">locked</span>';
+			} else {
+				aksi = r.keadaan === 'on'
+					? '<span class="sn-btn" onclick="snWafRule(\'' + r.nama + '\',\'off\')">Off</span>'
+					: '<span class="sn-btn pri" onclick="snWafRule(\'' + r.nama + '\',\'on\')">On</span>';
+			}
+			rl += '<tr><td class="sn-mono">' + r.nama + '</td><td>' + st + '</td><td>' + aksi + '</td></tr>';
+		}
+		if(rl){ $('#tbWafRule').html(rl); }
+		else { kosong('#tbWafRule', 3, 'Tidak ada rule.'); }
+	});
+}
+
+function snWafVhost(ws, site, state){
+	snAjax('set_waf_vhost', {ws: ws, site: site, state: state}, function(m){
+		if(m){ layer.msg(m, {time:4000}); snWafMuat(); snWafLencana(); }
+	});
+}
+function snWafRule(nama, state){
+	snAjax('set_waf_rule', {rule: nama, state: state}, function(m){
+		if(m){ layer.msg(m, {time:3000}); snWafMuat(); }
+	});
+}
+
+/* ---------- Engine Choice + WAF Control (Config > Engine) ---------- */
+/* Satu sumber data: get_waf_engine. Kartu dipilih dengan klik, tapi
+   penerapan tetap di server. Status "siap" TIDAK sama dengan "berjalan":
+   Coraza bisa "siap" (aset lengkap) sambil engine belum jalan. Itu
+   ditampilkan apa adanya supaya tidak menyesatkan. */
+var SN_ENG = {};
+
+function snEngineMuat(){
+	snAjax('get_waf_engine', {}, function(m){
+		if(!m) return;
+		SN_ENG = m;
+		var fw = m.free_waf || {}, cz = m.coraza || {};
+		var nginx = m.nginx_connector || 'none';
+
+		// --- kartu free_waf ---
+		var fwSt = fw.lua === 'ada'
+			? '<span class="sn-badge sn-ok">siap</span>'
+			: '<span class="sn-badge sn-bad">nginx tanpa Lua</span>';
+		var fwJalan = fw.loaded === 'ya'
+			? '<span class="sn-badge sn-ok">berjalan</span>'
+			: '<span class="sn-badge sn-off">tidak termuat</span>';
+
+		// --- kartu coraza ---
+		var czSt, czJalan;
+		if(!cz.aset){
+			czSt = '<span class="sn-badge sn-off">belum diunduh</span>';
+		} else {
+			czSt = '<span class="sn-badge sn-warn">aset siap</span>';
+		}
+		czJalan = (nginx === 'coraza' || nginx === 'modsecurity')
+			? '<span class="sn-badge sn-ok">konektor terpasang</span>'
+			: '<span class="sn-badge sn-off">konektor belum ada</span>';
+
+		var h = ''
+			+ '<div class="sn-engcard ' + (m.pilih === 'free_waf' ? 'on' : '') + '" '
+			+ 'onclick="snEnginePilih(\'' + (m.pilih === 'free_waf' ? 'coraza' : 'free_waf') + '\')">'
+			+ '<div class="t">Free Nginx WAF</div>'
+			+ '<div class="d">WAF Lua di dalam nginx. Ringan, cepat, memeriksa pola '
+			+ 'serangan umum dan CC per IP. Cocok untuk semua jenis situs.</div>'
+			+ '<div class="st">' + fwSt + fwJalan
+			+ '<span class="sn-badge sn-off">Lua: ' + (fw.lua || '-') + '</span></div>'
+			+ '<div class="pilih">' + (m.pilih === 'free_waf'
+				? '<span class="sn-badge sn-ok">aktif</span>'
+				: '<span class="sn-btn pri">Gunakan</span>') + '</div></div>'
+
+			+ '<div class="sn-engcard ' + (m.pilih === 'coraza' ? 'on' : '') + '" '
+			+ 'onclick="snEnginePilih(\'' + (m.pilih === 'coraza' ? 'free_waf' : 'coraza') + '\')">'
+			+ '<div class="t">Coraza + OWASP CRS</div>'
+			+ '<div class="d">Mesin OWASP Coraza dengan rule CRS. Lebih lengkap, '
+			+ 'tetapi butuh konektor nginx (rebuild dengan --with-compat) yang belum '
+			+ 'terpasang di server ini.</div>'
+			+ '<div class="st">' + czSt + czJalan
+			+ (cz.versi && cz.versi !== '-' ? '<span class="sn-badge sn-off">CRS ' + cz.versi + '</span>' : '')
+			+ '</div>'
+			+ '<div class="pilih">' + (m.pilih === 'coraza'
+				? '<span class="sn-badge sn-ok">dipilih</span>'
+				: '<span class="sn-btn">Pilih</span>') + '</div></div>';
+
+		$('#snEngCard').html(h);
+
+		// --- info aset coraza ---
+		$('#corazaInfo').html(
+			'<div><span>Assets</span><span>' + (cz.aset ? 'present' : 'not downloaded') + '</span></div>'
+			+ '<div><span>CRS Version</span><span>' + (cz.versi || '-') + '</span></div>'
+			+ '<div><span>Rule Files</span><span>' + (cz.aturan || 0) + '</span></div>'
+			+ '<div><span>Connector</span><span>' + (cz.konektor || 'none') + '</span></div>');
+		var cb = $('#corazaBadge');
+		cb.text(cz.aset ? 'ready' : 'missing');
+		cb.attr('class', 'sn-badge ' + (cz.aset ? 'sn-ok' : 'sn-off'));
+
+		snModeMuat();
+		snWafLencana();
+	});
+}
+
+function snEnginePilih(eng){
+	var nama = (eng === 'coraza') ? 'Coraza + OWASP CRS' : 'Free Nginx WAF';
+	var tanya = (eng === 'coraza')
+		? 'Pilih engine ' + nama + '? Aset disiapkan bila belum ada; engine baru '
+		  + 'berjalan setelah konektor nginx terpasang.'
+		: 'Pilih engine ' + nama + '?';
+	layer.confirm(tanya, function(idx){
+		layer.close(idx);
+		snAjax('set_waf_engine', {engine: eng}, function(m){
+			if(m){ layer.msg(m, {time:4500}); snEngineMuat(); }
+		});
+	});
+}
+
+function snModeMuat(){
+	snAjax('get_waf_mode', {}, function(m){
+		if(!m) return;
+		var mode = m.mode || 'disable';
+		$('#snModeSwitch .o').removeClass('on');
+		$('#snModeSwitch .o[data-m="' + mode + '"]').addClass('on');
+		var teks = { monitor:'log saja', block:'memblokir', disable:'mati' };
+		var warna = { monitor:'sn-warn', block:'sn-ok', disable:'sn-off' };
+		$('#engModeBadge').text(mode).attr('class', 'sn-badge ' + (warna[mode] || 'sn-off'));
+		$('#engModeNote').text('engine: ' + (m.engine || '-') + ' — ' + (teks[mode] || mode));
+	});
+}
+
+function snModeSet(mode){
+	/* Semua posisi meminta konfirmasi. Block paling berdampak, tetapi
+	   Monitor dan Disable juga mengubah perilaku seluruh vhost yang
+	   dilindungi, jadi tidak boleh berubah dari satu klik tanpa sadar. */
+	var tanya = {
+		block: 'Aktifkan mode Block? WAF akan benar-benar memblokir request '
+			+ 'yang cocok dengan rule, di semua vhost yang dilindungi.',
+		monitor: 'Ubah ke mode Monitor? WAF hanya mencatat, tidak memblokir.',
+		disable: 'Matikan engine WAF (Disable)? Tidak ada pemeriksaan WAF '
+			+ 'sampai dinyalakan lagi.'
+	}[mode] || ('Ubah mode ke ' + mode + '?');
+	layer.confirm(tanya, {title: 'Ubah mode WAF'}, function(idx){
+		layer.close(idx);
+		snModeKirim(mode);
+	});
+}
+function snModeKirim(mode){
+	snAjax('set_waf_mode', {mode: mode}, function(m){
+		if(m){ layer.msg(m, {time:3000}); snModeMuat(); snWafLencana(); }
+	});
+}
+
+function snCorazaUnduh(){
+	layer.confirm('Unduh aset Coraza + OWASP CRS dari sumber resmi? '
+		+ 'Bila versi sudah terpasang, tidak ada yang diunduh ulang.',
+		function(idx){
+			layer.close(idx);
+			layer.msg('mengunduh, tunggu sebentar', {time:0, shade:[0.3,'#000']});
+			snAjax('download_coraza', {}, function(m){
+				layer.closeAll('loading');
+				if(m){ layer.msg('selesai', {time:2500}); }
+				snEngineMuat();
+			});
+		});
+}
+
+/* ---------- tab WAF (engine free_waf) ---------- */
+var SN_FW_LIST = 'ip_black';
+var SN_FW_MODUL_NAMA = {
+	cc: 'CC Protection', get: 'Pindai Argumen', post: 'Pindai POST',
+	cookie: 'Pindai Cookie', 'user-agent': 'Filter User-Agent',
+	scan: 'Filter Scanner', url_black: 'Daftar URL Hitam',
+	drop_abroad: 'Block Abroad (luar negeri)'
+};
+
+/* Pemuat kartu LUA (engine free_waf). NAMANYA BUKAN snEngineMuat:
+   snEngineMuat dipakai kartu Engine Choice + switch mode. Dua fungsi
+   dengan nama sama akan saling menimpa, dan yang menang fungsi yang
+   terakhir dibaca — akibatnya pemuat engine choice tidak pernah jalan
+   dan badge WAF Control berhenti di "loading". */
+function snLuaMuat(){
+	snAjax('get_freewaf', {}, function(m){
+		if(!m) return;
+		var s = m.status || {};
+		var baris = [
+			['Lua Module', s.lua === 'ada' ? 'available' : 'MISSING'],
+			['Engine Files', s.engine_file === 'ada' ? 'installed' : 'missing'],
+			['Nginx Hook', s.conf === 'ada' ? 'installed' : 'not installed'],
+			['Loaded', s.loaded === 'ya' ? 'yes' : 'no'],
+			['Mode', s.mode || '-'],
+			['Home', s.home || '-']
+		];
+		var h = '';
+		for(var i = 0; i < baris.length; i++){
+			h += '<div><span>' + baris[i][0] + '</span><span>' + baris[i][1] + '</span></div>';
+		}
+		$('#fwEngine').html(h);
+
+		var buka = $('#btnFwOpen');
+		if(m.open){ buka.text('Disable WAF'); buka.attr('class', 'sn-btn dgr'); }
+		else { buka.text('Enable WAF'); buka.attr('class', 'sn-btn pri'); }
+		var mon = $('#btnFwMonitor');
+		if(m.monitor){ mon.text('Mode: monitor'); }
+		else { mon.text('Mode: blocking'); }
+		$('#fwGlobalNote').html(
+			'WAF global <b>' + (m.open ? 'AKTIF' : 'MATI') + '</b>, mode <b>'
+			+ (m.monitor ? 'monitor (hanya mencatat)' : 'blocking (memblokir)') + '</b>. '
+			+ 'CC global: ' + ((m.cc && m.cc.limit) || '-') + ' request per '
+			+ ((m.cc && m.cc.cycle) || '-') + ' detik, blokir '
+			+ ((m.cc && m.cc.endtime) || '-') + ' detik.');
+
+		var mb = '';
+		for(var k in SN_FW_MODUL_NAMA){
+			var nyala = m.modul && m.modul[k];
+			mb += '<tr><td>' + SN_FW_MODUL_NAMA[k] + '</td>'
+				+ '<td>' + (nyala ? '<span class="sn-badge sn-ok">on</span>' : '<span class="sn-badge sn-off">off</span>') + '</td>'
+				+ '<td style="width:96px">' + (nyala
+					? '<span class="sn-btn" onclick="snFwModul(\'' + k + '\',\'off\')">Off</span>'
+					: '<span class="sn-btn pri" onclick="snFwModul(\'' + k + '\',\'on\')">On</span>') + '</td></tr>';
+		}
+		$('#tbFwModul').html(mb || '<tr><td colspan="3" class="sn-empty">no module data</td></tr>');
+
+		if(m.cc){
+			$('#fwCcLimit').val(m.cc.limit || '');
+			$('#fwCcCycle').val(m.cc.cycle || '');
+			$('#fwCcEnd').val(m.cc.endtime || '');
+			$('#fwCcNow').text('Aktif: ' + (m.cc.limit || '-') + ' request per '
+				+ (m.cc.cycle || '-') + ' detik, blokir ' + (m.cc.endtime || '-') + ' detik.');
+		}
+		snFwSitesMuat();
+		snFwListMuat();
+	});
+}
+
+function snFwOpen(){
+	var tanya = 'Nyalakan atau matikan seluruh WAF engine LUA? '
+		+ 'Perubahan berlaku untuk semua vhost yang dilindungi.';
+	layer.confirm(tanya, function(idx){
+		layer.close(idx);
+		snAjax('get_freewaf', {}, function(m){
+			if(!m) return;
+			var aksi = m.open ? 'off' : 'on';
+			snAjax('set_fw_open', {state: aksi}, function(r){
+				if(r){ layer.msg(r, {time:3000}); snLuaMuat(); snModeMuat(); }
+			});
+		});
+	});
+}
+function snFwMonitor(){
+	snAjax('get_freewaf', {}, function(m){
+		if(!m) return;
+		var aksi = m.monitor ? 'blocking' : 'monitor';
+		var tanya = aksi === 'blocking'
+			? 'Aktifkan mode blocking? WAF akan benar-benar memblokir request.'
+			: 'Kembali ke mode monitor? WAF hanya mencatat, tidak memblokir.';
+		layer.confirm(tanya, function(idx){
+			layer.close(idx);
+			snAjax('set_fw_monitor', {state: aksi}, function(r){
+				if(r){ layer.msg(r, {time:3000}); snLuaMuat(); snModeMuat(); }
+			});
+		});
+	});
+}
+function snFwModul(modul, state){
+	snAjax('set_fw_module', {module: modul, state: state}, function(m){
+		if(m){ layer.msg(m, {time:2500}); snLuaMuat(); }
+	});
+}
+function snFwCc(){
+	var lim = $('#fwCcLimit').val().trim();
+	var cyc = $('#fwCcCycle').val().trim();
+	var end = $('#fwCcEnd').val().trim();
+	snAjax('set_fw_cc', {limit: lim, cycle: cyc, endtime: end}, function(m){
+		if(m){ layer.msg(m, {time:3000}); snLuaMuat(); }
+	});
+}
+
+function snFwSitesMuat(){
+	snAjax('get_fw_sites', {}, function(m){
+		if(!m) return;
+		var b = '';
+		for(var i = 0; i < m.length; i++){
+			var s = m[i];
+			var st = s.open ? '<span class="sn-badge sn-ok">on</span>' : '<span class="sn-badge sn-off">off</span>';
+			var cc = s.cc_open ? (s.cc_limit + '/' + s.cc_cycle + 's blokir ' + s.cc_endtime + 's') : '-';
+			var tombol = s.open
+				? '<span class="sn-btn" onclick="snFwSite(\'' + s.site + '\',\'off\')">Off</span>'
+				: '<span class="sn-btn pri" onclick="snFwSite(\'' + s.site + '\',\'on\')">On</span>';
+			b += '<tr><td>' + s.site + '</td><td>' + st + '</td><td class="sn-mono">' + cc + '</td>'
+				+ '<td><span class="sn-btn" onclick="snFwSiteCc(\'' + s.site + '\')">CC</span></td>'
+				+ '<td>' + tombol + '</td></tr>';
+		}
+		if(b){ $('#tbFwSites').html(b); } else { kosong('#tbFwSites', 5, 'No site in site.json.'); }
+	});
+}
+function snFwSite(site, state){
+	snAjax('set_fw_site', {site: site, state: state}, function(m){
+		if(m){ layer.msg(m, {time:2500}); snFwSitesMuat(); }
+	});
+}
+function snFwSiteCc(site){
+	var lim = prompt('CC limit untuk ' + site + ' (request):', '');
+	if(lim === null) return;
+	var cyc = prompt('Cycle (detik):', '60');
+	if(cyc === null) return;
+	var end = prompt('Blokir (detik):', '300');
+	if(end === null) return;
+	snAjax('set_fw_site_cc', {site: site, limit: lim, cycle: cyc, endtime: end}, function(m){
+		if(m){ layer.msg(m, {time:3000}); snFwSitesMuat(); }
+	});
+}
+
+function snFwTab(nama, el){
+	$('#top-waf .sn-tabs span').removeClass('on');
+	$(el).addClass('on');
+	SN_FW_LIST = nama;
+	snFwListMuat();
+}
+function snFwListMuat(){
+	snAjax('get_fw_lists', {}, function(m){
+		if(!m) return;
+		var daftar = m[SN_FW_LIST] || [];
+		var b = '';
+		for(var i = 0; i < daftar.length; i++){
+			var v = String(daftar[i]).replace(/"/g, '');
+			b += '<tr><td class="sn-mono">' + v + '</td>'
+				+ '<td><span class="sn-btn dgr" onclick="snFwListDel(\'' + v.split("'").join('') + '\')">Remove</span></td></tr>';
+		}
+		if(b){ $('#tbFwList').html(b); }
+		else { kosong('#tbFwList', 2, 'Daftar kosong.'); }
+	});
+}
+function snFwListAdd(){
+	var v = $('#fwListVal').val().trim();
+	if(!v){ layer.msg('Nilai belum diisi', {time:2000}); return; }
+	snAjax('fw_list_add', {list: SN_FW_LIST, value: v}, function(m){
+		if(m){ layer.msg(m, {time:2500}); $('#fwListVal').val(''); snFwListMuat(); }
+	});
+}
+function snFwListDel(v){
+	layer.confirm('Hapus ' + v + ' dari ' + SN_FW_LIST + '?', function(idx){
+		layer.close(idx);
+		snAjax('fw_list_del', {list: SN_FW_LIST, value: v}, function(m){
+			if(m){ layer.msg(m, {time:2500}); snFwListMuat(); }
+		});
+	});
+}
+
+/* ---------- Config > Nginx Waf (instalasi engine per webserver) ---------- */
+function snNwMuat(){
+	snAjax('get_freewaf', {}, function(m){
+		if(!m){ return; }
+		var s = m.status || {};
+		var detail = [
+			'Lua Module      : ' + (s.lua || '-'),
+			'Engine Files    : ' + (s.engine_file || '-'),
+			'Nginx Hook      : ' + (s.conf || '-'),
+			'Loaded          : ' + (s.loaded || '-'),
+			'Mode            : ' + (s.mode || '-'),
+			'Home            : ' + (s.home || '-')
+		];
+		$('#nwDetail').text(detail.join('\n'));
+		var ket = '';
+		if(s.lua !== 'ada'){
+			ket = 'nginx di server ini TIDAK punya lua_nginx_module. Engine free_waf tidak bisa dipasang. Bangun ulang nginx dengan modul lua di panel, lalu ulangi.';
+		} else if(s.loaded === 'ya'){
+			ket = 'Engine termuat dan berjalan (mode ' + (s.mode || '-') + '). Instalasi ulang bersifat idempoten dan tidak menghapus config yang sudah ada.';
+		} else {
+			ket = 'Engine belum terpasang. Install Engine menyalin berkas dari payload plugin tanpa menimpa config yang sudah ada.';
+		}
+		$('#nwNote').html('<b>Status:</b> ' + ket + ' Untuk apache dan openlitespeed engine ini tidak berlaku; pakai tab <b>Config &rsaquo; WAF</b>.');
+	});
+}
+function snNwInstall(){
+	layer.confirm('Pasang engine free_waf dari payload plugin? Berkas config yang sudah ada tidak ditimpa.', function(idx){
+		layer.close(idx);
+		snAjax('freewaf_engine', {action: 'install'}, function(m){
+			if(m){ layer.msg(m, {time:4000}); snNwMuat(); snLuaMuat(); }
+		});
+	});
+}
+function snNwRemove(){
+	layer.confirm('Cabut hook free_waf dari nginx? Data config dan log dipertahankan.', function(idx){
+		layer.close(idx);
+		snAjax('freewaf_engine', {action: 'remove'}, function(m){
+			if(m){ layer.msg(m, {time:4000}); snNwMuat(); snLuaMuat(); }
+		});
+	});
+}
+
+/* ---------- per-vhost ---------- */
+function snVhostMuat(){
+	var jam = $('#selVhostJam').val() || '24';
+	snAjax('get_vhost_stat', {hours: jam}, function(m){
+		if(!m) return;
+		var b = '';
+		for(var i = 0; i < m.length; i++){
+			var v = m[i];
+			/* 5xx diberi warna merah kalau ada. Ambang 1 persen
+			   dipakai supaya vhost dengan satu permintaan error dari seratus
+			   tidak terlihat sama dengan yang gagal separuh. */
+			var s5v = v.err5_persen > 0 ? (v.err5_persen >= 1
+				? '<span class="sn-badge sn-bad">' + v.err5_persen + '%</span>'
+				: '<span class="sn-badge sn-warn">' + v.err5_persen + '%</span>')
+				: '<span class="sn-badge sn-ok">0</span>';
+			var ser = v.serang > 0
+				? '<span class="sn-badge sn-bad">' + v.serang + '</span>'
+				: '<span class="sn-badge sn-off">0</span>';
+			b += '<tr><td><a href="javascript:void(0)" onclick="snVhostPip(\'' + v.host
+				+ '\')" title="lihat penyerang vhost ini">' + v.host + '</a></td>'
+				+ '<td class="r">' + v.req + '</td>'
+				+ '<td class="r sn-mono">' + ukuranAngka(v.bytes) + '</td>'
+				+ '<td class="r">' + v.s2 + '</td>'
+				+ '<td class="r">' + v.s4 + '</td>'
+				+ '<td class="r">' + s5v + '</td>'
+				+ '<td class="r">' + v.s429 + '</td>'
+				+ '<td class="r">' + ser + '</td>'
+				+ '<td class="r">' + v.ip_penyerang + '</td>'
+				+ '<td class="r sn-sc ' + kelasSkor(v.skor_puncak) + '">'
+				+ (v.skor_puncak || '-') + '</td></tr>';
+		}
+		if(b){ $('#tbVhost').html(b); }
+		else { kosong('#tbVhost', 10, 'Tidak ada trafik pada rentang ini.'); }
+	});
+}
+function snVhostPip(host){
+	var jam = $('#selVhostJam').val() || '24';
+	snAjax('get_vhost_ip', {hours: jam, host: host, limit: 50}, function(m){
+		if(!m) return;
+		var judul = '<div style="font-weight:600;margin:12px 0 7px">Top attackers on '
+			+ host + '</div>';
+		if(!m.length){
+			$('#vhostDetail').html(judul
+				+ '<div class="sn-empty">Tidak ada serangan tercatat untuk vhost ini.</div>');
+			return;
+		}
+		var b = '<table class="sn-tb"><thead><tr><th>IP Address</th>'
+			+ '<th class="r">Events</th><th class="r">Peak Score</th>'
+			+ '<th>Kind</th><th>Last Seen</th><th></th></tr></thead><tbody>';
+		for(var i = 0; i < m.length; i++){
+			var r = m[i];
+			b += '<tr><td class="sn-mono">' + r.ip + '</td>'
+				+ '<td class="r">' + r.n + '</td>'
+				+ '<td class="r sn-sc ' + kelasSkor(r.puncak) + '">' + r.puncak + '</td>'
+				+ '<td class="sn-mono">' + (r.jenis || '-') + '</td>'
+				+ '<td class="sn-mono">' + waktu(r.terakhir) + '</td>'
+				+ '<td><span class="sn-btn dgr" onclick="snIsiBan(\'' + r.ip
+				+ '\')">Block</span></td></tr>';
+		}
+		b += '</tbody></table>';
+		$('#vhostDetail').html(judul + b);
+	});
+}
+
+/* ---------- notifikasi ---------- */
+function snNotifMuat(){
+	snAjax('get_notif_conf', {}, function(m){
+		if(!m) return;
+		var ket = m.url_ada
+			? 'Destination is set to <b>' + m.url_host + '</b>. Timer: <b>' + m.timer
+				+ '</b>. Queue: <b>' + (m.antrean.nunggu || 0) + '</b> waiting, <b>'
+				+ (m.antrean.gagal || 0) + '</b> failed.'
+			: '<b>Not notifications are on.</b> Fill in the URL below and press Save. '
+				+ 'Until then, bans and throttles are recorded but nothing is sent.';
+		if(m.token_ada){ ket += ' Bearer token is set (value not shown).'; }
+		$('#notifNote').html(ket);
+		$('#notifKind').val(m.jenis || 'semua');
+		$('#notifMaks').val(m.maks_coba || '5');
+		snNotifLog();
+	});
+}
+function snNotifSimpan(){
+	var url = $('#notifUrl').val().trim();
+	if(!url){
+		layer.confirm('Empty the URL to turn notifications off?', function(idx){
+			layer.close(idx);
+			snAjax('set_notif_conf', {url: '', kind: $('#notifKind').val(),
+				maks: $('#notifMaks').val()}, function(m){
+				if(m){ layer.msg(m, {time:3000}); snNotifMuat(); }
+			});
+		});
+		return;
+	}
+	snAjax('set_notif_conf', {url: url, kind: $('#notifKind').val(),
+		maks: $('#notifMaks').val()}, function(m){
+		if(m){ layer.msg(m, {time:3000}); snNotifMuat(); }
+	});
+}
+function snNotifUji(){
+	snAjax('test_notif', {}, function(m){
+		if(m){ layer.msg(m, {time:4000}); snNotifLog(); }
+	});
+}
+function snNotifLog(){
+	snAjax('get_notif_log', {limit: 50}, function(m){
+		if(!m) return;
+		var b = '';
+		for(var i = 0; i < m.length; i++){
+			var n = m[i];
+			var st = n.terkirim
+				? '<span class="sn-badge sn-ok">sent</span>'
+				: (n.coba > 0
+					? '<span class="sn-badge sn-bad">failed</span>'
+					: '<span class="sn-badge sn-warn">waiting</span>');
+			var ket = n.terkirim ? '' :
+				(n.galat ? ' title="' + String(n.galat).replace(/"/g, '') + '"' : '');
+			b += '<tr><td class="sn-mono">' + waktu(n.ts) + '</td>'
+				+ '<td class="sn-mono">' + n.jenis + '</td>'
+				+ '<td class="sn-mono">' + n.ip + '</td>'
+				+ '<td class="sn-clip' + ket + '" title="'
+				+ String(n.isi).replace(/"/g, '') + '"><span class="sn-ell">'
+				+ n.isi + '</span></td>'
+				+ '<td>' + st + '</td>'
+				+ '<td class="r">' + n.coba + '</td></tr>';
+		}
+		if(b){ $('#tbNotif').html(b); }
+		else { kosong('#tbNotif', 6, 'No notification has been queued yet.'); }
+	});
+}
+
+/* ---------- antrian review ---------- */
+var SN_REV_STATUS = 'tunggu';
+function snRevMuat(status){
+	SN_REV_STATUS = status || 'tunggu';
+	snAjax('get_review', {status: SN_REV_STATUS, limit: 200}, function(m){
+		if(!m) return;
+		var h = m.hitung || {};
+		$('#revKet').text('waiting ' + (h.tunggu || 0)
+			+ ' | approved ' + (h.setuju || 0)
+			+ ' | dismissed ' + (h.tolak || 0));
+		var b = '';
+		for(var i = 0; i < m.antrian.length; i++){
+			var r = m.antrian[i];
+			var st = r.status === 'tunggu'
+				? '<span class="sn-badge sn-warn">waiting</span>'
+				: (r.status === 'setuju'
+					? '<span class="sn-badge sn-bad">approved</span>'
+					: '<span class="sn-badge sn-off">dismissed</span>');
+			/* Tombol keputusan hanya muncul untuk yang masih menunggu.
+			   Setelah diputuskan,diputusan tidak lagi bisa diubah. */
+			var tombol = (r.status === 'tunggu')
+				? '<span class="sn-btn dgr" onclick="snRevPut(\'' + r.ip
+					+ '\',\'setuju\')">Approve</span> '
+					+ '<span class="sn-btn" onclick="snRevPut(\'' + r.ip
+					+ '\',\'tolak\')">Dismiss</span>'
+				: '<span class="sn-refresh">-</span>';
+			var umur = r.umur >= 3600
+				? Math.floor(r.umur / 3600) + 'j'
+				: (r.umur >= 60 ? Math.floor(r.umur / 60) + 'm' : r.umur + 's');
+			b += '<tr><td class="sn-mono">' + r.ip + '</td>'
+				+ '<td>' + r.kode + ' ' + r.negara + '</td>'
+				+ '<td class="r sn-sc ' + kelasSkor(r.skor) + '">' + r.skor + '</td>'
+				+ '<td class="r">' + umur + '</td>'
+				+ '<td class="sn-clip" title="' + String(r.alasan).replace(/"/g, '')
+				+ '"><span class="sn-ell">' + r.alasan + '</span></td>'
+				+ '<td>' + st + '</td>'
+				+ '<td>' + tombol + '</td></tr>';
+		}
+		if(b){ $('#tbRev').html(b); }
+		else { kosong('#tbRev', 7,
+			SN_REV_STATUS === 'tunggu'
+				? 'Queue empty. No IP is waiting for a decision.'
+				: 'No entry with that decision.'); }
+	});
+}
+function snRevPut(ip, aksi){
+	var tanya = aksi === 'setuju'
+		? 'Approve and block ' + ip + ' now?'
+		: 'Dismiss ' + ip + '? It will not be blocked.';
+	layer.confirm(tanya, function(idx){
+		layer.close(idx);
+		snAjax('review_decide', {ip: ip, action: aksi}, function(m){
+			if(m){ layer.msg(m, {time:3500}); snRevMuat(SN_REV_STATUS); }
+		});
+	});
+}
+
+/* ---------- asal negara penyerang ---------- */
+function snGeoMuat(){
+	var jam = $('#selGeoJam').val() || '168';
+	snAjax('get_geo_stat', {hours: jam}, function(m){
+		if(!m) return;
+		if(!m.geo_tersedia){
+			$('#geoNote').html('Berkas <span class="sn-mono">GeoLite2-City.mmdb</span> '
+				+ 'tidak ditemukan di server ini, jadi negara tidak bisa ditampilkan. '
+				+ 'Fungsi lain tetap berjalan normal.').show();
+		} else {
+			var t = (m.tak_tahu > 0)
+				? ' dari ' + m.tak_tahu + ' IP tidak dikenali dan digabung sebagai "Tidak diketahui".'
+				: ' Semua IP dikenali.';
+			$('#geoNote').html('Negara sumber dibaca dari GeoLite2 milik panel, disimpan di '
+				+ 'cache lokal.' + t).show();
+		}
+		var b = '';
+		for(var i = 0; i < m.negara.length; i++){
+			var n = m.negara[i];
+			var tombol = (n.kode === '??')
+				? '<span class="sn-refresh">-</span>'
+				: '<span class="sn-btn dgr" onclick="snGeoBanCepat(\'' + n.kode + '\')">Block</span>';
+			b += '<tr><td class="sn-mono">' + n.kode + '</td>'
+				+ '<td>' + n.nama + '</td>'
+				+ '<td class="r">' + n.ip + '</td>'
+				+ '<td class="r">' + n.n + '</td>'
+				+ '<td class="r sn-sc ' + kelasSkor(n.puncak) + '">' + n.puncak + '</td>'
+				+ '<td>' + '<div class="sn-bar" style="width:90px"><i style="width:'
+				+ Math.round(n.n * 100 / (m.negara[0].n || 1))
+				+ '%"></i></div>' + '</td>'
+				+ '<td>' + tombol + '</td></tr>';
+		}
+		if(b){ $('#tbGeo').html(b); }
+		else { kosong('#tbGeo', 7, 'Tidak ada penyerang tercatat pada rentang ini.'); }
+		snGeoBanMuat();
+	});
+}
+
+/* ---------- blokir per negara ---------- */
+/* Dipilih di UI, tapi keputusan sebenarnya ditulis server. Kerangka
+   pesan sama seperti panic: konfirmasi wajib, dan hasilnya melaporkan
+   apa yang BENAR-BENAR berlaku (jumlah blok di kernel), bukan sekadar
+   "perintah terkirim". */
+var SN_GEO_BAN_PILIH = [];
+
+function snGeoBanMuat(){
+	snAjax('get_geo_ban', {}, function(m){
+		if(!m) return;
+		var lencana = $('#geoBanBadge');
+		if(m.mode === 'off'){
+			lencana.text('off'); lencana.attr('class', 'sn-badge sn-off');
+		} else {
+			lencana.text(m.mode + ': ' + m.blok + ' blok');
+			lencana.attr('class', 'sn-badge ' + (m.mode === 'allow' ? 'sn-warn' : 'sn-bad'));
+		}
+		$('#geoBanStatus').text(m.mode === 'off'
+			? 'Tidak ada negara yang diblokir.'
+			: ('Aktif: mode ' + m.mode + ', ' + m.blok + ' blok CIDR, '
+			   + m.aturan + ' aturan kernel.'));
+		SN_GEO_BAN_PILIH = (m.negara_daftar || []).slice();
+		snGeoBanKotak();
+		// Isi dropdown hanya sekali, saat masih kosong.
+		if($('#geoBanNegara option').length === 0){
+			snAjax('get_geo_list', {}, function(l){
+				if(!l) return;
+				var o = '<option value="">-- pilih negara --</option>';
+				for(var i = 0; i < l.length; i++){
+					o += '<option value="' + l[i].kode + '">' + l[i].kode
+						+ ' (' + l[i].blok + ' blok)</option>';
+				}
+				$('#geoBanNegara').html(o);
+			});
+		}
+	});
+}
+
+function snGeoBanKotak(){
+	var h = '';
+	for(var i = 0; i < SN_GEO_BAN_PILIH.length; i++){
+		var k = SN_GEO_BAN_PILIH[i];
+		h += '<span class="sn-badge sn-warn" style="cursor:pointer" '
+			+ 'onclick="snGeoBanHapus(\'' + k + '\')" title="klik untuk hapus">'
+			+ k + ' &times;</span>';
+	}
+	$('#geoBanTerpilih').html(h || '<span class="sn-refresh">Belum ada negara dipilih.</span>');
+}
+
+function snGeoBanTambah(){
+	var k = $('#geoBanNegara').val();
+	if(!k){ layer.msg('Pilih negara dulu', {time:2000}); return; }
+	if(SN_GEO_BAN_PILIH.indexOf(k) < 0){ SN_GEO_BAN_PILIH.push(k); }
+	snGeoBanKotak();
+}
+function snGeoBanHapus(k){
+	var i = SN_GEO_BAN_PILIH.indexOf(k);
+	if(i >= 0){ SN_GEO_BAN_PILIH.splice(i, 1); }
+	snGeoBanKotak();
+}
+/* Tombol Block di baris tabel: langsung menambahkan kode itu ke daftar
+   pilihan, bukan langsung memblokir. Memblokir tetap lewat Apply +
+   konfirmasi. */
+function snGeoBanCepat(kode){
+	if(SN_GEO_BAN_PILIH.indexOf(kode) < 0){ SN_GEO_BAN_PILIH.push(kode); }
+	snGeoBanKotak();
+	$('#geoBanTerpilih')[0].scrollIntoView({behavior:'smooth', block:'nearest'});
+	layer.msg(kode + ' ditambahkan ke daftar. Tekan Apply untuk menerapkan.', {time:3000});
+}
+
+function snGeoBanSimpan(){
+	var mode = $('#geoBanMode').val();
+	var negara = SN_GEO_BAN_PILIH.join(',');
+	if(!negara){ layer.msg('Pilih minimal satu negara', {time:2000}); return; }
+	var kalimat = (mode === 'allow')
+		? 'Mode ALLOW: SEMUA negara KECUALI ' + negara + ' akan DIBLOKIR di port web. Yakin?'
+		: 'Blokir negara ' + negara + ' di port web 80/443?';
+	layer.open({
+		type: 1, title: 'Aktifkan geo-ban?', shadeClose: false, area: ['540px', 'auto'],
+		content: '<div style="padding:16px;font-size:13px">'
+			+ '<b>' + kalimat + '</b>'
+			+ '<ul style="margin:9px 0 0 18px">'
+			+ '<li>Hanya berlaku di port web. SSH dan panel tetap bisa diakses.</li>'
+			+ '<li>Whitelist dan allow list selalu menang.</li>'
+			+ '<li>Untuk mematikan: tombol Turn Off di halaman ini.</li></ul>'
+			+ '<div style="margin-top:9px">Ketik <b>GEO</b> untuk konfirmasi:</div>'
+			+ '<input id="geoBanKonf" class="sn-inp" style="width:150px;margin-top:5px" placeholder="GEO">'
+			+ '</div>',
+		btn: ['Apply', 'Cancel'],
+		yes: function(i){
+			var v = ($('#geoBanKonf').val() || '').trim();
+			if(v !== 'GEO'){
+				layer.msg('Harus mengetik GEO dengan huruf besar semua', {time:3000});
+				return false;
+			}
+			layer.close(i);
+			layer.msg('menerapkan, tunggu sebentar', {time:0, shade:[0.3, '#000']});
+			snAjax('set_geo_ban', {action:'on', mode:mode, negara:negara, confirm:v}, function(r){
+				layer.closeAll('loading');
+				if(r){ layer.msg(r, {time:4500}); snGeoBanMuat(); }
+			});
+			return false;
+		}
+	});
+}
+
+function snGeoBanOff(){
+	layer.confirm('Matikan geo-ban dan buka kembali semua negara?', function(idx){
+		layer.close(idx);
+		snAjax('set_geo_ban', {action:'off'}, function(m){
+			if(m){ layer.msg(m, {time:3000}); snGeoBanMuat(); }
+		});
+	});
+}
+
+/* ---------- jejak audit ---------- */
+function snAksiMuat(){
+	snAjax('get_aksi', {limit: 200}, function(m){
+		if(!m) return;
+		var b = '';
+		for(var i = 0; i < m.length; i++){
+			var a = m[i];
+			var lencana = a.sumber === 'auto'
+				? '<span class="sn-badge sn-warn">auto</span>'
+				: '<span class="sn-badge sn-ok">panel</span>';
+			var aksi = a.aksi;
+			var warna = aksi === 'ban' ? 'sn-bad'
+				: (aksi === 'allow' ? 'sn-ok' : 'sn-off');
+			b += '<tr><td class="sn-mono">' + waktu(a.ts) + '</td>'
+				+ '<td class="sn-mono">' + a.ip + '</td>'
+				+ '<td><span class="sn-badge ' + warna + '">' + aksi + '</span></td>'
+				+ '<td>' + lencana + '</td>'
+				+ '<td class="r sn-mono">' + (a.detik ? a.detik + 's' : '-') + '</td>'
+				+ '<td class="sn-clip" title="' + String(a.alasan).replace(/"/g, '') + '">'
+				+ '<span class="sn-ell">' + a.alasan + '</span></td></tr>';
+		}
+		if(b){ $('#tbAksi').html(b); }
+		else { kosong('#tbAksi', 6,
+			'Belum ada tindakan. Jejak terisi saat ada ban, throttle, allow, atau unban.'); }
+	});
+}
+
+/* ---------- awal ---------- */
+SN_SUB = {
+	bans: snBans, edr: snEdrMuat, situs: snSitus, vhost: snVhostMuat, geo: snGeoMuat,
+	review: snRevMuat, notif: snNotifMuat,
+	aksi: snAksiMuat,
+	feed: snFeed, riwayat: snRiwayat, log: snLog
+};
+/* Setting hanya tiga: Settings, Rate Limits, Panic. Engine/WAF pindah ke
+   tab WAF; Allow List dan Kernel Rules pindah ke tab Firewall. */
+SN_SUB2 = {
+	atur: snConf, laju: snLaju, panic: snPanicMuat
+};
+
+$(function(){
+	snBuka();
+	snStatus();
+	snBans();
+	snPanicMuat();
+	SN_SYS_T = 0;
+
+	/* rpm mengikuti rps selama operator belum mengetiknya sendiri */
+	$(document).on('input keyup', '#c_throttle_rps', rpmIkuti);
+	$(document).on('input keyup', '#c_throttle_rpm', function(){
+		$(this).attr('data-otomatis', '');
+		snContoh();
+	});
+
+	/* Handler dibongkar lebih dulu. Plugin bisa dibuka berulang di
+	   halaman yang sama; tanpa off() dulu, setiap pembukaan menambah
+	   salinan handler dan satu klik jadi menutup beberapa kali. */
+	$(document).off('.snSentinel');
+
+	/* klik backdrop atau tombol tutup untuk menutup dialog */
+	$('#snBack').off('click.snSentinel').on('click.snSentinel', snTutup);
+	/* ESC menutup dialog. Standar di semua dialog, dan satu-satunya jalan
+	   keluar yang selalu ada walau tombolnya tidak kelihatan. */
+	$(document).on('keydown.snSentinel', function(e){
+		if((e.key === 'Escape' || e.keyCode === 27)
+			&& $('#snModal').hasClass('on')){
+			e.preventDefault();
+			snTutup();
+		}
+	});
+	/* Klik di luar kotak dialog ikut menutup. Ditangkap di fase capture
+	   supaya tidak tertahan elemen di atasnya. Dialog milik panel
+	   (layui-layer) dikecualikan agar tidak menutup diri sendiri
+	   saat sedang menjawab konfirmasi. */
+	$(document).on('click.snSentinel', function(e){
+		if(!$('#snModal').hasClass('on')) return;
+		var t = e.target;
+		if($(t).closest('.sn-mbox, .layui-layer').length) return;
+		snTutup();
+	}, true);
+
+	window.addEventListener('resize', function(){
+		if(SN_GRAF){ SN_GRAF.resize(); }
+	});
+	/* Timer TIDAK dibuat di sini. snBuka() yang memakainya, supaya timer
+	   lahir dan mati bersama dialog. Kalau dibuat di sini, timer tetap
+	   berjalan setelah dialog ditutup. */
+});
+
+/* ==================================================================
+   ANTIVIRUS & INTEGRITAS
+   ================================================================== */
+var SN_AV_TAB = 'vhost';
+window.SN_AV_POLL = null;
+
+function snAvLencana(){
+	snAjax('get_av', {}, function(m){
+		if(!m) return;
+		var l = $('#bAv');
+		if(m.ada === 'ya'){
+			l.text('clamav: ' + (m.clamd === 'ya' ? 'active' : 'ready'));
+			l.attr('class', 'sn-badge sn-ok');
+			l.attr('title', 'ClamAV ' + (m.versi || '') + ' (DB: ' + (m.db_umur || '') + ')');
+		} else {
+			l.text('clamav: off');
+			l.attr('class', 'sn-badge sn-off');
+			l.attr('title', 'ClamAV tidak terpasang di server');
+		}
+	});
+}
+
+function snAvSub(nama, el){
+	$('#top-antivirus .sn-tabs span').removeClass('on');
+	$(el).addClass('on');
+	$('#top-antivirus .sn-subpage').removeClass('on');
+	$('#avsub-' + nama).addClass('on');
+	SN_AV_TAB = nama;
+	if(nama === 'vhost'){ snAvSitesMuat(); }
+	else if(nama === 'integ'){ snAvIntegMuat(); }
+	else if(nama === 'quar'){ snAvQuarMuat(); }
+	else if(nama === 'logs'){ snAvLogsMuat(); }
+}
+
+function snAvMuat(){
+	snAvLencana();
+	snAjax('get_av', {}, function(m){
+		if(!m) return;
+		var badge = $('#avStatusBadge');
+		if(m.ada === 'ya'){
+			badge.text(m.clamd === 'ya' ? 'clamd active' : 'clamscan ready');
+			badge.attr('class', 'sn-badge sn-ok');
+		} else {
+			badge.text('not installed');
+			badge.attr('class', 'sn-badge sn-bad');
+		}
+		$('#avEngineVer').text(m.versi || '-');
+		$('#avClamd').text(m.clamd === 'ya' ? 'active socket' : 'inactive');
+		$('#avDbAge').text(m.db_umur || '-');
+		$('#avTimer').text(m.timer === 'ya' ? 'active (03:30)' : 'inactive');
+		$('#avQTotal').text(m.quarantine || 0);
+		$('#avTodayDet').text(m.deteksi_hari_ini || 0);
+
+		if(m.last_deepscan){
+			var ld = m.last_deepscan;
+			$('#avDeepscanNote').html('<b>Deep Scan Terakhir (' + (ld.date || '-') + '):</b> '
+				+ (ld.scanned || 0) + ' berkas dipindai, <b>' + (ld.infected || 0) + ' terinfeksi</b>, '
+				+ 'waktu: ' + (ld.runtime || '-') + '. Timer pemindaian harian: '
+				+ (m.timer === 'ya' ? '<span class="sn-badge sn-ok">Aktif</span>' : '<span class="sn-badge sn-bad">Mati</span>'));
+		}
+	});
+
+	if(SN_AV_TAB === 'vhost'){ snAvSitesMuat(); }
+	else if(SN_AV_TAB === 'integ'){ snAvIntegMuat(); }
+	else if(SN_AV_TAB === 'quar'){ snAvQuarMuat(); }
+	else if(SN_AV_TAB === 'logs'){ snAvLogsMuat(); }
+}
+
+function snAvSitesMuat(){
+	snAjax('get_av_sites', {}, function(sites){
+		if(!sites){
+			kosong('#tbAvSites', 6, 'Gagal memuat daftar situs.');
+			return;
+		}
+		$('#avVhostCount').text(sites.length);
+
+		var opt = '<option value="">Semua Vhost</option>';
+		for(var i = 0; i < sites.length; i++){
+			opt += '<option value="' + sites[i].name + '">' + sites[i].name + '</option>';
+		}
+		var selSite = $('#selAvIntegSite');
+		var curSite = selSite.val();
+		selSite.html(opt);
+		if(curSite){ selSite.val(curSite); }
+
+		if(!sites.length){
+			kosong('#tbAvSites', 6, 'Tidak ada vhost yang terdaftar.');
+			return;
+		}
+
+		var adaRunning = false;
+		var h = '';
+		for(var i = 0; i < sites.length; i++){
+			var s = sites[i];
+			var ls = s.last_scan;
+
+			var baseBadge = '';
+			if(s.has_baseline){
+				baseBadge = '<span class="sn-badge sn-ok">' + (s.baseline_count || 0) + ' files</span>';
+				if(s.integrity_changes !== null && s.integrity_changes > 0){
+					baseBadge += ' <span class="sn-badge sn-warn">' + s.integrity_changes + ' changed</span>';
+				}
+			} else {
+				baseBadge = '<span class="sn-badge sn-off">None</span>';
+			}
+
+			var scanBadge = '';
+			var infectedText = '-';
+			if(ls){
+				if(ls.status === 'running'){
+					adaRunning = true;
+					scanBadge = '<span class="sn-badge sn-warn">Scanning...</span>';
+				} else if(ls.status === 'done'){
+					if(ls.found > 0){
+						scanBadge = '<span class="sn-badge sn-bad">' + ls.found + ' Infected</span>';
+						infectedText = '<span style="color:var(--bad,#f44336);font-weight:600">' + ls.found + ' files</span>';
+					} else {
+						scanBadge = '<span class="sn-badge sn-ok">Clean</span>';
+						infectedText = '<span style="color:var(--ok,#4caf50)">0</span>';
+					}
+					if(ls.selesai){
+						scanBadge += ' <span class="sn-refresh" style="font-size:11px">(' + waktu(ls.selesai) + ')</span>';
+					}
+				} else {
+					scanBadge = '<span class="sn-badge sn-off">' + (ls.status || 'Done') + '</span>';
+				}
+			} else {
+				scanBadge = '<span class="sn-badge sn-off">Not Scanned</span>';
+			}
+
+			var safePath = (s.path || '').replace(/'/g, "\\'");
+			var safeName = (s.name || '').replace(/'/g, "\\'");
+			var act = '<span class="sn-btn" onclick="snAvScan(\'' + safePath + '\',\'' + safeName + '\')">Scan</span> '
+				+ '<span class="sn-btn" onclick="snAvBaseline(\'' + safePath + '\',\'' + safeName + '\')">Baseline</span> '
+				+ '<span class="sn-btn" onclick="snAvCheck(\'' + safePath + '\',\'' + safeName + '\')">Check</span>';
+
+			h += '<tr>'
+				+ '<td><b>' + s.name + '</b>' + (s.status == '0' ? ' <span class="sn-badge sn-off">stopped</span>' : '') + '</td>'
+				+ '<td class="sn-mono" style="font-size:12px">' + s.path + '</td>'
+				+ '<td>' + baseBadge + '</td>'
+				+ '<td>' + scanBadge + '</td>'
+				+ '<td>' + infectedText + '</td>'
+				+ '<td class="r">' + act + '</td>'
+				+ '</tr>';
+		}
+		$('#tbAvSites').html(h);
+
+		if(adaRunning){
+			if(!window.SN_AV_POLL){
+				window.SN_AV_POLL = setInterval(function(){
+					if($('#top-antivirus').hasClass('on') && SN_AV_TAB === 'vhost'){
+						snAvSitesMuat();
+					} else {
+						clearInterval(window.SN_AV_POLL);
+						window.SN_AV_POLL = null;
+					}
+				}, 4000);
+			}
+		} else {
+			if(window.SN_AV_POLL){
+				clearInterval(window.SN_AV_POLL);
+				window.SN_AV_POLL = null;
+			}
+		}
+	});
+}
+
+function snAvScan(path, label){
+	layer.msg('Memulai pemindaian untuk ' + label + '...', {time: 2000});
+	snAjax('av_scan', {path: path, label: label}, function(m){
+		if(m){
+			layer.msg(m, {time: 3000});
+			snAvSitesMuat();
+		}
+	});
+}
+
+function snAvScanAll(){
+	layer.confirm('Jalankan pemindaian antivirus untuk seluruh vhost di latar belakang?',
+		{title: 'Scan All Vhosts'},
+		function(idx){
+			layer.close(idx);
+			layer.msg('Memulai pemindaian semua vhost...', {time: 2000});
+			snAjax('av_scan_all', {}, function(m){
+				if(m){
+					layer.msg(m, {time: 3500});
+					snAvSitesMuat();
+				}
+			});
+		}
+	);
+}
+
+function snAvBaseline(path, label){
+	layer.confirm('Rekam baseline integritas SHA-256 untuk <b>' + label + '</b>?<br>'
+		+ 'Hash seluruh berkas web (.php, .js, .html, .sh, dll) saat ini akan dijadikan patokan integritas.',
+		{title: 'Rekam Baseline Integritas'},
+		function(idx){
+			layer.close(idx);
+			var loadIdx = layer.msg('Merekam baseline...', {time:0, shade:[0.3,'#000']});
+			snAjax('av_baseline', {path: path, label: label}, function(m){
+				layer.close(loadIdx);
+				if(m){
+					layer.msg(m, {time: 3000});
+					snAvSitesMuat();
+				}
+			});
+		}
+	);
+}
+
+function snAvCheck(path, label){
+	var loadIdx = layer.msg('Memeriksa integritas berkas ' + label + '...', {time:0, shade:[0.3,'#000']});
+	snAjax('av_check', {path: path, label: label}, function(m){
+		layer.close(loadIdx);
+		if(m){
+			layer.msg(m, {time: 3000});
+			snAvSitesMuat();
+			$('#selAvIntegSite').val(label);
+			snAvSub('integ', $('#top-antivirus .sn-tabs span').eq(1));
+		}
+	});
+}
+
+function snAvIntegMuat(){
+	var site = $('#selAvIntegSite').val() || '';
+	snAjax('get_av_integrity', {label: site}, function(items){
+		if(!items){
+			kosong('#tbAvInteg', 4, 'Gagal memuat data integritas.');
+			return;
+		}
+		$('#avIntegCount').text(items.length);
+		if(!items.length){
+			kosong('#tbAvInteg', 4, 'Tidak ada perubahan integritas terdeteksi. Berkas identik dengan baseline.');
+			return;
+		}
+		var h = '';
+		for(var i = 0; i < items.length; i++){
+			var it = items[i];
+			var jBadge = '';
+			if(it.jenis === 'added'){
+				jBadge = '<span class="sn-badge sn-ok">+ added</span>';
+			} else if(it.jenis === 'changed'){
+				jBadge = '<span class="sn-badge sn-warn">~ changed</span>';
+			} else if(it.jenis === 'deleted'){
+				jBadge = '<span class="sn-badge sn-bad">- deleted</span>';
+			} else {
+				jBadge = '<span class="sn-badge sn-off">' + it.jenis + '</span>';
+			}
+
+			h += '<tr>'
+				+ '<td>' + jBadge + '</td>'
+				+ '<td class="sn-mono" style="font-size:12px;word-break:break-all">' + it.path + '</td>'
+				+ '<td class="sn-mono" style="font-size:11px">' + (it.hash_lama ? it.hash_lama.substring(0, 16) + '...' : '-') + '</td>'
+				+ '<td class="sn-mono" style="font-size:11px">' + (it.hash_baru ? it.hash_baru.substring(0, 16) + '...' : '-') + '</td>'
+				+ '</tr>';
+		}
+		$('#tbAvInteg').html(h);
+	});
+}
+
+function snAvQuarMuat(){
+	snAjax('get_av_quarantine', {}, function(items){
+		if(!items){
+			kosong('#tbAvQuar', 5, 'Gagal memuat karantina.');
+			return;
+		}
+		$('#avQuarCount').text(items.length);
+		$('#avQTotal').text(items.length);
+		if(!items.length){
+			kosong('#tbAvQuar', 5, 'Karantina kosong. Tidak ada berkas malware yang diisolasi.');
+			return;
+		}
+		var h = '';
+		for(var i = 0; i < items.length; i++){
+			var it = items[i];
+			var safeQPath = (it.path || '').replace(/'/g, "\\'");
+			var act = '<span class="sn-btn" onclick="snAvRestore(\'' + it.id + '\',\'' + safeQPath + '\')">Restore</span> '
+				+ '<span class="sn-btn dgr" onclick="snAvDelete(\'' + it.id + '\')">Delete</span>';
+			h += '<tr>'
+				+ '<td class="sn-mono" style="font-size:12px">' + it.waktu + '</td>'
+				+ '<td><span class="sn-badge sn-bad">' + it.virus + '</span></td>'
+				+ '<td class="sn-mono" style="font-size:12px;word-break:break-all">' + it.path + '</td>'
+				+ '<td class="r">' + ukuranAngka(it.ukuran) + '</td>'
+				+ '<td class="r">' + act + '</td>'
+				+ '</tr>';
+		}
+		$('#tbAvQuar').html(h);
+	});
+}
+
+function snAvRestore(id, path){
+	layer.confirm('<b>PERINGATAN:</b> Berkas ini terdeteksi sebagai malware!<br>'
+		+ 'Apakah Anda yakin ingin memulihkan berkas ke lokasi asal:<br>'
+		+ '<span class="sn-mono" style="font-size:12px">' + path + '</span><br>'
+		+ 'Hanya lakukan ini jika Anda yakin ini adalah false-positive!',
+		{title: 'Restore Berkas Karantina'},
+		function(idx){
+			layer.close(idx);
+			snAjax('av_restore', {id: id}, function(m){
+				if(m){
+					layer.msg(m, {time: 3000});
+					snAvQuarMuat();
+					snAvMuat();
+				}
+			});
+		}
+	);
+}
+
+function snAvDelete(id){
+	layer.confirm('Hapus permanen berkas karantina ini? Berkas tidak dapat dipulihkan lagi.',
+		{title: 'Hapus Berkas Karantina'},
+		function(idx){
+			layer.close(idx);
+			snAjax('av_delete', {id: id}, function(m){
+				if(m){
+					layer.msg(m, {time: 2500});
+					snAvQuarMuat();
+					snAvMuat();
+				}
+			});
+		}
+	);
+}
+
+function snAvQuarPurge(){
+	layer.confirm('Hapus SEMUA berkas di karantina secara permanen? Semua berkas malware yang diisolasi akan dimusnahkan.',
+		{title: 'Purge Semua Karantina'},
+		function(idx){
+			layer.close(idx);
+			snAjax('av_purge', {}, function(m){
+				if(m){
+					layer.msg(m, {time: 3000});
+					snAvQuarMuat();
+					snAvMuat();
+				}
+			});
+		}
+	);
+}
+
+function snAvDbUpdate(){
+	layer.confirm('Perbarui signature basis data virus ClamAV sekarang lewat freshclam?',
+		{title: 'Update Database Virus'},
+		function(idx){
+			layer.close(idx);
+			var loadIdx = layer.msg('Memperbarui database virus, mohon tunggu...', {time:0, shade:[0.3,'#000']});
+			snAjax('av_db_update', {}, function(m){
+				layer.close(loadIdx);
+				if(m){
+					layer.msg(m, {time: 3500});
+					snAvMuat();
+				}
+			});
+		}
+	);
+}
+
+function snAvLogsMuat(){
+	var kind = $('#selAvLogKind').val() || 'scan';
+	var limit = $('#selAvLogLimit').val() || 80;
+	snAjax('get_av_logs', {kind: kind, limit: limit}, function(lines){
+		if(!lines || !lines.length){
+			$('#avLogPre').text('(tidak ada catatan log)');
+			return;
+		}
+		$('#avLogPre').text(lines.join('\n'));
+	});
+}
+
+/* lencana panic ikut disegarkan, tapi tidak menimpa pesan yang sedang
+   dibaca pengguna. Hanya lencana di header yang diperbarui. */
+function snPanikRefresh(){
+	snAjax('get_panic', {}, function(m){
+		if(!m) return;
+		var l = $('#bPanic');
+		if(m.aktif){ l.text('panic: ACTIVE'); l.attr('class', 'sn-badge sn-bad'); }
+		else { l.text('panic: off'); l.attr('class', 'sn-badge sn-ok'); }
+	});
+}
+</script>

@@ -1,0 +1,34 @@
+[Unit]
+Description=Sentinel guardd (monitoring dan klasifikasi serangan)
+Documentation=file:/www/docs/2026-10-02-fitur-sentinel-monitoring-firewall.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/www/server/sentinel/bin/guardd -c /www/server/sentinel/etc/guardd.conf
+ExecReload=/bin/kill -HUP $MAINPID
+Restart=always
+RestartSec=5
+# batas keras: kalau daemon membengkak, restart lebih baik
+# daripada zajamnya sampai server kehabisan memori
+MemoryMax=256M
+LimitNOFILE=65536
+# direktori kerja /www supaya path relatif tidak salah
+WorkingDirectory=/www
+
+# Pengetatan minimal. Daemon hanya butuh menulis ke direktori miliknya
+# sendiri dan membaca log nginx.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+ReadWritePaths=/www/server/sentinel
+
+StandardOutput=append:/www/server/sentinel/log/guardd.out
+StandardError=append:/www/server/sentinel/log/guardd.out
+
+[Install]
+WantedBy=multi-user.target

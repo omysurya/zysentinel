@@ -1,0 +1,30 @@
+[Unit]
+Description=Sentinel aturan firewall kernel (iptables + ipset)
+Documentation=file:/www/docs/2026-10-02-fitur-sentinel-monitoring-firewall.md
+# Aturan firewall harus ada lebih dulu sebelum
+# permintaan masuk supaya tidak ada celah tanpa perlindungan.
+After=network-online.target
+Before=nginx.service
+
+[Service]
+Type=oneshot
+# RemainAfterExit SENGAJA TIDAK dipakai.
+#
+# Dengan RemainAfterExit=yes, unit Once selesai tetapi tetap berstatus
+# active (exited). Akibatnya setiap kali sentinel-fw.timer menyala,
+# systemd melihat unit sudah aktif lalu tidak menjalankan apa pun.
+# Gejalanya sangat menyesatkan: timer terlihat aktif dan
+# "TriggeredBy" menunjuk ke service, tapi ExecMainStartTimestamp tidak
+# pernah berubah sejak pemasangan pertama. Aturan kernel praktis tidak
+# pernah dipasang ulang.
+RemainAfterExit=no
+ExecStart=/www/server/sentinel/bin/sentinel-fw.sh install
+# ExecStop sengaja kosong. Melepas aturan firewall saat service dihentikan
+# akan membuka celah tanpa perlindungan tepat ketika daemon sedang dimatikan
+# untuk pemeliharaan. Aturan lebih baik dibiarkan, dicabut lewat
+# "sentinel-fw.sh remove" secara sadar.
+ExecStop=/bin/true
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target
