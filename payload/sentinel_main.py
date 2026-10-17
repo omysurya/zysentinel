@@ -156,16 +156,177 @@ class sentinel_main(object):
 
         return True, ''
 
+    def _get_active_lang(self, get=None):
+        """Ambil bahasa aktif: prioritaskan parameter get, lalu konfigurasi lang.json, default 'en'."""
+        if get:
+            l = getattr(get, 'lang', None) or (get.get('lang') if isinstance(get, dict) else None)
+            if l in ('en', 'id'):
+                return l
+        target_etc = self._p('etc', 'lang.json')
+        if os.path.exists(target_etc):
+            try:
+                with open(target_etc, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    val = data.get('lang')
+                    if val in ('en', 'id'):
+                        return val
+            except Exception:
+                pass
+        local_p = os.path.join(os.path.dirname(__file__), 'lang.json')
+        if os.path.exists(local_p):
+            try:
+                with open(local_p, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    val = data.get('lang')
+                    if val in ('en', 'id'):
+                        return val
+            except Exception:
+                pass
+        return 'en'
+
+    def _localize_msg(self, msg, lang='en'):
+        """Standarisasi pesan respon dan error sesuai bahasa yang aktif (default 'en')."""
+        if not msg or not isinstance(msg, str):
+            return msg
+
+        # Kamus terjemahan langsung (Exact Match) Indonesia -> Inggris
+        ID_TO_EN = {
+            'Aksi tidak dikenal': 'Unknown action',
+            'Aksi tidak dikenal (hanya start, stop, restart, reload)': 'Unknown action (start, stop, restart, reload only)',
+            'aksi tidak dikenal': 'Unknown action',
+            'alamat IP tidak valid': 'Invalid IP address',
+            'durasi harus angka bulat nonnegative': 'Duration must be a non-negative integer',
+            'durasi harus lebih besar dari nol': 'Duration must be greater than zero',
+            'ip ada di allowlist': 'IP address is in allowlist',
+            'ip tidak valid': 'Invalid IP address',
+            'nilai harus angka bulat': 'Value must be an integer',
+            'nilai maksimal 100000': 'Maximum value is 100,000',
+            'Pola pencocokan (pattern) wajib diisi': 'Matching pattern is required',
+            'ID aturan wajib diisi': 'Rule ID is required',
+            'ID aturan wajib disertakan': 'Rule ID is required',
+            'Berkas whitelist tidak ditemukan': 'Whitelist file not found',
+            'Aturan tidak ditemukan': 'Rule not found',
+            'Aturan dengan ID tersebut tidak ditemukan': 'Rule with that ID not found',
+            'Arah aturan harus inbound atau outbound': 'Rule direction must be inbound or outbound',
+            'Nomor port atau rentang port wajib diisi': 'Port number or range is required',
+            'Format port tidak valid (contoh: 80 atau 8000-8080)': 'Invalid port format (e.g. 80 or 8000-8080)',
+            'Nomor port harus berada di antara 1 dan 65535': 'Port number must be between 1 and 65535',
+            'Rentang port tidak valid (port awal harus lebih kecil)': 'Invalid port range (start port must be smaller)',
+            'URL harus diawali http:// atau https://': 'URL must start with http:// or https://',
+            'URL terlalu panjang': 'URL is too long',
+            'percobaan maksimal harus angka antara 1 dan 20': 'Maximum retries must be between 1 and 20',
+            'jumlah per siklus harus angka antara 1 dan 200': 'Batch size must be between 1 and 200',
+            'timeout harus angka antara 1 dan 120 detik': 'Timeout must be between 1 and 120 seconds',
+            'belum ada tujuan notifikasi. Isi dulu di sini.': 'No notification destination configured. Please configure it first.',
+            'notifikasi uji tidak masuk antrean': 'Test notification failed to queue',
+            'notifikasi uji terkirim': 'Test notification sent successfully',
+            'tujuan notifikasi disimpan': 'Notification destination saved',
+            'Status harus "on" atau "off"': 'Status must be "on" or "off"',
+            'Mode harus enforce, audit, atau off': 'Mode must be enforce, audit, or off',
+            'Nama vhost tidak valid': 'Invalid vhost name',
+            'Aksi tidak valid (start|stop|restart)': 'Invalid action (start|stop|restart)',
+            'Berkas metadata karantina tidak valid': 'Invalid quarantine metadata file',
+            'Berkas berhasil dipulihkan': 'File restored successfully',
+            'Pemulihan gagal': 'File restoration failed',
+            'Berkas karantina berhasil dihapus': 'Quarantine file deleted successfully',
+            'Gagal menghapus': 'Failed to delete',
+            'daftar tidak dikenal': 'Unknown list',
+            'nilai tidak valid': 'Invalid value',
+            'state harus on atau off': 'State must be on or off',
+            'state harus monitor atau blocking': 'State must be monitor or blocking',
+            'semua nilai minimal 1': 'All values must be at least 1',
+            'nilai di luar batas wajar': 'Value out of reasonable bounds',
+            'config.json tidak terbaca': 'Unable to read config.json',
+            'gagal menulis config.json': 'Failed to write config.json',
+            'site.json tidak terbaca': 'Unable to read site.json',
+            'gagal menulis site.json': 'Failed to write site.json',
+            'bentuk modul tidak dikenal': 'Unknown module structure',
+            'bagian cc rusak di config.json': 'Corrupted CC section in config.json',
+            'Daemon ZySentinel berhasil dijalankan (Started)': 'ZySentinel daemon successfully started',
+            'Daemon ZySentinel berhasil dihentikan (Stopped)': 'ZySentinel daemon successfully stopped',
+            'Daemon ZySentinel berhasil dimulai ulang (Restarted)': 'ZySentinel daemon successfully restarted',
+            'Konfigurasi daemon ZySentinel berhasil dimuat ulang via SIGHUP (Reloaded)': 'ZySentinel configuration successfully reloaded via SIGHUP',
+            'Akses ditolak: sesi tidak terotentikasi, silakan login ke aaPanel': 'Access denied: unauthenticated session, please log in to aaPanel',
+            'Akses ditolak: sesi telah kedaluwarsa, silakan login ulang': 'Access denied: session expired, please log in again',
+            'Akses ditolak: koneksi tidak terenkripsi, gunakan HTTPS': 'Access denied: unencrypted connection, please use HTTPS',
+            'Akses ditolak: verifikasi token anti-CSRF gagal': 'Access denied: anti-CSRF token verification failed',
+            'Akses ditolak: karakter null byte dilarang': 'Access denied: null byte prohibited',
+            'Akses ditolak: path traversal tidak diizinkan': 'Access denied: path traversal prohibited',
+            'Akses ditolak: Origin lintas domain tidak diizinkan': 'Access denied: cross-origin Origin not allowed',
+            'Akses ditolak: Referer lintas domain tidak diizinkan': 'Access denied: cross-origin Referer not allowed',
+            'Akses ditolak: Lingkungan tidak terdaftar sebagai pengembang resmi. Silakan sampaikan feedback dan laporan bug langsung melalui panel plugin ZySentinel (💬 Feedback & Report Bugs).': 'Access denied: Environment is not registered as an authorized developer. Please submit feedback and bug reports directly via the ZySentinel panel (💬 Feedback & Report Bugs).'
+        }
+
+        # Pola regex dinamis Indonesia -> Inggris
+        PATTERNS_TO_EN = [
+            (r'^gagal memblokir: (.*)$', r'Failed to ban IP: \1'),
+            (r'^gagal melepas blokir: (.*)$', r'Failed to unban IP: \1'),
+            (r'^gagal menambah: (.*)$', r'Failed to add: \1'),
+            (r'^gagal membaca daftar putih: (.*)$', r'Failed to read allowlist: \1'),
+            (r'^(.*) tidak ada di daftar putih$', r'\1 not found in allowlist'),
+            (r'^(.*) masuk daftar putih$', r'\1 added to allowlist'),
+            (r'^(.*) dihapus dari daftar putih$', r'\1 removed from allowlist'),
+            (r'^(.*) diblokir dan masuk ipset kernel, durasi (\d+) detik$', r'\1 banned and added to kernel ipset, duration \2 seconds'),
+            (r'^(.*) diblokir dan masuk ipset kernel$', r'\1 banned and added to kernel ipset'),
+            (r'^(.*) dilepas dari (daftar )?blokir$', r'\1 unbanned successfully'),
+            (r'^Gagal melakukan (start|stop|restart|reload): (.*)$', r'Failed to \1 service: \2'),
+            (r'^Aturan whitelist \'(.*)\' berhasil ditambahkan dan langsung aktif$', r"Process whitelist rule '\1' added successfully and active"),
+            (r'^Aturan \'(.*)\' berhasil dihapus$', r"Rule '\1' removed successfully"),
+            (r'^Pengaturan telemetri Google Tag Manager berhasil diubah: (.*)$', r'Google Tag Manager telemetry setting updated: \1'),
+            (r'^Bahasa antarmuka diubah ke (.*)$', r'Interface language changed to \1'),
+            (r'^Process Guard berhasil disetel ke mode: (.*)$', r'Process Guard mode set to: \1'),
+            (r'^Egress Guard berhasil diatur ke (.*): (.*)$', r'Egress Guard set to \1: \2'),
+            (r'^Threat Intel berhasil diperbarui: (.*)$', r'Threat Intel updated successfully: \1'),
+            (r'^Gagal memperbarui Threat Intel: (.*)$', r'Failed to update Threat Intel: \1'),
+            (r'^Upload Protection untuk vhost \'(.*)\' berhasil (.*)$', r"Upload Protection for vhost '\1' \2 successfully"),
+            (r'^Layanan sentinel-upload-scan berhasil di-(start|stop|restart)$', r'sentinel-upload-scan service successfully \1ed'),
+            (r'^Gagal (start|stop|restart) layanan: (.*)$', r'Failed to \1 service: \2'),
+            (r'^Gagal membaca konfigurasi: (.*)$', r'Failed to read configuration: \1'),
+            (r'^Gagal menulis: (.*)$', r'Failed to write: \1'),
+            (r'^gagal menulis: (.*)$', r'Failed to write: \1'),
+            (r'^kunci tidak dikenal: (.*)$', r'Unknown key: \1'),
+            (r'^modul tidak dikenal: (.*)$', r'Unknown module: \1'),
+            (r'^situs tidak ada di (.*)$', r'Site not found in \1'),
+            (r'^kueri basis data gagal: (.*)$', r'Database query failed: \1'),
+            (r'^gagal menyalakan panic: (.*)$', r'Failed to enable panic: \1'),
+            (r'^gagal mencabut panic: (.*)$', r'Failed to disable panic: \1'),
+            (r'^gagal membaca status: (.*)$', r'Failed to read status: \1'),
+            (r'^Gagal mengambil status upload scanner: (.*)$', r'Failed to get upload scanner status: \1'),
+            (r'^Galat parsing respons status: (.*)$', r'Error parsing status response: \1'),
+            (r'^Gagal memulihkan berkas: (.*)$', r'Failed to restore file: \1'),
+            (r'^Gagal menghapus karantina: (.*)$', r'Failed to delete quarantine: \1'),
+            (r'^(.*) diubah menjadi (.*), daemon direstart$', r'\1 changed to \2, daemon restarted'),
+            (r'^(.*) = (.*), aturan kernel sudah dipasang ulang$', r'\1 = \2, kernel rules reinstalled'),
+        ]
+
+        if lang == 'en':
+            if msg in ID_TO_EN:
+                return ID_TO_EN[msg]
+            for pattern, repl in PATTERNS_TO_EN:
+                if re.match(pattern, msg):
+                    return re.sub(pattern, repl, msg)
+            return msg
+
+        # Jika lang == 'id', jika pesan kebetulan masuk dalam bahasa Inggris, kembalikan padanan Indonesianya
+        EN_TO_ID = {v: k for k, v in ID_TO_EN.items()}
+        if msg in EN_TO_ID:
+            return EN_TO_ID[msg]
+        return msg
+
     def __getattribute__(self, name):
         attr = super(sentinel_main, self).__getattribute__(name)
         if name.startswith('_') or not callable(attr):
             return attr
 
         def secure_api_wrapper(get=None, *args, **kwargs):
+            active_lang = self._get_active_lang(get)
             ok, err_msg = self._enforce_security_guard(name, get)
             if not ok:
-                return public.returnMsg(False, err_msg)
-            return attr(get, *args, **kwargs)
+                return public.returnMsg(False, self._localize_msg(err_msg, active_lang))
+            res = attr(get, *args, **kwargs)
+            if isinstance(res, dict) and 'msg' in res and isinstance(res['msg'], str):
+                res['msg'] = self._localize_msg(res['msg'], active_lang)
+            return res
 
         return secure_api_wrapper
 
@@ -781,6 +942,7 @@ class sentinel_main(object):
         # dicatat oleh daemon di tabel aksi, jadi mencatatnya lagi di
         # sini akan menghasilkan dua baris untuk satu tindakan yang
         # sama. unban juga sama: dicatat daemon lewat ban_remove.
+        self._sh("'%s/bin/guardctl' flush" % self.__PATH, 10)
         if dipakai and secs > 0 and dipakai != secs:
             # Penyebab paling umum adalah nilai yang diminta melewati
             # ban_seconds_max, jadi Causes_hint disebut apa adanya tanpa
@@ -807,6 +969,7 @@ class sentinel_main(object):
         if rc != 0 or '"ok":true' not in o:
             return public.returnMsg(False, 'gagal melepas blokir: %s'
                                     % (o.strip() or e.strip()))
+        self._sh("'%s/bin/guardctl' flush" % self.__PATH, 10)
         return public.returnMsg(True, '%s dilepas dari daftar blokir' % ip)
 
     # ------------------------------------------------------------------ #

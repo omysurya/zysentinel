@@ -1981,6 +1981,9 @@ function snAjax(method, data, cb){
 	var d = data || {};
 	d.method = method;
 	d.s = method;
+	if(typeof SN_LANG !== 'undefined' && !d.lang){
+		d.lang = SN_LANG;
+	}
 
 	var headers = {
 		'X-Requested-With': 'XMLHttpRequest',

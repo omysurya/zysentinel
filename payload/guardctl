@@ -14,15 +14,38 @@ CONF="${SENTINEL_CONF:-/www/server/sentinel/etc/guardd.conf}"
 PIDFILE="$RUNDIR/guardd.pid"
 STATUSJSON="$RUNDIR/status.json"
 
+LANGFILE="${SENTINEL_ETC:-/www/server/sentinel/etc}/lang.json"
+
+get_lang() {
+  local l="en"
+  if [ -f "$LANGFILE" ]; then
+    l="$(grep -o '"lang"[[:space:]]*:[[:space:]]*"[^"]*"' "$LANGFILE" 2>/dev/null | cut -d'"' -f4)"
+  fi
+  [ "$l" = "id" ] && printf "id" || printf "en"
+}
+
 say() { printf '%s\n' "$*"; }
-err() { printf 'GALAT: %s\n' "$*" >&2; }
+err() {
+  if [ "$(get_lang)" = "id" ]; then
+    printf 'GALAT: %s\n' "$*" >&2
+  else
+    printf 'ERROR: %s\n' "$*" >&2
+  fi
+}
 
 is_systemd() {
   [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1
 }
 
 ctl() {
-  [ -S "$SOCK" ] || { err "socket daemon tidak ada ($SOCK), guardd belum jalan"; return 1; }
+  if [ ! -S "$SOCK" ]; then
+    if [ "$(get_lang)" = "id" ]; then
+      err "socket daemon tidak ada ($SOCK), guardd belum jalan"
+    else
+      err "daemon socket not found ($SOCK), guardd is not running"
+    fi
+    return 1
+  fi
   local reply=""
   if command -v nc >/dev/null 2>&1; then
     reply="$(printf '%s' "$1" | timeout 5 nc -U -q1 "$SOCK" 2>/dev/null)"
@@ -39,7 +62,19 @@ ctl() {
   if [ -z "$reply" ] && [ -n "$py_bin" ]; then
     reply="$("$py_bin" -c "import socket, sys; s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM); s.settimeout(5); s.connect('$SOCK'); s.sendall(sys.argv[1].encode()); print(s.recv(4096).decode('utf-8', errors='ignore').strip())" "$1" 2>/dev/null)"
   fi
-  if [ -z "$reply" ]; then err "tidak ada balasan dari guardd"; return 1; fi
+  if [ -z "$reply" ]; then
+    if [ "$(get_lang)" = "id" ]; then
+      err "tidak ada balasan dari guardd"
+    else
+      err "no response from guardd"
+    fi
+    return 1
+  fi
+  if [ "$(get_lang)" = "en" ]; then
+    reply="${reply//\"err\":\"ip tidak valid\"/\"err\":\"invalid IP address\"}"
+    reply="${reply//\"err\":\"ip ada di allowlist\"/\"err\":\"IP address is in allowlist\"}"
+    reply="${reply//\"err\":\"perintah tidak dikenal\"/\"err\":\"unknown command\"}"
+  fi
   say "$reply"
   case "$reply" in *'"ok":true'*) return 0 ;; *) return 1 ;; esac
 }
@@ -53,14 +88,21 @@ case "${1:-}" in
         cat "$STATUSJSON"
       fi
     else
-      err "status.json belum ada; guardd belum menulis statistik"
+      if [ "$(get_lang)" = "id" ]; then
+        err "status.json belum ada; guardd belum menulis statistik"
+      else
+        err "status.json not found; guardd has not written statistics yet"
+      fi
       exit 1
     fi
     ;;
 
   brief)
     # Ringkasan satu baris, enak untuk monitoring.
-    [ -f "$STATUSJSON" ] || { err "status.json belum ada"; exit 1; }
+    [ -f "$STATUSJSON" ] || {
+      if [ "$(get_lang)" = "id" ]; then err "status.json belum ada"; else err "status.json not found"; fi
+      exit 1
+    }
     if command -v jq >/dev/null 2>&1; then
       # Dua angka ban sengaja dipisahkan. bans_total adalah jumlah
       # ban yang PERNAH dibuat sejak daemon mulai, sedangkan bans_active
@@ -80,22 +122,46 @@ case "${1:-}" in
 
   ping)   ctl "ping" ;;
   ban)
-    [ -n "${2:-}" ] || { err "pakai: guardctl ban <ip> [durasi detik]"; exit 1; }
+    [ -n "${2:-}" ] || {
+      if [ "$(get_lang)" = "id" ]; then err "pakai: guardctl ban <ip> [durasi detik]"; else err "Usage: guardctl ban <ip> [duration seconds]"; fi
+      exit 1
+    }
     # Durasi opsional harus benar-benar dikirim ke daemon. Kalau argumen
     # ketiga diabaikan diam-diam, nilai yang diketik di panel tidak
     # pernah berlaku dan ban selalu memakai durasi bawaan.
     if [ -n "${3:-}" ]; then
       case "$3" in
-        ''|*[!0-9]*) err "durasi harus angka bulat: $3"; exit 1 ;;
+        ''|*[!0-9]*)
+          if [ "$(get_lang)" = "id" ]; then err "durasi harus angka bulat: $3"; else err "duration must be an integer: $3"; fi
+          exit 1
+          ;;
       esac
       ctl "ban $2 $3"
     else
       ctl "ban $2"
     fi
     ;;
-  unban)  [ -n "${2:-}" ] || { err "pakai: guardctl unban <ip>"; exit 1; }; ctl "unban $2" ;;
-  unreview) [ -n "${2:-}" ] || { err "pakai: guardctl unreview <ip>"; exit 1; }; ctl "unreview $2" ;;
-  allow)  [ -n "${2:-}" ] || { err "pakai: guardctl allow <ip>"; exit 1; }; ctl "allow $2" ;;
+  unban)
+    [ -n "${2:-}" ] || {
+      if [ "$(get_lang)" = "id" ]; then err "pakai: guardctl unban <ip>"; else err "Usage: guardctl unban <ip>"; fi
+      exit 1
+    }
+    ctl "unban $2"
+    ;;
+  unreview)
+    [ -n "${2:-}" ] || {
+      if [ "$(get_lang)" = "id" ]; then err "pakai: guardctl unreview <ip>"; else err "Usage: guardctl unreview <ip>"; fi
+      exit 1
+    }
+    ctl "unreview $2"
+    ;;
+  allow)
+    [ -n "${2:-}" ] || {
+      if [ "$(get_lang)" = "id" ]; then err "pakai: guardctl allow <ip>"; else err "Usage: guardctl allow <ip>"; fi
+      exit 1
+    }
+    ctl "allow $2"
+    ;;
   rescan) ctl "rescan" ;;
   flush)  ctl "flush" ;;
 
@@ -104,7 +170,10 @@ case "${1:-}" in
     # dipasang ulang dan dicabut meski guardd sedang mati, dan justru
     # di saat panik guardd itu yang paling mungkin tidak merespons.
     FW="${SENTINEL_FW:-/www/server/sentinel/bin/sentinel-fw.sh}"
-    [ -x "$FW" ] || { err "skrip firewall tidak ditemukan: $FW"; exit 1; }
+    [ -x "$FW" ] || {
+      if [ "$(get_lang)" = "id" ]; then err "skrip firewall tidak ditemukan: $FW"; else err "firewall script not found: $FW"; fi
+      exit 1
+    }
     "$FW" "$1"
     rc=$?
     # panic-status mengembalikan 1 saat tidak aktif. Itu jawaban yang
@@ -114,37 +183,57 @@ case "${1:-}" in
 
   start)
     if is_systemd && systemctl is-active sentinel.service >/dev/null 2>&1; then
-      say "sentinel.service sudah aktif dan berjalan"
+      if [ "$(get_lang)" = "id" ]; then say "sentinel.service sudah aktif dan berjalan"; else say "sentinel.service is already active and running"; fi
       exit 0
     fi
     if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE" 2>/dev/null)" 2>/dev/null; then
-      say "guardd sudah aktif dan berjalan (PID $(cat "$PIDFILE"))"
+      if [ "$(get_lang)" = "id" ]; then say "guardd sudah aktif dan berjalan (PID $(cat "$PIDFILE"))"; else say "guardd is already active and running (PID $(cat "$PIDFILE"))"; fi
       exit 0
     fi
     if is_systemd; then
-      systemctl start sentinel.service && say "sentinel.service berhasil dijalankan"
+      if [ "$(get_lang)" = "id" ]; then
+        systemctl start sentinel.service && say "sentinel.service berhasil dijalankan"
+      else
+        systemctl start sentinel.service && say "sentinel.service successfully started"
+      fi
     else
       BINDIR="$(dirname "$0")"
       nohup "$BINDIR/guardd" -c "$CONF" >/dev/null 2>&1 &
-      say "guardd dimulai di latar belakang"
+      if [ "$(get_lang)" = "id" ]; then say "guardd dimulai di latar belakang"; else say "guardd started in background"; fi
     fi
     ;;
 
   stop)
     if is_systemd && systemctl is-active sentinel.service >/dev/null 2>&1; then
-      systemctl stop sentinel.service && say "sentinel.service berhasil dihentikan"
+      if [ "$(get_lang)" = "id" ]; then
+        systemctl stop sentinel.service && say "sentinel.service berhasil dihentikan"
+      else
+        systemctl stop sentinel.service && say "sentinel.service successfully stopped"
+      fi
     else
-      ctl "stop" 2>/dev/null && say "permintaan berhenti dikirim, guardd akan menutup diri" || {
-        if [ -f "$PIDFILE" ]; then
-          kill "$(cat "$PIDFILE")" 2>/dev/null && say "guardd dihentikan via PID"
-        fi
-      }
+      if [ "$(get_lang)" = "id" ]; then
+        ctl "stop" 2>/dev/null && say "permintaan berhenti dikirim, guardd akan menutup diri" || {
+          if [ -f "$PIDFILE" ]; then
+            kill "$(cat "$PIDFILE")" 2>/dev/null && say "guardd dihentikan via PID"
+          fi
+        }
+      else
+        ctl "stop" 2>/dev/null && say "stop request sent, guardd will shut down" || {
+          if [ -f "$PIDFILE" ]; then
+            kill "$(cat "$PIDFILE")" 2>/dev/null && say "guardd stopped via PID"
+          fi
+        }
+      fi
     fi
     ;;
 
   restart)
     if is_systemd; then
-      systemctl restart sentinel.service && say "sentinel.service berhasil dimulai ulang"
+      if [ "$(get_lang)" = "id" ]; then
+        systemctl restart sentinel.service && say "sentinel.service berhasil dimulai ulang"
+      else
+        systemctl restart sentinel.service && say "sentinel.service successfully restarted"
+      fi
     else
       "$0" stop
       sleep 1
@@ -154,11 +243,23 @@ case "${1:-}" in
 
   reload)
     if is_systemd && systemctl is-active sentinel.service >/dev/null 2>&1; then
-      systemctl reload sentinel.service && say "konfigurasi sentinel.service berhasil dimuat ulang (SIGHUP)"
+      if [ "$(get_lang)" = "id" ]; then
+        systemctl reload sentinel.service && say "konfigurasi sentinel.service berhasil dimuat ulang (SIGHUP)"
+      else
+        systemctl reload sentinel.service && say "sentinel.service configuration successfully reloaded (SIGHUP)"
+      fi
     elif [ -f "$PIDFILE" ]; then
-      kill -HUP "$(cat "$PIDFILE")" 2>/dev/null && say "SIGHUP dikirim ke PID $(cat "$PIDFILE")"
+      if [ "$(get_lang)" = "id" ]; then
+        kill -HUP "$(cat "$PIDFILE")" 2>/dev/null && say "SIGHUP dikirim ke PID $(cat "$PIDFILE")"
+      else
+        kill -HUP "$(cat "$PIDFILE")" 2>/dev/null && say "SIGHUP sent to PID $(cat "$PIDFILE")"
+      fi
     else
-      ctl "rescan" 2>/dev/null && say "perintah rescan dikirim ke daemon" || err "gagal memuat ulang daemon"
+      if [ "$(get_lang)" = "id" ]; then
+        ctl "rescan" 2>/dev/null && say "perintah rescan dikirim ke daemon" || err "gagal memuat ulang daemon"
+      else
+        ctl "rescan" 2>/dev/null && say "rescan command sent to daemon" || err "failed to reload daemon"
+      fi
     fi
     ;;
 
@@ -166,8 +267,14 @@ case "${1:-}" in
     # Ubah satu key di berkas config. Menghentikan daemon dari
     # panel karena daemon membaca config hanya saat start.
     key="${2:-}"; val="${3:-}"
-    [ -n "$key" ] || { err "pakai: guardctl set <key> <nilai>"; exit 1; }
-    if [ ! -f "$CONF" ]; then err "config tidak ditemukan: $CONF"; exit 1; fi
+    [ -n "$key" ] || {
+      if [ "$(get_lang)" = "id" ]; then err "pakai: guardctl set <key> <nilai>"; else err "Usage: guardctl set <key> <value>"; fi
+      exit 1
+    }
+    if [ ! -f "$CONF" ]; then
+      if [ "$(get_lang)" = "id" ]; then err "config tidak ditemukan: $CONF"; else err "config not found: $CONF"; fi
+      exit 1
+    fi
     before="$CONF.$(date +%Y%m%d%H%M%S).bak"
     cp -p "$CONF" "$before"
     if grep -qE "^[[:space:]]*$key[[:space:]]*=" "$CONF"; then
@@ -175,8 +282,13 @@ case "${1:-}" in
     else
       printf '%s = %s\n' "$key" "$val" >> "$CONF"
     fi
-    say "config diperbarui: $key = $val (backup: $before)"
-    say "jalankan: systemctl restart sentinel"
+    if [ "$(get_lang)" = "id" ]; then
+      say "config diperbarui: $key = $val (backup: $before)"
+      say "jalankan: systemctl restart sentinel"
+    else
+      say "config updated: $key = $val (backup: $before)"
+      say "run: systemctl restart sentinel"
+    fi
     ;;
 
   live)
@@ -216,7 +328,7 @@ case "${1:-}" in
       sage_bin="/www/server/panel/plugin/sentinel/payload/sentinel-sage.py"
     fi
     if [ ! -f "$sage_bin" ]; then
-      err "sentinel-sage.py tidak ditemukan di $sage_bin"
+      if [ "$(get_lang)" = "id" ]; then err "sentinel-sage.py tidak ditemukan di $sage_bin"; else err "sentinel-sage.py not found at $sage_bin"; fi
       exit 1
     fi
     py_bin="/www/server/panel/pyenv/bin/python3"
@@ -229,12 +341,15 @@ case "${1:-}" in
     if is_systemd && command -v journalctl >/dev/null 2>&1 && systemctl cat sentinel >/dev/null 2>&1; then
       journalctl -u sentinel -n "$n" --no-pager
     else
-      tail -n "$n" /www/server/sentinel/log/guardd.log 2>/dev/null || err "log tidak ditemukan"
+      tail -n "$n" /www/server/sentinel/log/guardd.log 2>/dev/null || {
+        if [ "$(get_lang)" = "id" ]; then err "log tidak ditemukan"; else err "log not found"; fi
+      }
     fi
     ;;
 
   ""|help|-h|--help)
-    cat <<'EOF'
+    if [ "$(get_lang)" = "id" ]; then
+      cat <<'EOF'
 pakai: guardctl <perintah>
 
   status            tampilkan status.json lengkap (format rapi)
@@ -256,7 +371,37 @@ pakai: guardctl <perintah>
   check-auth        periksa otentikasi pengembang resmi & integritas kode
   scan-ai [path]    pindai prompt injection, toxic skills & aturan AI berbahaya
 EOF
+    else
+      cat <<'EOF'
+Usage: guardctl <command>
+
+  status            show full status.json (formatted)
+  brief             one-line summary
+  live              live monitor, refreshed every 2 seconds
+  ping              test if daemon responds
+  ban <ip>          ban IP immediately (with default timeout)
+  unban <ip>        unban IP and remove from blacklist
+  unreview <ip>     remove IP from review queue without banning
+  allow <ip>        permanent whitelist (persists across restarts)
+  rescan            force redetection of access log files now
+  flush             flush statistics to database
+  panic-on          emergency lockdown web access (SSH remains accessible)
+  panic-off         disable panic lockdown
+  panic-status      check if panic mode is active
+  stop              request daemon graceful shutdown
+  set <k> <v>       update a config key in guardd.conf
+  logs [n]          display last n log lines
+  check-auth        verify developer authority & code integrity
+  scan-ai [path]    scan for prompt injection, toxic skills & dangerous AI rules
+EOF
+    fi
     ;;
 
-  *) err "perintah tidak dikenal: $1 (lihat: guardctl help)"; exit 1 ;;
+  *)
+    if [ "$(get_lang)" = "id" ]; then
+      err "perintah tidak dikenal: $1 (lihat: guardctl help)"; exit 1
+    else
+      err "unknown command: $1 (see: guardctl help)"; exit 1
+    fi
+    ;;
 esac
