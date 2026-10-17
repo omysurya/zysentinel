@@ -523,8 +523,8 @@ class sentinel_main(object):
             info['mem_persen'] = 0.0
 
         st_ver = st.get('version')
-        if not st_ver or str(st_ver).strip() in ('1.0.0', '1.6', '1.6.0', '-'):
-            info['versi'] = 'v1.6.0'
+        if not st_ver or str(st_ver).strip() in ('1.0.0', '1.6', '1.6.0', '1.6.1', '-'):
+            info['versi'] = 'v1.6.1'
         else:
             info['versi'] = str(st_ver) if str(st_ver).lower().startswith('v') else ('v' + str(st_ver))
         info['pid'] = st.get('pid', 0)
@@ -3711,12 +3711,12 @@ class sentinel_main(object):
                 except Exception:
                     pass
 
-            v_info = '1.6.0'
+            v_info = '1.6.1'
             try:
                 info_p = os.path.join(os.path.dirname(__file__), 'info.json')
                 if os.path.exists(info_p):
                     with open(info_p, 'r', encoding='utf-8') as f:
-                        v_info = json.load(f).get('versions', '1.6.0')
+                        v_info = json.load(f).get('versions', '1.6.1')
             except Exception:
                 pass
 
@@ -3741,7 +3741,7 @@ class sentinel_main(object):
             pass
 
     def _parse_version(self, v_str):
-        """Parse semver string menjadi tuple integer (mis. 'v1.6.0' -> (1, 6, 0))."""
+        """Parse semver string menjadi tuple integer (mis. 'v1.6.1' -> (1, 6, 1))."""
         if not v_str:
             return (0, 0, 0)
         v_clean = str(v_str).strip().lstrip('vV')
@@ -3756,20 +3756,20 @@ class sentinel_main(object):
         return tuple(parts[:3])
 
     def _normalize_version(self, v_str):
-        """Pastikan format versi selalu berawalan 'v' (mis. 'v1.6.0')."""
+        """Pastikan format versi selalu berawalan 'v' (mis. 'v1.6.1')."""
         if not v_str or str(v_str).strip() in ('-', ''):
-            return 'v1.6.0'
+            return 'v1.6.1'
         s = str(v_str).strip()
         return s if s.lower().startswith('v') else ('v' + s)
 
     def get_lifecycle_status(self, get):
         """Ambil status detail siklus hidup, versi, dan diagnostik komponen."""
-        v_info = 'v1.6.0'
+        v_info = 'v1.6.1'
         try:
             info_p = os.path.join(os.path.dirname(__file__), 'info.json')
             if os.path.exists(info_p):
                 with open(info_p, 'r', encoding='utf-8') as f:
-                    v_raw = json.load(f).get('versions', '1.6.0')
+                    v_raw = json.load(f).get('versions', '1.6.1')
                     v_info = self._normalize_version(v_raw)
         except Exception:
             pass
@@ -3835,13 +3835,13 @@ class sentinel_main(object):
         """Periksa versi rilis terbaru di repository GitHub omysurya/zysentinel.
         
         Mendukung inspeksi melalui Releases API, Tags API, dan Branches API
-        (untuk branch rilis seperti v1.6.0), dengan parsing semver akurat."""
-        v_current = 'v1.6.0'
+        (untuk branch rilis seperti v1.6.1), dengan parsing semver akurat."""
+        v_current = 'v1.6.1'
         try:
             info_p = os.path.join(os.path.dirname(__file__), 'info.json')
             if os.path.exists(info_p):
                 with open(info_p, 'r', encoding='utf-8') as f:
-                    v_raw = json.load(f).get('versions', '1.6.0')
+                    v_raw = json.load(f).get('versions', '1.6.1')
                     v_current = self._normalize_version(v_raw)
         except Exception:
             pass
@@ -3900,7 +3900,7 @@ class sentinel_main(object):
             except Exception:
                 pass
 
-        # 3. Cek GitHub Branches (sinkronisasi dengan branch rilis seperti v1.6.0)
+        # 3. Cek GitHub Branches (sinkronisasi dengan branch rilis seperti v1.6.1)
         if not found_target:
             try:
                 req = urllib.request.Request(url_branches, headers=headers)
@@ -3939,7 +3939,7 @@ class sentinel_main(object):
         chk = self.check_github_update(get)
         data = chk.get('msg', {})
         download_url = data.get('download_url')
-        latest_ver = self._normalize_version(data.get('latest_version', 'v1.6.0'))
+        latest_ver = self._normalize_version(data.get('latest_version', 'v1.6.1'))
 
         staging_zip = '/tmp/sentinel_update.zip'
         staging_dir = '/tmp/sentinel_update_staging'
@@ -3947,7 +3947,7 @@ class sentinel_main(object):
         try:
             if download_url and download_url.startswith('http'):
                 try:
-                    headers = {'User-Agent': 'ZySentinel-Updater/1.6.0'}
+                    headers = {'User-Agent': 'ZySentinel-Updater/1.6.1'}
                     req = urllib.request.Request(download_url, headers=headers)
                     with urllib.request.urlopen(req, timeout=30) as resp, open(staging_zip, 'wb') as out_f:
                         out_f.write(resp.read())
@@ -4089,13 +4089,13 @@ class sentinel_main(object):
                 'subject': subject,
                 'message': full_body,
                 'email': user_email,
-                'version': '1.6.0'
+                'version': '1.6.1'
             }).encode('utf-8')
             dev_url = 'https://api.zysens.com/api/v1/sentinel/feedback'
             req = urllib.request.Request(
                 dev_url,
                 data=payload_data,
-                headers={'Content-Type': 'application/json', 'User-Agent': 'ZySentinel-Feedback/1.6.0'}
+                headers={'Content-Type': 'application/json', 'User-Agent': 'ZySentinel-Feedback/1.6.1'}
             )
             urllib.request.urlopen(req, timeout=4.0)
         except Exception:
