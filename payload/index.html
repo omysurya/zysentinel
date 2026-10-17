@@ -74,8 +74,9 @@
   background:linear-gradient(180deg, #080f21 0%, #030712 100%);
   box-shadow:var(--shadow-hi);overflow:hidden;max-width:calc(100% - 44px);
   width:min(1780px,100%);max-height:calc(100vh - 50px);display:flex;flex-direction:column}
-.sn-mhead{display:flex;align-items:center;gap:12px;padding:14px 22px;background:rgba(8,15,33,0.95);
+.sn-mhead{display:flex;align-items:center;gap:8px;padding:12px 20px;background:rgba(8,15,33,0.95);
   backdrop-filter:blur(14px);border-bottom:1px solid var(--border-subtle);box-shadow:0 4px 20px rgba(0,0,0,0.5)}
+.sn-mhead .sn-badge{font-size:10px !important;padding:2px 7px !important;gap:4px !important;letter-spacing:0.2px !important;white-space:nowrap !important;flex:0 0 auto !important;line-height:1.4 !important;cursor:pointer}
 
 /* Tombol tutup */
 .sn-mclose{flex:0 0 auto;width:32px;height:32px;line-height:30px;text-align:center;
@@ -360,12 +361,12 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 					</div>
 				</div>
 			</h2>
-			<span id="bGuard" class="sn-badge sn-off" style="cursor:pointer" onclick="snClickGuardBadge()" data-i18n-title="tip_b_guard_inact" title="Daemon Guardd: Pemantau log akses & mitigasi anomali realtime (Klik untuk kelola layanan)">Guardd: Inactive</span>
-			<span id="bAv" class="sn-badge sn-off" data-i18n-title="tip_b_av" title="Antivirus ClamAV: Pemindaian streaming berkas & karantina malware">ClamAV: Inactive</span>
-			<span id="bFw" class="sn-badge sn-off" data-i18n-title="tip_b_fw_inact" title="Kernel Firewall: Rantai iptables & ipset perlindungan paket jaringan">Firewall: Inactive</span>
-			<span id="bBackend" class="sn-badge sn-info" data-i18n-title="tip_b_backend" title="Backend Firewall: Subsistem kernel Linux yang aktif menegakkan aturan">Backend: Iptables-NFT</span>
-			<span id="bWaf" class="sn-badge sn-off" data-i18n-title="tip_b_waf" title="Web Application Firewall: Filter L7 inspeksi HTTP pencegah SQLi, XSS, dan exploit web">WAF: Off</span>
-			<span id="bPanic" class="sn-badge sn-ok" data-i18n-title="tip_b_panic_off" title="Tombol Panik: Matikan darurat seluruh akses web bila server diserang masif">Panic: Off</span>
+			<span id="bGuard" class="sn-badge sn-off" style="cursor:pointer" onclick="snClickGuardBadge()" data-i18n-title="tip_b_guard_inact" title="Daemon Guardd: Pemantau log akses & mitigasi anomali realtime (Klik untuk kelola layanan)">🛡️ Guardd: Inactive</span>
+			<span id="bAv" class="sn-badge sn-off" style="cursor:pointer" onclick="snTop('antivirus',$('.sn-mtabs span[onclick*=\'antivirus\']')[0])" data-i18n-title="tip_b_av" title="Antivirus ClamAV: Pemindaian streaming berkas & karantina malware">🦠 ClamAV: Inactive</span>
+			<span id="bFw" class="sn-badge sn-off" style="cursor:pointer" onclick="snTop('firewall',$('.sn-mtabs span[onclick*=\'firewall\']')[0])" data-i18n-title="tip_b_fw_inact" title="Kernel Firewall: Rantai iptables & ipset perlindungan paket jaringan">🔥 Firewall: Inactive</span>
+			<span id="bBackend" class="sn-badge sn-info" style="cursor:pointer" onclick="snTop('firewall',$('.sn-mtabs span[onclick*=\'firewall\']')[0])" data-i18n-title="tip_b_backend" title="Backend Firewall: Subsistem kernel Linux yang aktif menegakkan aturan">⚙️ NFT</span>
+			<span id="bWaf" class="sn-badge sn-off" style="cursor:pointer" onclick="snTop('waf',$('.sn-mtabs span[onclick*=\'waf\']')[0])" data-i18n-title="tip_b_waf" title="Web Application Firewall: Filter L7 inspeksi HTTP pencegah SQLi, XSS, dan exploit web">🌐 WAF: Off</span>
+			<span id="bPanic" class="sn-badge sn-ok" style="cursor:pointer" onclick="snTop('conf',$('.sn-mtabs span[onclick*=\'conf\']')[0])" data-i18n-title="tip_b_panic_off" title="Tombol Panik: Matikan darurat seluruh akses web bila server diserang masif">🚨 Panic: Off</span>
 			<span style="flex:1"></span>
 			<span id="snVerBadge" class="sn-badge" style="background:rgba(0,240,255,0.08);color:var(--accent-cyan);border:1px solid var(--border-cyan);cursor:pointer" onclick="snBukaMaintenance('update')" data-i18n-title="tip_ver_info" title="Version Information & Updates">v1.6.1</span>
 			<button id="btnHeaderMaint" class="sn-btn sn-sm" onclick="snBukaMaintenance()" style="background:rgba(16,185,129,0.1);color:var(--accent-green);border:1px solid var(--border-accent);font-weight:600" data-i18n="btn_maintenance" data-i18n-title="tip_maintenance" title="Open Maintenance, Updates & Diagnostics">⚙️ Maintenance</button>
@@ -2849,12 +2850,12 @@ function snUpdateBadgesAndNotes(m){
 	var s = m.status || {};
 	var g = $('#bGuard'), f = $('#bFw');
 	var gAct = (m.guardd_service === 'active');
-	g.text('Guardd: ' + (gAct ? (isEn ? 'Active' : 'Aktif') : (isEn ? 'Inactive' : 'Nonaktif')));
+	g.text('🛡️ Guardd: ' + (gAct ? (isEn ? 'Active' : 'Aktif') : (isEn ? 'Inactive' : 'Nonaktif')));
 	g.attr('class', 'sn-badge ' + (gAct ? 'sn-ok' : 'sn-bad'));
 	g.attr('title', isEn ? ('Guardd Daemon: ' + (gAct ? 'Actively monitoring real-time access logs' : 'Inactive')) : ('Daemon Guardd: ' + (gAct ? 'Berjalan aktif memantau akses realtime' : 'Tidak aktif')));
 
 	var fAct = (m.fw_service === 'active');
-	f.text('Firewall: ' + (fAct ? (isEn ? 'Active' : 'Aktif') : (isEn ? 'Inactive' : 'Nonaktif')));
+	f.text('🔥 Firewall: ' + (fAct ? (isEn ? 'Active' : 'Aktif') : (isEn ? 'Inactive' : 'Nonaktif')));
 	f.attr('class', 'sn-badge ' + (fAct ? 'sn-ok' : 'sn-bad'));
 	f.attr('title', isEn ? ('Kernel Firewall: ' + (fAct ? 'Netfilter iptables & ipset packet filtering active' : 'Firewall rules inactive')) : ('Kernel Firewall: ' + (fAct ? 'Rantai iptables & ipset aktif menyaring paket' : 'Aturan firewall belum aktif')));
 
@@ -4367,7 +4368,7 @@ function snPanicMuat(){
 		if(!m) return;
 		var lencana = $('#bPanic');
 		if(m.aktif){
-			lencana.text(isEn ? 'Panic: Active' : 'Panik: Aktif');
+			lencana.text(isEn ? '🚨 Panic: Active' : '🚨 Panik: Aktif');
 			lencana.attr('class', 'sn-badge sn-bad');
 			lencana.attr('title', isEn ? 'WARNING: Emergency Panic is ACTIVE! All web port access is blocked.' : 'PERINGATAN: Tombol Panik AKTIF! Seluruh akses port web sedang diblokir.');
 			$('#pnKondisi').removeClass('warn dgr').addClass('dgr')
@@ -4381,7 +4382,7 @@ function snPanicMuat(){
 				+ 'Yang masih bisa diakses: SSH, port panel, whitelist, dan jaringan privat.'));
 			$('#pnRules').text((m.baris && m.baris.length) ? m.baris.join('\n') : (isEn ? 'rules unreadable' : 'aturan tidak terbaca'));
 		} else {
-			lencana.text(isEn ? 'Panic: Off' : 'Panik: Off');
+			lencana.text(isEn ? '🚨 Panic: Off' : '🚨 Panik: Off');
 			lencana.attr('class', 'sn-badge sn-ok');
 			lencana.attr('title', isEn ? 'Panic button is inactive. All web access is running normally.' : 'Tombol Panik nonaktif. Seluruh akses web berjalan normal.');
 			$('#pnKondisi').removeClass('warn dgr').css('background', '#fff8e1').css('border-color', '#ffe082');
@@ -5244,18 +5245,18 @@ function snBackendLencana(){
 		var l = $('#bBackend');
 		var nama = m.backend || '?';
 		if(nama === 'iptables-nft'){
-			l.text('Backend: Iptables-NFT'); l.attr('class', 'sn-badge sn-info');
+			l.text('⚙️ NFT'); l.attr('class', 'sn-badge sn-info');
 			l.attr('title', isEn ? 'Firewall Backend: Linux kernel iptables-nft subsystem active' : 'Backend Firewall: Subsistem kernel Linux iptables-nft aktif');
 		} else if(nama === 'iptables-legacy'){
-			l.text('Backend: Iptables-Legacy'); l.attr('class', 'sn-badge sn-info');
+			l.text('⚙️ Legacy'); l.attr('class', 'sn-badge sn-info');
 			l.attr('title', isEn ? 'Firewall Backend: Linux kernel iptables-legacy subsystem active' : 'Backend Firewall: Subsistem kernel Linux iptables-legacy aktif');
 		} else if(nama === 'ufw-active' || nama === 'firewalld-active'){
-			var uLabel = (nama === 'ufw-active' ? 'UFW-Active' : 'Firewalld-Active');
-			l.text('Backend: ' + uLabel); l.attr('class', 'sn-badge sn-warn');
+			var uLabel = (nama === 'ufw-active' ? 'UFW' : 'Firewalld');
+			l.text('⚙️ ' + uLabel); l.attr('class', 'sn-badge sn-warn');
 			l.attr('title', isEn ? 'External frontend active. ZySentinel hooks at INPUT position 1 without modifying external rules.' : 'frontend lain aktif. ZySentinel menumpang di INPUT posisi 1, tidak menghapus aturan lain.');
 		} else {
 			var capNama = nama ? (nama.charAt(0).toUpperCase() + nama.slice(1)) : '?';
-			l.text('Backend: ' + capNama); l.attr('class', 'sn-badge sn-bad');
+			l.text('⚙️ ' + capNama); l.attr('class', 'sn-badge sn-bad');
 		}
 		if(m.split && m.split !== 'tidak-ada'){
 			l.attr('title', isEn ? ('WARNING: INPUT table contains rules on another backend (' + m.split + '). Hook may not intercept packets.') : ('PERINGATAN: tabel INPUT berisi aturan di backend lain (' + m.split + '). Hook mungkin tidak tersentuh paket.'));
@@ -5271,13 +5272,13 @@ function snWafLencana(){
 		var l = $('#bWaf');
 		var e = (m.engine && m.engine.nginx) || '?';
 		if(e === 'modsecurity'){
-			l.text('WAF: ModSecurity'); l.attr('class', 'sn-badge sn-ok');
+			l.text('🌐 WAF: ModSec'); l.attr('class', 'sn-badge sn-ok');
 			l.attr('title', isEn ? 'Nginx WAF: ModSecurity actively inspecting HTTP requests' : 'WAF Nginx: ModSecurity aktif memeriksa request HTTP');
 		} else if(e === 'coraza'){
-			l.text('WAF: Coraza'); l.attr('class', 'sn-badge sn-ok');
+			l.text('🌐 WAF: Coraza'); l.attr('class', 'sn-badge sn-ok');
 			l.attr('title', isEn ? 'Nginx WAF: Coraza WAF actively inspecting HTTP requests' : 'WAF Nginx: Coraza WAF aktif memeriksa request HTTP');
 		} else {
-			l.text(isEn ? 'WAF: Off' : 'WAF: Nonaktif'); l.attr('class', 'sn-badge sn-off');
+			l.text(isEn ? '🌐 WAF: Off' : '🌐 WAF: Off'); l.attr('class', 'sn-badge sn-off');
 			l.attr('title', isEn ? 'Web Application Firewall inactive. Nginx runs without WAF filter.' : 'Web Application Firewall nonaktif. Nginx berjalan tanpa filter WAF.');
 		}
 	});
@@ -6409,11 +6410,11 @@ function snAvLencana(){
 		var isEn = (SN_LANG !== 'id');
 		var l = $('#bAv');
 		if(m.ada === 'ya'){
-			l.text('ClamAV: ' + (m.clamd === 'ya' ? 'Active' : (isEn ? 'Ready' : 'Siap')));
+			l.text('🦠 ClamAV: ' + (m.clamd === 'ya' ? 'Active' : (isEn ? 'Ready' : 'Siap')));
 			l.attr('class', 'sn-badge sn-ok');
 			l.attr('title', 'ClamAV ' + (m.versi || '') + ' & Rkhunter ' + (m.rkhunter_versi || '') + ' (DB: ' + (m.db_umur || '') + ') - ' + (isEn ? 'Antivirus & Rootkit Ready' : 'Antivirus & Rootkit Siap'));
 		} else {
-			l.text(isEn ? 'ClamAV: Off' : 'ClamAV: Nonaktif');
+			l.text(isEn ? '🦠 ClamAV: Off' : '🦠 ClamAV: Nonaktif');
 			l.attr('class', 'sn-badge sn-off');
 			l.attr('title', isEn ? 'ClamAV is not installed on this server' : 'ClamAV tidak terpasang di server');
 		}
@@ -7187,11 +7188,11 @@ function snPanikRefresh(){
 		var isEn = (SN_LANG !== 'id');
 		var l = $('#bPanic');
 		if(m.aktif){
-			l.text(isEn ? 'Panic: Active' : 'Panik: Aktif');
+			l.text(isEn ? '🚨 Panic: Active' : '🚨 Panik: Aktif');
 			l.attr('class', 'sn-badge sn-bad');
 			l.attr('title', isEn ? 'WARNING: Panic Lockdown ACTIVE! All public web access is blocked.' : 'PERINGATAN: Tombol Panik AKTIF! Seluruh akses port web sedang diblokir.');
 		} else {
-			l.text(isEn ? 'Panic: Off' : 'Panik: Nonaktif');
+			l.text(isEn ? '🚨 Panic: Off' : '🚨 Panik: Off');
 			l.attr('class', 'sn-badge sn-ok');
 			l.attr('title', isEn ? 'Panic button inactive. All web traffic flows normally.' : 'Tombol Panik nonaktif. Seluruh akses web berjalan normal.');
 		}
@@ -7437,12 +7438,32 @@ function snBukaFeedback(){
 		+ '<b>' + (isEn ? 'Subject Format:' : 'Format Subjek Terkirim:') + '</b> <span id="snFbSubjectPreview" class="sn-mono" style="color:#0284c7">Feedback [Topik] [' + hostname + ']</span><br>'
 		+ '<span style="font-size:11px;color:#64748b">' + (isEn ? 'Privacy Assurance: Passwords, tokens, and private keys are automatically filtered before transmission.' : 'Jaminan Privasi: Server secara otomatis menghapus password, token, dan kunci privat sebelum diteruskan ke pengembang.') + '</span>'
 		+ '</div>'
+		+ '<div style="margin-top:14px;padding:12px 14px;background:linear-gradient(135deg, rgba(16,185,129,0.08) 0%, rgba(2,132,199,0.08) 100%);border:1px solid rgba(16,185,129,0.25);border-radius:8px">'
+		+ '<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px">'
+		+ '<div>'
+		+ '<div style="font-size:12.5px;font-weight:700;color:var(--ink);display:flex;align-items:center;gap:6px">'
+		+ '<span>☕</span> <span>' + (isEn ? 'Support ZySentinel Development' : 'Dukung Pengembangan ZySentinel') + '</span>'
+		+ '</div>'
+		+ '<div style="font-size:11.5px;color:var(--ink-2);margin-top:2px">'
+		+ (isEn ? 'Voluntary donation to support continuous security research & updates:' : 'Donasi sukarela untuk mendukung riset keamanan & kelanjutan fitur:')
+		+ '</div>'
+		+ '</div>'
+		+ '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
+		+ '<a href="https://saweria.co/omysurya" target="_blank" rel="noopener noreferrer" class="sn-btn" style="background:#f59e0b;color:#1e293b;font-weight:700;font-size:11.5px;padding:6px 12px;text-decoration:none;display:inline-flex;align-items:center;gap:5px;border:none;border-radius:6px;box-shadow:0 0 12px rgba(245,158,11,0.25)" title="' + (isEn ? 'Donate via Saweria (IDR, QRIS, GoPay, OVO, Dana)' : 'Donasi via Saweria (QRIS, GoPay, OVO, Dana)') + '">'
+		+ '💛 Saweria'
+		+ '</a>'
+		+ '<a href="https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=moelyhana%40gmail.com&currency_code=USD" target="_blank" rel="noopener noreferrer" class="sn-btn" style="background:#0284c7;color:#ffffff;font-weight:700;font-size:11.5px;padding:6px 12px;text-decoration:none;display:inline-flex;align-items:center;gap:5px;border:none;border-radius:6px;box-shadow:0 0 12px rgba(2,132,199,0.25)" title="PayPal: moelyhana@gmail.com">'
+		+ '🅿️ PayPal <span style="font-size:10.5px;opacity:.9;font-weight:400">(moelyhana@gmail.com)</span>'
+		+ '</a>'
+		+ '</div>'
+		+ '</div>'
+		+ '</div>'
 		+ '</div>';
 
 	layer.open({
 		type: 1,
 		title: isEn ? '💬 ZySentinel Developer Feedback & Bug Report' : '💬 Feedback & Laporan Bug Pengembang ZySentinel',
-		area: ['580px', 'auto'],
+		area: ['620px', 'auto'],
 		content: fbHtml,
 		btn: isEn ? ['Send Report', 'Cancel'] : ['Kirim Laporan', 'Batal'],
 		yes: function(idx){
