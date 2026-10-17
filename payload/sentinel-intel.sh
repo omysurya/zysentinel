@@ -177,5 +177,5 @@ case "${1:-status}" in
   status) do_status ;;
   flush)  do_flush ;;
   list)   do_list ;;
-  *) echo "pakai: $0 {update|status|flush|list}"; exit 1 ;;
+  *) echo "Usage: $0 {update|status|flush|list}"; exit 1 ;;
 esac

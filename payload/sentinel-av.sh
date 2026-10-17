@@ -1029,5 +1029,5 @@ case "${1:-status}" in
   db-update)          do_db_update ;;
   rkhunter-propupd)   do_rkhunter_propupd ;;
   rkhunter-update)    do_rkhunter_update ;;
-  *) echo "pakai: $0 {status|scan <path> [label]|scan-stream <engine> <path> [label]|scan-ai <path> [label]|scan-all|quarantine-list|quarantine-restore <id>|quarantine-delete <id>|quarantine-purge|baseline <path> [label]|baseline-sys|check <path> [label]|check-sys|integ-list [label]|db-update|rkhunter-propupd|rkhunter-update}"; exit 1 ;;
+  *) echo "Usage: $0 {status|scan <path> [label]|scan-stream <engine> <path> [label]|scan-ai <path> [label]|scan-all|quarantine-list|quarantine-restore <id>|quarantine-delete <id>|quarantine-purge|baseline <path> [label]|baseline-sys|check <path> [label]|check-sys|integ-list [label]|db-update|rkhunter-propupd|rkhunter-update}"; exit 1 ;;
 esac

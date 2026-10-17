@@ -986,5 +986,5 @@ case "${1:-status}" in
   ports-apply)  do_ports_apply ;;
   ports-status) do_ports_status ;;
   ports-reset)  do_ports_reset ;;
-  *) echo "pakai: $0 {install|remove|flush|status|backend|panic-on|panic-off|panic-status|egress-on|egress-off|egress-status|geo-apply|geo-clear|geo-status|ports-apply|ports-status|ports-reset}"; exit 1 ;;
+  *) echo "Usage: $0 {install|remove|flush|status|backend|panic-on|panic-off|panic-status|egress-on|egress-off|egress-status|geo-apply|geo-clear|geo-status|ports-apply|ports-status|ports-reset}"; exit 1 ;;
 esac

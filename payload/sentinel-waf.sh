@@ -764,7 +764,7 @@ case "${1:-help}" in
   freewaf-install) do_freewaf_install ;;
   freewaf-remove) do_freewaf_remove ;;
   help|*) cat <<'EOF'
-pakai: sentinel-waf.sh <perintah>
+Usage: sentinel-waf.sh <command>
   engine              deteksi engine WAF per webserver
   rules               daftar rule OWASP (nama|on|off|berkas)
   rule-on <nama>      aktifkan satu rule group

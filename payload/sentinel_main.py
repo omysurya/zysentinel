@@ -4321,7 +4321,7 @@ class sentinel_main(object):
             confirm = str(get.get('confirm', '')).strip()
             if confirm != 'UNINSTALL':
                 return public.returnMsg(False, 'Konfirmasi pencabutan tidak sesuai. Harap ketik UNINSTALL.')
-            rc, o, e = self._sh("bash %s cabut --clean" % install_script, 60)
+            rc, o, e = self._sh("bash %s uninstall --clean" % install_script, 60)
             self._send_telemetry('uninstall_clean', {'status': 'success' if rc == 0 else 'failed'})
             if rc != 0:
                 return public.returnMsg(False, 'Pencabutan gagal: %s' % (e or o))

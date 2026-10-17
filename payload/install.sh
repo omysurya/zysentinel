@@ -422,7 +422,7 @@ pasang_layanan() {
   fi
 }
 
-cabut_bersih() {
+uninstall_clean() {
   local force=0
   if [ "${1:-}" = "--force" ] || [ "${1:-}" = "--clean" ] || [ "${1:-}" = "-y" ] || [ ! -t 0 ]; then
     force=1
@@ -430,20 +430,20 @@ cabut_bersih() {
 
   if [ "$force" -eq 0 ]; then
     echo "============================================================"
-    echo " PERINGATAN: PENCABUTAN BERSIH ZYSENTINEL"
+    echo " [ZySentinel] CLEAN UNINSTALLATION / PENCABUTAN BERSIH"
     echo " Tindakan ini akan menghentikan seluruh layanan proteksi,"
     echo " mencabut aturan kernel firewall, melepas hook WAF, dan"
     echo " menghapus seluruh berkas/log di $BASE."
     echo " Konfigurasi vhost dan server akan dikembalikan ke awal."
     echo "============================================================"
-    read -r -p "Ketik 'UNINSTALL' untuk menyetujui pencabutan: " jawab
+    read -r -p "Type 'UNINSTALL' to confirm / Ketik 'UNINSTALL' untuk menyetujui: " jawab
     if [ "$jawab" != "UNINSTALL" ] && [ "$jawab" != "uninstall" ] && [ "$jawab" != "y" ] && [ "$jawab" != "Y" ]; then
-      say "Pencabutan dibatalkan oleh pengguna."
+      say "Pencabutan dibatalkan oleh pengguna / Uninstallation cancelled."
       return 0
     fi
   fi
 
-  say "Memulai pencabutan bersih ZySentinel..."
+  say "Memulai pencabutan bersih ZySentinel (Clean uninstallation)..."
   rm -f "$ETC/uninstall.lock" 2>/dev/null || true
 
   # 1. Cabut hook WAF webserver dan reload Nginx
@@ -494,8 +494,16 @@ cabut_bersih() {
   return 0
 }
 
+uninstall() {
+  uninstall_clean "${1:-}"
+}
+
+cabut_bersih() {
+  uninstall_clean "${1:-}"
+}
+
 cabut() {
-  cabut_bersih "${1:-}"
+  uninstall "${1:-}"
 }
 
 pasang_fresh() {
@@ -705,10 +713,10 @@ pasang_icon() {
 }
 
 butuh_root
-AKSI="${1:-pasang}"
+AKSI="${1:-install}"
 ARG2="${2:-}"
 case "$AKSI" in
-  pasang|install)
+  install|pasang)
     cek_depe \
       && pasang_daemon && pasang_unit_dari_payload && pasang_firewall \
       && pasang_layanan && pasang_notif && konsolidasi_waf && pasang_waf \
@@ -727,16 +735,16 @@ case "$AKSI" in
       && pasang_icon
     say "pembaruan selesai. Versi terbaru aktif."
     ;;
-  repair|perbaiki|self-heal)
+  repair|self-heal|perbaiki)
     perbaiki_mandiri
     ;;
-  cabut|uninstall)
-    cabut_bersih "$ARG2"
+  uninstall|cabut)
+    uninstall_clean "$ARG2"
     ;;
-  kunci)
+  lock|kunci)
     kunci_keamanan_benteng
     ;;
   *)
-    echo "pakai: $0 {pasang|fresh|update|repair|cabut|kunci}"; exit 1
+    echo "Usage: $0 {install|fresh|update|repair|uninstall|lock}"; exit 1
     ;;
 esac
