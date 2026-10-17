@@ -1505,11 +1505,11 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 							<div class="sn-card" style="margin-bottom:0;border-left:4px solid #ef4444">
 								<h3 style="color:#ef4444" data-i18n="uninstall_title">🗑️ Clean Uninstall</h3>
 								<p style="font-size:12.5px;color:var(--ink-2);margin:6px 0 12px;line-height:1.5" data-i18n="uninstall_desc">
-									Menghentikan seluruh proses proteksi, mencabut rantai aturan firewall kernel, melepas hook WAF dari Nginx, dan menghapus seluruh berkas di <span class="sn-mono">/www/server/sentinel</span> secara bersih tanpa sisa.
+									Stop all protection processes, revoke kernel firewall rules, remove WAF hooks from Nginx, and cleanly delete files.
 								</p>
 								<div style="display:flex;align-items:center;justify-content:space-between;margin-top:auto">
-									<span style="font-size:11.5px;color:#dc2626" data-i18n="badge_stops_protection">⚠️ Menghentikan Proteksi</span>
-									<button class="sn-btn dgr" onclick="snDoUninstall()" data-i18n="btn_uninstall" data-i18n-title="tip_uninstall" title="Hentikan Proteksi dan Cabut Seluruh Berkas Plugin Bersih Total">Cabut Bersih</button>
+									<span style="font-size:11.5px;color:#dc2626" data-i18n="badge_stops_protection">⚠️ Stops Protection</span>
+									<button class="sn-btn dgr" onclick="snDoUninstall()" data-i18n="btn_uninstall" data-i18n-title="tip_uninstall" title="Stop Protection and Completely Remove All Plugin Files">Clean Uninstall</button>
 								</div>
 							</div>
 						</div>
@@ -2628,9 +2628,9 @@ var SN_I18N = {
 		repair_title: "🩹 Perbaikan Mandiri (Repair)",
 		repair_desc: "Mendeteksi anomali atau kerusakan berkas, menyusun ulang biner yang hilang, memulihkan file konfigurasi default, dan mengaktifkan kembali daemon yang macet secara otomatis tanpa downtime.",
 		btn_self_heal: "Jalankan Self-Heal",
-		uninstall_title: "🗑️ Pencabutan Bersih (Uninstall)",
+		uninstall_title: "🗑️ Uninstall Bersih",
 		uninstall_desc: "Menghentikan seluruh proses proteksi, mencabut rantai aturan firewall kernel, melepas hook WAF dari Nginx, dan menghapus seluruh berkas di /www/server/sentinel secara bersih tanpa sisa.",
-		btn_uninstall: "Cabut Bersih",
+		btn_uninstall: "Uninstall Bersih",
 		feedback_history_title: "📋 Riwayat Laporan Feedback & Bug",
 		btn_new_feedback: "+ Buat Laporan Baru",
 		badge_zero_downtime: "● Tanpa Downtime",
@@ -2641,7 +2641,7 @@ var SN_I18N = {
 		tip_fresh_install: "Pasang Ulang Bersih: Reset Basis Data dan Konfigurasi Default",
 		tip_check_update: "Periksa dan Pasang Pembaruan dari Repository GitHub Resmi",
 		tip_self_heal: "Jalankan Diagnostik & Perbaikan Mandiri Tanpa Downtime",
-		tip_uninstall: "Hentikan Proteksi dan Cabut Seluruh Berkas Plugin Bersih Total",
+		tip_uninstall: "Hentikan Proteksi dan Jalankan Uninstall Bersih Total",
 		tip_maintenance: "Buka Menu Pemeliharaan, Update, dan Diagnostik",
 		tip_feedback: "Kirim Umpan Balik atau Laporan Bug ke Pengembang",
 		tip_close: "Tutup Jendela Dashboard ZySentinel",
@@ -3524,7 +3524,7 @@ function snUpdateDefconBanner(p){
 	}
 
 	if(p.panic_on){
-		$('#btnPanicToggle').text(isEn ? 'DISABLE PANIC' : 'CABUT PANIC').removeClass('dgr').addClass('sn-ok');
+		$('#btnPanicToggle').text(isEn ? 'DISABLE PANIC' : 'NONAKTIFKAN PANIK').removeClass('dgr').addClass('sn-ok');
 	} else {
 		$('#btnPanicToggle').text(isEn ? 'PANIC LOCKDOWN' : 'KUNCI PANIK').removeClass('sn-ok').addClass('dgr');
 	}
@@ -7207,6 +7207,12 @@ function snBukaMaintenance(subtab){
 	snSub2('maintenance', $('#top-conf .sn-tabs span[onclick*="\'maintenance\'"]').get(0));
 	if(subtab === 'update'){
 		snCheckUpdate();
+	} else if(subtab === 'uninstall' || subtab === 'cabut'){
+		snDoUninstall();
+	} else if(subtab === 'repair' || subtab === 'selfheal' || subtab === 'perbaiki'){
+		snDoSelfHeal();
+	} else if(subtab === 'fresh'){
+		snDoFreshInstall();
 	}
 	snLoadFeedbackHistory();
 }
@@ -7350,44 +7356,52 @@ function snDoUninstall(){
 	var unHtml = '<div style="padding:16px 20px;font-size:13px;color:var(--ink);line-height:1.6">'
 		+ '<div style="background:rgba(239,68,68,0.12);border:1px solid rgba(239,68,68,0.35);color:#fca5a5;padding:12px;border-radius:8px;margin-bottom:12px">'
 		+ (isEn ? '<b>CRITICAL WARNING:</b> You are about to uninstall ZySentinel completely.<br>• All security services will be stopped.<br>• Kernel firewall chains and blacklists will be purged.<br>• WAF hooks will be unlinked from Nginx.<br>• All files in <span class="sn-mono">/www/server/sentinel</span> and logs will be removed.<br>• Server configuration is restored cleanly without disturbing production sites.'
-		: '<b>PERINGATAN BAHAYA:</b> Anda akan mencabut ZySentinel secara total.<br>• Seluruh layanan proteksi akan dihentikan.<br>• Rantai kernel firewall dan set blacklist/throttle akan dicabut.<br>• Hook WAF pada Nginx akan dilepas (Nginx diverifikasi normal).<br>• Seluruh berkas di <span class="sn-mono">/www/server/sentinel</span> dan log akan dibersihkan tanpa sisa.<br>• Konfigurasi server dan vhost dikembalikan ke kondisi awal tanpa merusak situs pelanggan.')
+		: '<b>PERINGATAN KRITIS:</b> Anda akan mencabut / meng-uninstall ZySentinel secara total.<br>• Seluruh layanan proteksi akan dihentikan.<br>• Rantai kernel firewall dan set blacklist/throttle akan dicabut.<br>• Hook WAF pada Nginx akan dilepas (Nginx diverifikasi normal).<br>• Seluruh berkas di <span class="sn-mono">/www/server/sentinel</span> dan log akan dibersihkan tanpa sisa.<br>• Konfigurasi server dan vhost dikembalikan ke kondisi awal tanpa merusak situs pelanggan.')
 		+ '</div>'
-		+ '<p style="margin-bottom:8px">' + (isEn ? 'To proceed with clean uninstallation, type <b>UNINSTALL</b> below:' : 'Untuk melanjutkan pencabutan bersih, ketik <b>UNINSTALL</b> pada kotak di bawah:') + '</p>'
-		+ '<input type="text" id="inUnConfirm" class="sn-in" style="width:100%;font-weight:700;letter-spacing:1px;text-align:center;border-color:#f87171" placeholder="' + (isEn ? 'Type UNINSTALL' : 'Ketik UNINSTALL') + '">'
+		+ '<p style="margin-bottom:8px">' + (isEn ? 'To proceed with clean uninstallation, type <b>UNINSTALL</b> below:' : 'Untuk melanjutkan uninstall bersih, ketik <b>UNINSTALL</b> atau <b>CABUT</b> pada kotak di bawah:') + '</p>'
+		+ '<input type="text" id="inUnConfirm" class="sn-in" style="width:100%;font-weight:700;letter-spacing:1px;text-align:center;border-color:#f87171" placeholder="' + (isEn ? 'Type UNINSTALL' : 'Ketik UNINSTALL atau CABUT') + '">'
 		+ '</div>';
 
 	layer.open({
 		type: 1,
-		title: isEn ? '⚠️ Confirm Clean ZySentinel Uninstallation' : '⚠️ Konfirmasi Pencabutan Bersih ZySentinel',
+		title: isEn ? '⚠️ Confirm Clean ZySentinel Uninstallation' : '⚠️ Konfirmasi Uninstall Bersih ZySentinel',
 		area: ['520px', 'auto'],
 		content: unHtml,
-		btn: isEn ? ['Clean Uninstall', 'Cancel'] : ['Cabut Bersih Total', 'Batal'],
+		btn: isEn ? ['Clean Uninstall', 'Cancel'] : ['Uninstall Bersih', 'Batal'],
 		btn1: function(idx){
-			var txt = ($('#inUnConfirm').val() || '').trim();
-			if(txt !== 'UNINSTALL'){
-				layer.msg(isEn ? 'Confirmation text incorrect. Type UNINSTALL in uppercase.' : 'Konfirmasi teks salah. Ketik UNINSTALL dengan huruf besar.', {time: 3000});
+			var txt = ($('#inUnConfirm').val() || '').trim().toUpperCase();
+			if(txt !== 'UNINSTALL' && txt !== 'CABUT'){
+				layer.msg(isEn ? 'Confirmation text incorrect. Type UNINSTALL in uppercase.' : 'Konfirmasi teks salah. Ketik UNINSTALL atau CABUT dengan huruf besar.', {time: 3000});
 				return false;
 			}
 			layer.close(idx);
-			var loadIdx = layer.msg(isEn ? 'Uninstalling ZySentinel and cleaning files completely...' : 'Mencabut ZySentinel dan membersihkan berkas secara total...', {time:0, shade:[0.5,'#000']});
+			var loadIdx = layer.msg(isEn ? 'Uninstalling ZySentinel and cleaning files completely...' : 'Mencabut dan meng-uninstall ZySentinel secara total...', {time:0, shade:[0.5,'#000']});
 			if(typeof gtag === 'function'){
 				gtag('event', 'uninstall_clean', {'event_category': 'lifecycle', 'app_version': '1.6.1'});
 			}
-			snAjax('run_lifecycle_action', {action: 'uninstall', confirm: 'UNINSTALL'}, function(res){
+			snAjax('run_lifecycle_action', {action: 'uninstall', confirm: txt}, function(res){
 				layer.close(loadIdx);
 				if(res){
 					layer.alert(res + (isEn ? '<br><br>This dashboard will now close.' : '<br><br>Dasbor ini akan ditutup.'), {
-						title: isEn ? 'Uninstallation Completed' : 'Pencabutan Bersih Selesai',
+						title: isEn ? 'Uninstallation Completed' : 'Uninstall Bersih Selesai',
 						icon: 1,
 						yes: function(aIdx){
 							layer.close(aIdx);
 							snTutup();
+							if(window.parent && window.parent.layer){
+								try { window.parent.layer.closeAll(); } catch(e){}
+							}
+							try { location.reload(); } catch(e){}
 						}
 					});
 				}
 			});
 		}
 	});
+}
+
+function snDoCabut(){
+	snDoUninstall();
 }
 
 function snBukaFeedback(){

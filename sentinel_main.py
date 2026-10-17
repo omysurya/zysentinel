@@ -254,11 +254,17 @@ class sentinel_main(object):
             'Akses ditolak: path traversal tidak diizinkan': 'Access denied: path traversal prohibited',
             'Akses ditolak: Origin lintas domain tidak diizinkan': 'Access denied: cross-origin Origin not allowed',
             'Akses ditolak: Referer lintas domain tidak diizinkan': 'Access denied: cross-origin Referer not allowed',
-            'Akses ditolak: Lingkungan tidak terdaftar sebagai pengembang resmi. Silakan sampaikan feedback dan laporan bug langsung melalui panel plugin ZySentinel (💬 Feedback & Report Bugs).': 'Access denied: Environment is not registered as an authorized developer. Please submit feedback and bug reports directly via the ZySentinel panel (💬 Feedback & Report Bugs).'
+            'Akses ditolak: Lingkungan tidak terdaftar sebagai pengembang resmi. Silakan sampaikan feedback dan laporan bug langsung melalui panel plugin ZySentinel (💬 Feedback & Report Bugs).': 'Access denied: Environment is not registered as an authorized developer. Please submit feedback and bug reports directly via the ZySentinel panel (💬 Feedback & Report Bugs).',
+            'ZySentinel berhasil di-uninstall bersih tanpa sisa.': 'ZySentinel successfully uninstalled cleanly without residue.',
+            'ZySentinel berhasil dicabut bersih tanpa sisa.': 'ZySentinel successfully uninstalled cleanly without residue.',
+            'Konfirmasi uninstall tidak sesuai. Harap ketik UNINSTALL.': 'Confirmation incorrect. Please type UNINSTALL.',
+            'Konfirmasi pencabutan tidak sesuai. Harap ketik UNINSTALL.': 'Confirmation incorrect. Please type UNINSTALL.'
         }
 
         # Pola regex dinamis Indonesia -> Inggris
         PATTERNS_TO_EN = [
+            (r'^Pencabutan gagal: (.*)$', r'Uninstallation failed: \1'),
+            (r'^Uninstall gagal: (.*)$', r'Uninstallation failed: \1'),
             (r'^gagal memblokir: (.*)$', r'Failed to ban IP: \1'),
             (r'^gagal melepas blokir: (.*)$', r'Failed to unban IP: \1'),
             (r'^gagal menambah: (.*)$', r'Failed to add: \1'),
@@ -4307,9 +4313,9 @@ class sentinel_main(object):
         })
 
     def run_lifecycle_action(self, get):
-        """Jalankan aksi siklus hidup: fresh, repair, update, uninstall."""
+        """Jalankan aksi siklus hidup: fresh, repair, update, uninstall / cabut."""
         action = str(get.get('action', '')).strip().lower()
-        if action not in ['fresh', 'repair', 'update', 'uninstall']:
+        if action not in ['fresh', 'repair', 'update', 'uninstall', 'cabut']:
             return public.returnMsg(False, 'Aksi tidak valid (fresh|repair|update|uninstall)')
 
         plug_dir = os.path.dirname(__file__)
@@ -4317,15 +4323,15 @@ class sentinel_main(object):
         if not os.path.exists(install_script):
             return public.returnMsg(False, 'Skrip install.sh tidak ditemukan di direktori plugin')
 
-        if action == 'uninstall':
-            confirm = str(get.get('confirm', '')).strip()
-            if confirm != 'UNINSTALL':
-                return public.returnMsg(False, 'Konfirmasi pencabutan tidak sesuai. Harap ketik UNINSTALL.')
+        if action in ['uninstall', 'cabut']:
+            confirm = str(get.get('confirm', '')).strip().upper()
+            if confirm not in ['UNINSTALL', 'CABUT']:
+                return public.returnMsg(False, 'Konfirmasi uninstall tidak sesuai. Harap ketik UNINSTALL.')
             rc, o, e = self._sh("bash %s uninstall --clean" % install_script, 60)
             self._send_telemetry('uninstall_clean', {'status': 'success' if rc == 0 else 'failed'})
             if rc != 0:
-                return public.returnMsg(False, 'Pencabutan gagal: %s' % (e or o))
-            return public.returnMsg(True, 'ZySentinel berhasil dicabut bersih tanpa sisa.')
+                return public.returnMsg(False, 'Uninstall gagal: %s' % (e or o))
+            return public.returnMsg(True, 'ZySentinel berhasil di-uninstall bersih tanpa sisa.')
 
         elif action == 'fresh':
             rc, o, e = self._sh("bash %s fresh" % install_script, 90)
