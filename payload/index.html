@@ -224,18 +224,18 @@ select.sn-inp{cursor:pointer}
 			<span id="bWaf" class="sn-badge sn-off" title="Web Application Firewall: Filter L7 inspeksi HTTP pencegah SQLi, XSS, dan exploit web">WAF: Off</span>
 			<span id="bPanic" class="sn-badge sn-ok" title="Tombol Panik: Matikan darurat seluruh akses web bila server diserang masif">Panic: Off</span>
 			<span style="flex:1"></span>
-			<span id="snVerBadge" class="sn-badge" style="background:#f1f5f9;color:#334155;border:1px solid #cbd5e1;cursor:pointer" onclick="snBukaMaintenance('update')" title="Informasi Versi & Pembaruan">v1.6.1</span>
-			<button class="sn-btn sn-sm" onclick="snBukaMaintenance()" style="background:#e0f2fe;color:#0369a1;border:1px solid #bae6fd;font-weight:600" title="Buka Menu Pemeliharaan, Update, dan Diagnostik">⚙️ Pemeliharaan</button>
-			<button class="sn-btn sn-sm" onclick="snBukaFeedback()" style="background:#fef3c7;color:#92400e;border:1px solid #fde68a;font-weight:600" title="Kirim Umpan Balik atau Laporan Bug ke Pengembang">💬 Feedback</button>
-			<span class="sn-mclose" onclick="snTutup()" title="Tutup Jendela Dashboard ZySentinel">✕</span>
+			<span id="snVerBadge" class="sn-badge" style="background:#f1f5f9;color:#334155;border:1px solid #cbd5e1;cursor:pointer" onclick="snBukaMaintenance('update')" data-i18n-title="tip_ver_info" title="Version Information & Updates">v1.6.1</span>
+			<button id="btnHeaderMaint" class="sn-btn sn-sm" onclick="snBukaMaintenance()" style="background:#e0f2fe;color:#0369a1;border:1px solid #bae6fd;font-weight:600" data-i18n="btn_maintenance" data-i18n-title="tip_maintenance" title="Open Maintenance, Updates & Diagnostics">⚙️ Maintenance</button>
+			<button id="btnHeaderFeedback" class="sn-btn sn-sm" onclick="snBukaFeedback()" style="background:#fef3c7;color:#92400e;border:1px solid #fde68a;font-weight:600" data-i18n="btn_feedback" data-i18n-title="tip_feedback" title="Send Feedback or Bug Report to Developers">💬 Feedback</button>
+			<span class="sn-mclose" onclick="snTutup()" data-i18n-title="tip_close" title="Close ZySentinel Dashboard">✕</span>
 		</div>
 
 		<div class="sn-mtabs">
-			<span class="on" onclick="snTop('dash',this)" title="Buka Tab Ringkasan Dashboard">Dashboard</span>
-			<span onclick="snTop('antivirus',this)" title="Buka Tab Antivirus & Integritas Berkas">Antivirus</span>
-			<span onclick="snTop('firewall',this)" title="Buka Tab Konfigurasi Firewall & Port">Firewall</span>
-			<span onclick="snTop('waf',this)" title="Buka Tab Web Application Firewall">WAF</span>
-			<span onclick="snTop('conf',this)" title="Buka Tab Pengaturan Ambang & Sistem">Setting</span>
+			<span class="on" onclick="snTop('dash',this)" data-i18n="tab_dashboard" data-i18n-title="tip_tab_dash" title="Open Dashboard Overview">Dashboard</span>
+			<span onclick="snTop('antivirus',this)" data-i18n="tab_antivirus" data-i18n-title="tip_tab_av" title="Open Antivirus & File Integrity">Antivirus</span>
+			<span onclick="snTop('firewall',this)" data-i18n="tab_firewall" data-i18n-title="tip_tab_fw" title="Open Firewall & Port Configuration">Firewall</span>
+			<span onclick="snTop('waf',this)" data-i18n="tab_waf" data-i18n-title="tip_tab_waf" title="Open Web Application Firewall">WAF</span>
+			<span onclick="snTop('conf',this)" data-i18n="tab_setting" data-i18n-title="tip_tab_conf" title="Open Settings & System Controls">Settings</span>
 		</div>
 
 		<div class="sn-mbody">
@@ -255,7 +255,7 @@ select.sn-inp{cursor:pointer}
 						</div>
 					</div>
 					<div style="text-align:right;flex:0 0 auto">
-						<span class="sn-btn" onclick="snEliteLoad()" style="background:rgba(255,255,255,.2);color:#fff;border:1px solid rgba(255,255,255,.3)" title="Segarkan Postur Keamanan & Indikator Pertahanan">Segarkan</span>
+						<span id="btnDefconRefresh" class="sn-btn" onclick="snEliteLoad()" style="background:rgba(255,255,255,.2);color:#fff;border:1px solid rgba(255,255,255,.3)" data-i18n="btn_refresh" data-i18n-title="tip_refresh" title="Refresh Security Posture & Defense Indicators">Refresh</span>
 					</div>
 				</div>
 
@@ -264,26 +264,26 @@ select.sn-inp{cursor:pointer}
 					<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
 						<div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap">
 							<div style="display:flex;align-items:center;gap:8px">
-								<span style="font-size:12.5px;font-weight:600;color:var(--ink-2)">Egress (Anti-RevShell):</span>
-								<span id="tgEgress" class="sn-badge sn-ok" style="cursor:pointer;font-weight:700" onclick="snToggleEgress()" title="Sakelar Pembatasan Koneksi Keluar Pekerja Web (Cegah Reverse Shell)">AKTIF</span>
+								<span style="font-size:12.5px;font-weight:600;color:var(--ink-2)" data-i18n="egress_label">Egress (Anti-RevShell):</span>
+								<span id="tgEgress" class="sn-badge sn-ok" style="cursor:pointer;font-weight:700" onclick="snToggleEgress()" title="Web Worker Outbound Connection Restrictor (Prevent Reverse Shell)">ACTIVE</span>
 							</div>
 							<div style="display:flex;align-items:center;gap:8px">
-								<span style="font-size:12.5px;font-weight:600;color:var(--ink-2)">Process Guard (EDR):</span>
-								<span id="tgProc" class="sn-badge sn-ok" style="cursor:pointer;font-weight:700" onclick="snToggleProc()" title="Sakelar Perlindungan Eksekusi Proses Ilegal (EDR)">ENFORCE</span>
+								<span style="font-size:12.5px;font-weight:600;color:var(--ink-2)" data-i18n="proc_guard_label">Process Guard (EDR):</span>
+								<span id="tgProc" class="sn-badge sn-ok" style="cursor:pointer;font-weight:700" onclick="snToggleProc()" title="Unauthorized Process Execution Watchdog (EDR)">ENFORCE</span>
 							</div>
 							<div style="display:flex;align-items:center;gap:8px">
-								<span style="font-size:12.5px;font-weight:600;color:var(--ink-2)">Global Threat Intel:</span>
-								<span id="tgIntel" class="sn-badge sn-ok" style="font-weight:700" title="Jumlah Blok IP Penyerang Global Terdaftar">1,681 CIDR</span>
-								<span class="sn-btn" style="padding:2px 8px;font-size:11.5px" onclick="snSyncIntel()" title="Sinkronisasi Daftar Reputasi IP Penyerang Global Terbaru">Sync</span>
+								<span style="font-size:12.5px;font-weight:600;color:var(--ink-2)" data-i18n="threat_intel_label">Global Threat Intel:</span>
+								<span id="tgIntel" class="sn-badge sn-ok" style="font-weight:700" title="Registered Global Threat Intelligence IP Blocks">1,681 CIDR</span>
+								<span class="sn-btn" style="padding:2px 8px;font-size:11.5px" onclick="snSyncIntel()" data-i18n="btn_sync" data-i18n-title="tip_sync" title="Sync Latest Global Threat Intelligence Feed">Sync</span>
 							</div>
 							<div style="display:flex;align-items:center;gap:8px">
-								<span style="font-size:12.5px;font-weight:600;color:var(--ink-2)">Persistence FIM:</span>
-								<span id="tgFim" class="sn-badge sn-ok" style="font-weight:700" title="Hasil Pemantauan Integritas File Startup & Biner Penting">89 BERSIH</span>
-								<span class="sn-btn" style="padding:2px 8px;font-size:11.5px" onclick="snCheckFim()" title="Periksa Integritas File Startup & Biner Penting">Cek FIM</span>
+								<span style="font-size:12.5px;font-weight:600;color:var(--ink-2)" data-i18n="fim_label">Persistence FIM:</span>
+								<span id="tgFim" class="sn-badge sn-ok" style="font-weight:700" title="Startup Files & Critical Binaries Integrity Result">89 CLEAN</span>
+								<span class="sn-btn" style="padding:2px 8px;font-size:11.5px" onclick="snCheckFim()" data-i18n="btn_check_fim" data-i18n-title="tip_check_fim" title="Check Startup & Critical Binary File Integrity">Check FIM</span>
 							</div>
 						</div>
 						<div style="display:flex;align-items:center;gap:10px">
-							<span id="btnPanicToggle" class="sn-btn dgr" style="font-weight:700;padding:4px 12px" onclick="snPanicKancing()" title="Kunci Darurat Seluruh Akses Web Server Saat Diserang Masif">PANIC LOCKDOWN</span>
+							<span id="btnPanicToggle" class="sn-btn dgr" style="font-weight:700;padding:4px 12px" onclick="snPanicKancing()" data-i18n="btn_panic_lockdown" data-i18n-title="tip_panic_lockdown" title="Emergency Lockdown All Web Server Ports During Attack">PANIC LOCKDOWN</span>
 						</div>
 					</div>
 				</div>
@@ -407,9 +407,9 @@ select.sn-inp{cursor:pointer}
 								<th>Vhost</th><th class="r">Requests</th><th class="r">Data</th>
 								<th class="r">2xx</th><th class="r">4xx</th><th class="r">5xx</th>
 								<th class="r">429</th>
-								<th class="r" title="Total Ancaman & Serangan Terdeteksi">Threats</th>
-								<th class="r" title="Total IP Penyerang Terdeteksi">Attackers</th>
-								<th class="r" title="Total Virus & Malware Terdeteksi">Virus</th>
+								<th class="r" data-i18n="th_threats" title="Total Threats & Attacks Detected">Threats</th>
+								<th class="r" data-i18n="th_attackers" title="Total Unique Attacker IPs Detected">Attackers</th>
+								<th class="r" data-i18n="th_viruses" title="Total Viruses & Malware Detected">Viruses</th>
 								<th class="r">Peak Score</th>
 							</tr></thead>
 							<tbody id="tbVhost"><tr><td colspan="11" class="sn-empty">loading</td></tr></tbody>
@@ -1209,10 +1209,10 @@ select.sn-inp{cursor:pointer}
 
 				<div class="sn-card">
 					<div class="sn-tabs">
-						<span class="on" onclick="snSub2('atur',this)" title="Atur Ambang Batas Skor Serangan">Settings</span>
-						<span onclick="snSub2('laju',this)" title="Atur Batas Laju Request (RPS / RPM)">Rate Limits</span>
-						<span onclick="snSub2('panic',this)" title="Menu Darurat Kunci Panik Server">Panic</span>
-						<span onclick="snSub2('maintenance',this)" title="Manajemen Siklus Hidup & Pemeliharaan">Pemeliharaan</span>
+						<span class="on" onclick="snSub2('atur',this)" data-i18n="sub_set_general" data-i18n-title="tip_sub_atur" title="Score Thresholds & System Modes">Settings</span>
+						<span onclick="snSub2('laju',this)" data-i18n="sub_set_limits" data-i18n-title="tip_sub_laju" title="Request Rate Limits (RPS / RPM)">Rate Limits</span>
+						<span onclick="snSub2('panic',this)" data-i18n="sub_set_panic" data-i18n-title="tip_sub_panic" title="Emergency Server Panic Lockdown">Panic</span>
+						<span onclick="snSub2('maintenance',this)" data-i18n="sub_set_lifecycle" data-i18n-title="tip_sub_maint" title="Lifecycle Management & Maintenance">Maintenance</span>
 					</div>
 
 					<div class="sn-subpage on" id="c-atur">
@@ -1240,26 +1240,49 @@ select.sn-inp{cursor:pointer}
 							<b>Aktifkan (enforce = 1)</b> setelah melihat daftar IP yang akan diblokir dan memastikan semuanya memang penyerang.
 						</div>
 						<div class="sn-fl">
-							<span class="sn-btn pri" onclick="snSetConf('enforce','0',this)" title="Ubah Mode ke Monitor: Catat Tanpa Memblokir">Monitor Only</span>
-							<span class="sn-btn dgr" onclick="snSetConf('enforce','1',this)" title="Ubah Mode ke Enforce: Blokir Pelanggar di Kernel">Enable Blocking</span>
-							<span class="sn-btn" onclick="snSvc('restart')" title="Mulai Ulang Layanan Daemon sentinel.service">Restart Daemon</span>
+							<span class="sn-btn pri" onclick="snSetConf('enforce','0',this)" data-i18n="btn_monitor_only" title="Switch Mode to Monitor: Log Without Blocking">Monitor Only</span>
+							<span class="sn-btn dgr" onclick="snSetConf('enforce','1',this)" data-i18n="btn_enable_blocking" title="Switch Mode to Enforce: Block Violators in Kernel">Enable Blocking</span>
+							<span class="sn-btn" onclick="snSvc('restart')" data-i18n="btn_restart_daemon" title="Restart Sentinel Daemon Service">Restart Daemon</span>
 						</div>
 
-						<div style="font-weight:600;margin:18px 0 7px">Telemetry &amp; Google Tag Manager</div>
+						<div style="font-weight:600;margin:18px 0 7px" data-i18n="sec_language">Language / Bahasa</div>
+						<div class="sn-card" style="margin-bottom:14px;border-left:4px solid #8b5cf6;background:#f8fafc">
+							<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+								<div style="flex:1;min-width:260px">
+									<div style="display:flex;align-items:center;gap:8px;font-weight:600;font-size:13.5px;color:var(--ink)">
+										<span data-i18n="lang_title">Interface Language</span>
+										<span id="badgeLang" class="sn-badge sn-ok" style="font-weight:700">English (EN)</span>
+									</div>
+									<p style="font-size:12px;color:var(--ink-2);margin:4px 0 0;line-height:1.5" data-i18n="lang_desc">
+										Select the display language for the ZySentinel dashboard. The setting applies instantly and persists automatically.
+									</p>
+								</div>
+								<div style="display:flex;align-items:center;gap:8px">
+									<button id="btnLangEn" class="sn-btn ok" onclick="snSetLang('en')" style="font-weight:700;padding:6px 14px" title="Switch to English (Default)">
+										🇬🇧 English (Active)
+									</button>
+									<button id="btnLangId" class="sn-btn" onclick="snSetLang('id')" style="font-weight:400;padding:6px 14px" title="Alihkan ke Bahasa Indonesia">
+										🇮🇩 Bahasa Indonesia
+									</button>
+								</div>
+							</div>
+						</div>
+
+						<div style="font-weight:600;margin:18px 0 7px" data-i18n="sec_telemetry">Telemetry &amp; Google Tag Manager</div>
 						<div class="sn-card" style="margin-bottom:0;border-left:4px solid #3b82f6;background:#f8fafc">
 							<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
 								<div style="flex:1;min-width:260px">
 									<div style="display:flex;align-items:center;gap:8px;font-weight:600;font-size:13.5px;color:var(--ink)">
-										<span>Statistik Telemetri (Google Tag Manager)</span>
-										<span id="badgeTelemetry" class="sn-badge sn-ok" style="font-weight:700">AKTIF (ON)</span>
+										<span data-i18n="telemetry_title">Anonymous Telemetry (Google Tag Manager)</span>
+										<span id="badgeTelemetry" class="sn-badge sn-ok" style="font-weight:700">ACTIVE (ON)</span>
 									</div>
-									<p style="font-size:12px;color:var(--ink-2);margin:4px 0 0;line-height:1.5">
-										Mengirim data telemetri anonim (versi rilis plugin, status operasional, kejadian pembaruan/instalasi) ke Google Tag Manager untuk membantu tim pengembang ZySentinel memantau kestabilan sistem. <b>Tidak ada data kredensial, kunci, atau informasi sensitif vhost yang dikirim.</b>
+									<p style="font-size:12px;color:var(--ink-2);margin:4px 0 0;line-height:1.5" data-i18n="telemetry_desc">
+										Sends anonymous telemetry (plugin version, operational status, lifecycle events) to help monitor stability. No credentials or sensitive data are ever sent.
 									</p>
 								</div>
 								<div style="display:flex;align-items:center;gap:10px">
-									<button id="btnTelemetryToggle" class="sn-btn ok" onclick="snToggleTelemetry()" style="font-weight:600;padding:6px 14px" title="Nyalakan atau Matikan Pengiriman Data Telemetri GTM">
-										● Telemetri: ON (Aktif)
+									<button id="btnTelemetryToggle" class="sn-btn ok" onclick="snToggleTelemetry()" style="font-weight:600;padding:6px 14px" title="Toggle Google Tag Manager Telemetry">
+										● Telemetry: ON (Active)
 									</button>
 								</div>
 							</div>
@@ -1416,6 +1439,279 @@ var SN_WAFTAB = 'coraza';
 var SN_SYS_T = 0;
 
 /* =========================================================================
+   BILINGUAL SUPPORT (English & Bahasa Indonesia)
+   Default: English ('en'). Switchable in Settings Tab.
+   ========================================================================= */
+var SN_LANG = (function(){
+	try {
+		var l = localStorage.getItem('sn_lang');
+		if(l === 'id' || l === 'en') return l;
+	} catch(e){}
+	return 'en';
+})();
+
+var SN_I18N = {
+	en: {
+		brand_sub: "ZYSENTINEL v1.6.1",
+		btn_maintenance: "⚙️ Maintenance",
+		btn_feedback: "💬 Feedback",
+		tab_dashboard: "Dashboard",
+		tab_antivirus: "Antivirus",
+		tab_firewall: "Firewall",
+		tab_waf: "WAF",
+		tab_setting: "Settings",
+		active: "Active",
+		inactive: "Inactive",
+		open: "Open",
+		locked: "Locked",
+		clean: "Clean",
+		anomaly: "Anomaly",
+		egress_label: "Egress (Anti-RevShell):",
+		proc_guard_label: "Process Guard (EDR):",
+		threat_intel_label: "Global Threat Intel:",
+		fim_label: "Persistence FIM:",
+		btn_panic_lockdown: "PANIC LOCKDOWN",
+		btn_sync: "Sync",
+		btn_check_fim: "Check FIM",
+		btn_refresh: "Refresh",
+		card_total_attackers: "Total Attackers",
+		card_total_threats: "Total Threats",
+		card_total_virus: "Total Viruses",
+		card_active_bans: "Active IP Bans",
+		card_threat_intel: "Global Threat Intel",
+		card_rce_watchdog: "Anti-RCE Watchdog",
+		card_egress_defense: "Egress Defense",
+		card_persistence_fim: "Persistence FIM",
+		card_total_requests: "Total Requests",
+		card_lines_read: "Lines Read",
+		card_memory: "Memory",
+		th_requests: "Requests",
+		th_data: "Data",
+		th_threats: "Threats",
+		th_attackers: "Attackers",
+		th_viruses: "Viruses",
+		th_peak_score: "Peak Score",
+		sub_set_general: "Settings",
+		sub_set_limits: "Rate Limits",
+		sub_set_panic: "Panic",
+		sub_set_lifecycle: "Maintenance",
+		sec_score_thresholds: "Score Thresholds",
+		sec_weights_caps: "Weights and Category Caps",
+		sec_blocking_mode: "Blocking Mode",
+		btn_monitor_only: "Monitor Only",
+		btn_enable_blocking: "Enable Blocking",
+		btn_restart_daemon: "Restart Daemon",
+		sec_language: "Interface Language / Bahasa Antarmuka",
+		lang_title: "Interface Language",
+		lang_desc: "Select the display language for ZySentinel. Defaults to English with instantaneous switching to Bahasa Indonesia.",
+		lang_switched: "Interface language switched to English",
+		btn_lang_en: "🇬🇧 English (Active)",
+		btn_lang_id: "🇮🇩 Bahasa Indonesia",
+		sec_telemetry: "Telemetry & Google Tag Manager",
+		telemetry_title: "Anonymous Telemetry (Google Tag Manager)",
+		telemetry_desc: "Sends anonymous telemetry (plugin version, operational status, lifecycle events) to help monitor stability. No credentials or sensitive data are ever sent.",
+		telemetry_btn_on: "● Telemetry: ON (Active)",
+		telemetry_btn_off: "○ Telemetry: OFF (Disabled)",
+		badge_on: "ACTIVE (ON)",
+		badge_off: "DISABLED (OFF)",
+		maintenance_note: "Lifecycle and maintenance management for ZySentinel. All actions include confirmation dialogs and protection safeguards.",
+		fresh_install_title: "✨ Fresh Install",
+		fresh_install_desc: "Reinstall ZySentinel from scratch with clean default configurations. Useful to reset all databases.",
+		terms_policy_link: "Terms & Policies",
+		update_title: "🔄 Update",
+		update_desc: "Check for the latest release from the official GitHub repository (omysurya/zysentinel). Applies patches and binaries without removing data.",
+		btn_check_update: "Check & Update",
+		repair_title: "🩹 Self-Heal (Repair)",
+		repair_desc: "Detect file anomalies, recompile missing binaries, restore default configurations, and revive stalled daemons with zero downtime.",
+		btn_self_heal: "Run Self-Heal",
+		uninstall_title: "🗑️ Clean Uninstall",
+		uninstall_desc: "Stop all protection processes, revoke kernel firewall rules, remove WAF hooks from Nginx, and cleanly delete files.",
+		btn_uninstall: "Clean Uninstall",
+		feedback_history_title: "📋 Feedback & Bug Reports History",
+		btn_new_feedback: "+ New Report",
+		tip_maintenance: "Open Maintenance, Updates & Diagnostics Menu",
+		tip_feedback: "Send Feedback or Bug Report to Developers",
+		tip_close: "Close ZySentinel Dashboard Window",
+		tip_tab_dash: "Open Dashboard Summary Tab",
+		tip_tab_av: "Open Antivirus & File Integrity Tab",
+		tip_tab_fw: "Open Firewall & Port Configuration Tab",
+		tip_tab_waf: "Open Web Application Firewall Tab",
+		tip_tab_conf: "Open Settings & System Controls Tab"
+	},
+	id: {
+		brand_sub: "ZYSENTINEL v1.6.1",
+		btn_maintenance: "⚙️ Pemeliharaan",
+		btn_feedback: "💬 Feedback",
+		tab_dashboard: "Dashboard",
+		tab_antivirus: "Antivirus",
+		tab_firewall: "Firewall",
+		tab_waf: "WAF",
+		tab_setting: "Setting",
+		active: "Aktif",
+		inactive: "Tidak Aktif",
+		open: "Bebas",
+		locked: "Terkunci",
+		clean: "Bersih",
+		anomaly: "Anomali",
+		egress_label: "Egress (Anti-RevShell):",
+		proc_guard_label: "Process Guard (EDR):",
+		threat_intel_label: "Global Threat Intel:",
+		fim_label: "Persistence FIM:",
+		btn_panic_lockdown: "KUNCI PANIK",
+		btn_sync: "Sinkron",
+		btn_check_fim: "Cek FIM",
+		btn_refresh: "Segarkan",
+		card_total_attackers: "Total Penyerang",
+		card_total_threats: "Total Ancaman",
+		card_total_virus: "Total Virus",
+		card_active_bans: "Ban IP Aktif",
+		card_threat_intel: "Global Threat Intel",
+		card_rce_watchdog: "Anti-RCE Watchdog",
+		card_egress_defense: "Pertahanan Egress",
+		card_persistence_fim: "Integritas FIM",
+		card_total_requests: "Total Permintaan",
+		card_lines_read: "Baris Terbaca",
+		card_memory: "Memori",
+		th_requests: "Permintaan",
+		th_data: "Data",
+		th_threats: "Ancaman",
+		th_attackers: "Penyerang",
+		th_viruses: "Virus",
+		th_peak_score: "Skor Puncak",
+		sub_set_general: "Pengaturan",
+		sub_set_limits: "Batas Laju",
+		sub_set_panic: "Kunci Panik",
+		sub_set_lifecycle: "Pemeliharaan",
+		sec_score_thresholds: "Ambang Batas Skor",
+		sec_weights_caps: "Bobot dan Batas Kategori",
+		sec_blocking_mode: "Mode Pemblokiran",
+		btn_monitor_only: "Hanya Monitor",
+		btn_enable_blocking: "Aktifkan Pemblokiran",
+		btn_restart_daemon: "Mulai Ulang Daemon",
+		sec_language: "Bahasa Antarmuka / Interface Language",
+		lang_title: "Bahasa Tampilan",
+		lang_desc: "Pilih bahasa pengantar antarmuka ZySentinel. Pengaturan akan langsung diterapkan ke seluruh halaman dasbor dan tersimpan otomatis.",
+		lang_switched: "Bahasa antarmuka diubah ke Bahasa Indonesia",
+		btn_lang_en: "🇬🇧 English",
+		btn_lang_id: "🇮🇩 Bahasa Indonesia (Aktif)",
+		sec_telemetry: "Telemetri & Google Tag Manager",
+		telemetry_title: "Statistik Telemetri (Google Tag Manager)",
+		telemetry_desc: "Mengirim data telemetri anonim (versi rilis plugin, status operasional, kejadian pembaruan/instalasi) ke Google Tag Manager untuk membantu tim pengembang memantau kestabilan sistem. Tidak ada data kredensial atau informasi sensitif yang dikirim.",
+		telemetry_btn_on: "● Telemetri: ON (Aktif)",
+		telemetry_btn_off: "○ Telemetri: OFF (Mati)",
+		badge_on: "AKTIF (ON)",
+		badge_off: "NONAKTIF (OFF)",
+		maintenance_note: "Manajemen siklus hidup instalasi dan pemeliharaan ZySentinel. Seluruh tindakan dilengkapi dialog konfirmasi dan perlindungan keamanan server.",
+		fresh_install_title: "✨ Fresh Install",
+		fresh_install_desc: "Memasang ulang ZySentinel dari awal dengan konfigurasi bersih. Berguna jika ingin me-reset seluruh basis data dan memulai dari setelan default bawaan pabrik.",
+		terms_policy_link: "Ketentuan & Kebijakan",
+		update_title: "🔄 Pembaruan (Update)",
+		update_desc: "Memeriksa rilis terbaru dari repository resmi GitHub (omysurya/zysentinel). Melakukan patch versi dan pembaruan biner tanpa menghapus data atau konfigurasi Anda.",
+		btn_check_update: "Cek & Update",
+		repair_title: "🩹 Perbaikan Mandiri (Repair)",
+		repair_desc: "Mendeteksi anomali atau kerusakan berkas, menyusun ulang biner yang hilang, memulihkan file konfigurasi default, dan mengaktifkan kembali daemon yang macet secara otomatis tanpa downtime.",
+		btn_self_heal: "Jalankan Self-Heal",
+		uninstall_title: "🗑️ Pencabutan Bersih (Uninstall)",
+		uninstall_desc: "Menghentikan seluruh proses proteksi, mencabut rantai aturan firewall kernel, melepas hook WAF dari Nginx, dan menghapus seluruh berkas di /www/server/sentinel secara bersih tanpa sisa.",
+		btn_uninstall: "Cabut Bersih",
+		feedback_history_title: "📋 Riwayat Laporan Feedback & Bug",
+		btn_new_feedback: "+ Buat Laporan Baru",
+		tip_maintenance: "Buka Menu Pemeliharaan, Update, dan Diagnostik",
+		tip_feedback: "Kirim Umpan Balik atau Laporan Bug ke Pengembang",
+		tip_close: "Tutup Jendela Dashboard ZySentinel",
+		tip_tab_dash: "Buka Tab Ringkasan Dashboard",
+		tip_tab_av: "Buka Tab Antivirus & Integritas Berkas",
+		tip_tab_fw: "Buka Tab Konfigurasi Firewall & Port",
+		tip_tab_waf: "Buka Tab Web Application Firewall",
+		tip_tab_conf: "Buka Tab Pengaturan Ambang & Sistem"
+	}
+};
+
+function snT(key, fallback){
+	var lang = (SN_LANG === 'id') ? 'id' : 'en';
+	if(SN_I18N[lang] && typeof SN_I18N[lang][key] !== 'undefined'){
+		return SN_I18N[lang][key];
+	}
+	if(SN_I18N.en && typeof SN_I18N.en[key] !== 'undefined'){
+		return SN_I18N.en[key];
+	}
+	return (typeof fallback !== 'undefined') ? fallback : key;
+}
+
+function snSetLang(lang){
+	if(lang !== 'en' && lang !== 'id') lang = 'en';
+	SN_LANG = lang;
+	try {
+		localStorage.setItem('sn_lang', lang);
+	} catch(e){}
+	snAjax('set_lang_setting', {lang: lang}, function(){});
+	snApplyLang();
+	layer.msg(snT('lang_switched'), {time: 2000, icon: 1});
+}
+
+function snApplyLang(){
+	var isEn = (SN_LANG !== 'id');
+	$('[data-i18n]').each(function(){
+		var k = $(this).attr('data-i18n');
+		if(k && typeof SN_I18N[isEn ? 'en' : 'id'][k] !== 'undefined'){
+			$(this).html(SN_I18N[isEn ? 'en' : 'id'][k]);
+		}
+	});
+	$('[data-i18n-title]').each(function(){
+		var k = $(this).attr('data-i18n-title');
+		if(k && typeof SN_I18N[isEn ? 'en' : 'id'][k] !== 'undefined'){
+			$(this).attr('title', SN_I18N[isEn ? 'en' : 'id'][k]);
+		}
+	});
+
+	var bEn = $('#btnLangEn');
+	var bId = $('#btnLangId');
+	var badge = $('#badgeLang');
+	if(isEn){
+		badge.attr('class', 'sn-badge sn-ok').text('English (EN)');
+		bEn.attr('class', 'sn-btn ok').css('font-weight', '700').html('🇬🇧 English (Active)');
+		bId.attr('class', 'sn-btn').css('font-weight', '400').html('🇮🇩 Bahasa Indonesia');
+	} else {
+		badge.attr('class', 'sn-badge sn-ok').text('Bahasa Indonesia (ID)');
+		bEn.attr('class', 'sn-btn').css('font-weight', '400').html('🇬🇧 English');
+		bId.attr('class', 'sn-btn ok').css('font-weight', '700').html('🇮🇩 Bahasa Indonesia (Aktif)');
+	}
+
+	$('#btnHeaderMaint').html(snT('btn_maintenance'));
+	$('#btnHeaderFeedback').html(snT('btn_feedback'));
+	$('#btnDefconRefresh').html(snT('btn_refresh'));
+
+	snUpdateTelemetryUI();
+
+	if(SN_ELITE_DATA){
+		snUpdateDefconBanner(SN_ELITE_DATA);
+	}
+}
+
+function snInitLang(){
+	try {
+		var l = localStorage.getItem('sn_lang');
+		if(l === 'id' || l === 'en'){
+			SN_LANG = l;
+		} else {
+			SN_LANG = 'en';
+		}
+	} catch(e){
+		SN_LANG = 'en';
+	}
+	snApplyLang();
+
+	snAjax('get_lang_setting', {}, function(data){
+		if(data && data.lang && (data.lang === 'id' || data.lang === 'en')){
+			if(data.lang !== SN_LANG && !localStorage.getItem('sn_lang')){
+				SN_LANG = data.lang;
+				snApplyLang();
+			}
+		}
+	});
+}
+
+/* =========================================================================
    TELEMETRI STATISTIK GOOGLE TAG MANAGER (GTM / GA4)
    Default: Aktif (ON) dengan kontrol On/Off di menu Setting
    ========================================================================= */
@@ -1438,33 +1734,40 @@ function snInitTelemetry(){
 function snUpdateTelemetryUI(){
 	var badge = $('#badgeTelemetry');
 	var btn = $('#btnTelemetryToggle');
+	var isEn = (SN_LANG !== 'id');
 	if(SN_TELEMETRY_ENABLED){
-		badge.attr('class', 'sn-badge sn-ok').text('AKTIF (ON)');
-		btn.attr('class', 'sn-btn ok').html('● Telemetri: ON (Aktif)');
+		badge.attr('class', 'sn-badge sn-ok').text(isEn ? 'ACTIVE (ON)' : 'AKTIF (ON)');
+		btn.attr('class', 'sn-btn ok').html(isEn ? '● Telemetry: ON (Active)' : '● Telemetri: ON (Aktif)');
 	} else {
-		badge.attr('class', 'sn-badge sn-off').text('NONAKTIF (OFF)');
-		btn.attr('class', 'sn-btn').html('○ Telemetri: OFF (Mati)');
+		badge.attr('class', 'sn-badge sn-off').text(isEn ? 'DISABLED (OFF)' : 'NONAKTIF (OFF)');
+		btn.attr('class', 'sn-btn').html(isEn ? '○ Telemetry: OFF (Disabled)' : '○ Telemetri: OFF (Mati)');
 	}
 }
 
 function snToggleTelemetry(){
 	var targetVal = SN_TELEMETRY_ENABLED ? '0' : '1';
-	var txtAksi = SN_TELEMETRY_ENABLED ? 'menonaktifkan' : 'mengaktifkan';
-	layer.confirm('Apakah Anda yakin ingin ' + txtAksi + ' pengiriman statistik telemetri Google Tag Manager?',
-		{title: 'Konfigurasi Telemetri', icon: 3},
-		function(idx){
-			layer.close(idx);
-			var loadIdx = layer.msg('Menyimpan pengaturan telemetri...', {time:0, shade:[0.2,'#000']});
-			snAjax('set_telemetry_setting', {enabled: targetVal}, function(res){
-				layer.close(loadIdx);
-				SN_TELEMETRY_ENABLED = (targetVal === '1');
-				snUpdateTelemetryUI();
-				layer.msg(res || 'Pengaturan telemetri berhasil diperbarui', {icon: 1, time: 2500});
-				if(SN_TELEMETRY_ENABLED){
-					snInjectGtm();
-				}
-			});
-		}
+	var isEn = (SN_LANG !== 'id');
+	var txtAksi = isEn
+		? (SN_TELEMETRY_ENABLED ? 'disable' : 'enable')
+		: (SN_TELEMETRY_ENABLED ? 'menonaktifkan' : 'mengaktifkan');
+	var tanya = isEn
+		? ('Are you sure you want to ' + txtAksi + ' Google Tag Manager anonymous telemetry reporting?')
+		: ('Apakah Anda yakin ingin ' + txtAksi + ' pengiriman statistik telemetri Google Tag Manager?');
+	var judul = isEn ? 'Telemetry Configuration' : 'Konfigurasi Telemetri';
+	layer.confirm(tanya, {title: judul, icon: 3}, function(idx){
+		layer.close(idx);
+		var loadIdx = layer.msg(isEn ? 'Saving telemetry setting...' : 'Menyimpan pengaturan telemetri...', {time:0, shade:[0.2,'#000']});
+		snAjax('set_telemetry_setting', {enabled: targetVal}, function(res){
+			layer.close(loadIdx);
+			SN_TELEMETRY_ENABLED = (targetVal === '1');
+			snUpdateTelemetryUI();
+			layer.msg(isEn ? 'Telemetry setting updated successfully' : (res || 'Pengaturan telemetri berhasil diperbarui'), {icon: 1, time: 2500});
+			if(SN_TELEMETRY_ENABLED){
+				snInjectGtm();
+			}
+		});
+	});
+}
 	);
 }
 
@@ -1628,6 +1931,7 @@ function snBuka(){
 		snLuaMuat();    /* kartu LUA free_waf */
 		snFwMuat();     /* urutan aturan kernel */
 		snAvLencana();  /* lencana antivirus clamav */
+		snInitLang();      /* inisialisasi bahasa tampilan */
 		snInitTelemetry(); /* inisialisasi telemetri Google Tag Manager */
 	}, 500);
 }
@@ -1867,55 +2171,95 @@ function kosong(tbl, kolom, pesan){
 
 var SN_ELITE_DATA = null;
 
+function snUpdateDefconBanner(p){
+	if(!p) return;
+	var isEn = (SN_LANG !== 'id');
+	var ban = $('#snDefconBanner');
+	ban.removeClass('defcon-1 defcon-2 defcon-3 defcon-4 defcon-5').addClass('defcon-' + p.defcon);
+	$('#snDefconBadge').text('DEFCON ' + p.defcon);
+
+	var defconTitles = {
+		en: {
+			1: "DEFCON 1 -- EMERGENCY (PANIC MODE)",
+			2: "DEFCON 2 -- THREAT DETECTED & NEUTRALIZED",
+			3: "DEFCON 3 -- FULL DEFENSE ACTIVE",
+			4: "DEFCON 4 -- PARTIAL DEFENSE",
+			5: "DEFCON 5 -- DEFENSE INACTIVE"
+		},
+		id: {
+			1: "DEFCON 1 -- DARURAT (PANIC MODE)",
+			2: "DEFCON 2 -- ANCAMAN TERDETEKSI & DINETRALISIR",
+			3: "DEFCON 3 -- PERTAHANAN PENUH AKTIF",
+			4: "DEFCON 4 -- PERTAHANAN PARSIAL",
+			5: "DEFCON 5 -- PERTAHANAN NONAKTIF"
+		}
+	};
+	var defconDescs = {
+		en: {
+			1: "Server under complete quarantine: all public HTTP/HTTPS access is blocked at kernel level for incident investigation.",
+			2: "RCE attack attempts, unauthorized execution, or persistence anomalies were detected and neutralized within the last 15 minutes.",
+			3: "All defense layers (Kernel firewall, WAF, Egress Guard, Process Guard, Threat Intel) are running optimally with zero incidents.",
+			4: "Some elite defense modules (Egress, Process Guard, or Threat Intel) are currently inactive.",
+			5: "Major security systems are disabled. The server is vulnerable to attacks."
+		},
+		id: {
+			1: "Server dalam karantina total: seluruh akses HTTP/HTTPS publik diblokir di tingkat kernel demi investigasi insiden.",
+			2: "Upaya serangan RCE/eksekusi ilegal atau anomali persistensi terdeteksi dan dinetralisir dalam 15 menit terakhir.",
+			3: "Seluruh layer pertahanan (Firewall kernel, WAF, Egress Guard, Process Guard, Threat Intel) berjalan optimal tanpa insiden.",
+			4: "Beberapa modul pertahanan elit (Egress, Process Guard, atau Intel Feed) sedang dalam kondisi nonaktif.",
+			5: "Sistem pertahanan utama nonaktif. Server rentan terhadap serangan."
+		}
+	};
+
+	var langKey = isEn ? 'en' : 'id';
+	var t = (defconTitles[langKey] && defconTitles[langKey][p.defcon]) ? defconTitles[langKey][p.defcon] : p.defcon_title;
+	var d = (defconDescs[langKey] && defconDescs[langKey][p.defcon]) ? defconDescs[langKey][p.defcon] : p.defcon_desc;
+	$('#snDefconTitle').text(t);
+	$('#snDefconDesc').text(d);
+
+	var eg = p.egress_guard;
+	if(eg && eg.active){
+		$('#tgEgress').removeClass('sn-off sn-bad').addClass('sn-badge sn-ok').text(isEn ? 'ACTIVE' : 'AKTIF');
+	} else {
+		$('#tgEgress').removeClass('sn-ok').addClass('sn-badge sn-off').text(isEn ? 'INACTIVE' : 'NONAKTIF');
+	}
+
+	var pr = p.proc_guard;
+	if(pr && pr.active && pr.mode === 'enforce'){
+		$('#tgProc').removeClass('sn-off sn-bad').addClass('sn-badge sn-ok').text('ENFORCE');
+	} else if(pr && pr.mode === 'audit'){
+		$('#tgProc').removeClass('sn-ok sn-bad').addClass('sn-badge sn-off').text('AUDIT');
+	} else {
+		$('#tgProc').removeClass('sn-ok').addClass('sn-badge sn-bad').text('OFF');
+	}
+
+	var ti = p.threat_intel;
+	if(ti && ti.count > 0){
+		$('#tgIntel').removeClass('sn-off sn-bad').addClass('sn-badge sn-ok').text(ti.count.toLocaleString() + ' CIDR');
+	} else {
+		$('#tgIntel').removeClass('sn-ok').addClass('sn-badge sn-bad').text(isEn ? 'EMPTY' : 'KOSONG');
+	}
+
+	var fim = p.sys_persistence;
+	if(fim && fim.status === 'clean'){
+		$('#tgFim').removeClass('sn-bad sn-off').addClass('sn-badge sn-ok').text(isEn ? '89 CLEAN' : '89 BERSIH');
+	} else {
+		$('#tgFim').removeClass('sn-ok').addClass('sn-badge sn-bad').text((fim ? fim.changes : 1) + (isEn ? ' ANOMALIES' : ' ANOMALI'));
+	}
+
+	if(p.panic_on){
+		$('#btnPanicToggle').text(isEn ? 'DISABLE PANIC' : 'CABUT PANIC').removeClass('dgr').addClass('sn-ok');
+	} else {
+		$('#btnPanicToggle').text(isEn ? 'PANIC LOCKDOWN' : 'KUNCI PANIK').removeClass('sn-ok').addClass('dgr');
+	}
+}
+
 function snEliteLoad(){
 	snAjax('get_elite_posture', {}, function(res){
 		if(!res) return;
 		var p = res;
 		SN_ELITE_DATA = p;
-
-		// 1. Update DEFCON Banner
-		var ban = $('#snDefconBanner');
-		ban.removeClass('defcon-1 defcon-2 defcon-3 defcon-4 defcon-5').addClass('defcon-' + p.defcon);
-		$('#snDefconBadge').text('DEFCON ' + p.defcon);
-		$('#snDefconTitle').text(p.defcon_title);
-		$('#snDefconDesc').text(p.defcon_desc);
-
-		// 2. Update Tactical Controls
-		var eg = p.egress_guard;
-		if(eg && eg.active){
-			$('#tgEgress').removeClass('sn-off sn-bad').addClass('sn-badge sn-ok').text('AKTIF');
-		} else {
-			$('#tgEgress').removeClass('sn-ok').addClass('sn-badge sn-off').text('NONAKTIF');
-		}
-
-		var pr = p.proc_guard;
-		if(pr && pr.active && pr.mode === 'enforce'){
-			$('#tgProc').removeClass('sn-off sn-bad').addClass('sn-badge sn-ok').text('ENFORCE');
-		} else if(pr && pr.mode === 'audit'){
-			$('#tgProc').removeClass('sn-ok sn-bad').addClass('sn-badge sn-off').text('AUDIT');
-		} else {
-			$('#tgProc').removeClass('sn-ok').addClass('sn-badge sn-bad').text('OFF');
-		}
-
-		var ti = p.threat_intel;
-		if(ti && ti.count > 0){
-			$('#tgIntel').removeClass('sn-off sn-bad').addClass('sn-badge sn-ok').text(ti.count.toLocaleString() + ' CIDR');
-		} else {
-			$('#tgIntel').removeClass('sn-ok').addClass('sn-badge sn-bad').text('KOSONG');
-		}
-
-		var fim = p.sys_persistence;
-		if(fim && fim.status === 'clean'){
-			$('#tgFim').removeClass('sn-bad sn-off').addClass('sn-badge sn-ok').text('89 BERSIH');
-		} else {
-			$('#tgFim').removeClass('sn-ok').addClass('sn-badge sn-bad').text((fim ? fim.changes : 1) + ' ANOMALI');
-		}
-
-		if(p.panic_on){
-			$('#btnPanicToggle').text('CABUT PANIC').removeClass('dgr').addClass('sn-ok');
-		} else {
-			$('#btnPanicToggle').text('PANIC LOCKDOWN').removeClass('sn-ok').addClass('dgr');
-		}
+		snUpdateDefconBanner(p);
 
 		if(SN_SUB.aktif === 'edr'){
 			snEdrMuat();
@@ -2221,11 +2565,12 @@ function snWlTypeChange(val){
 function snStats(s, m){
 	var g = '#1a9c4e', r = '#f44336', o = '#ff9800', b = '#2f7fe0', dRed = '#dc2626';
 	var p = SN_ELITE_DATA;
+	var isEn = (SN_LANG !== 'id');
 	var intelText = (p && p.threat_intel ? p.threat_intel.count.toLocaleString() + ' CIDR' : '1,681 CIDR');
 	var edrText = (p && p.proc_guard ? p.proc_guard.mode.toUpperCase() + ' (' + p.proc_guard.kills + ' Kills)' : 'ENFORCE (0 Kills)');
 	var edrColor = (p && p.proc_guard && p.proc_guard.kills > 0 ? r : g);
-	var egressText = (p && p.egress_guard && p.egress_guard.active ? 'TERKUNCI' : 'BEBAS');
-	var fimText = (p && p.sys_persistence && p.sys_persistence.status === 'clean' ? '89 Bersih' : 'Anomali!');
+	var egressText = (p && p.egress_guard && p.egress_guard.active ? (isEn ? 'LOCKED' : 'TERKUNCI') : (isEn ? 'OPEN' : 'BEBAS'));
+	var fimText = (p && p.sys_persistence && p.sys_persistence.status === 'clean' ? (isEn ? '89 Clean' : '89 Bersih') : (isEn ? 'Anomaly!' : 'Anomali!'));
 	var fimColor = (p && p.sys_persistence && p.sys_persistence.status === 'clean' ? g : r);
 
 	var totalAttackers = (m && m.total_attackers !== undefined ? m.total_attackers : (s.total_attackers || s.ip_penyerang || 0));
@@ -2237,17 +2582,17 @@ function snStats(s, m){
 	var virColor = totalVirus > 0 ? r : g;
 
 	var kartu = [
-		['Total Attackers', totalAttackers.toLocaleString() + ' IP', atkColor, '&#128128;'],
-		['Total Threats', totalThreats.toLocaleString(), thrColor, '&#9888;'],
-		['Total Virus', totalVirus.toLocaleString() + ' File', virColor, '&#129440;'],
-		['Active IP Bans', (s.bans_active || 0) + ' IP', r, '&#128683;'],
-		['Global Threat Intel', intelText, g, '&#127760;'],
-		['Anti-RCE Watchdog', edrText, edrColor, '&#9889;'],
-		['Egress Defense', egressText, b, '&#128274;'],
-		['Persistence FIM', fimText, fimColor, '&#128193;'],
-		['Total Requests', (s.total_req || 0).toLocaleString(), b, '&#128065;'],
-		['Lines Read', (s.lines || 0).toLocaleString(), g, '&#128196;'],
-		['Memory', (m ? m.rss_mb : '0') + ' MB', b, '&#128190;']
+		[isEn ? 'Total Attackers' : 'Total Penyerang', totalAttackers.toLocaleString() + ' IP', atkColor, '&#128128;'],
+		[isEn ? 'Total Threats' : 'Total Ancaman', totalThreats.toLocaleString(), thrColor, '&#9888;'],
+		[isEn ? 'Total Viruses' : 'Total Virus', totalVirus.toLocaleString() + (isEn ? ' Files' : ' Berkas'), virColor, '&#129440;'],
+		[isEn ? 'Active IP Bans' : 'Ban IP Aktif', (s.bans_active || 0) + ' IP', r, '&#128683;'],
+		[isEn ? 'Global Threat Intel' : 'Global Threat Intel', intelText, g, '&#127760;'],
+		[isEn ? 'Anti-RCE Watchdog' : 'Anti-RCE Watchdog', edrText, edrColor, '&#9889;'],
+		[isEn ? 'Egress Defense' : 'Pertahanan Egress', egressText, b, '&#128274;'],
+		[isEn ? 'Persistence FIM' : 'Integritas FIM', fimText, fimColor, '&#128193;'],
+		[isEn ? 'Total Requests' : 'Total Permintaan', (s.total_req || 0).toLocaleString(), b, '&#128065;'],
+		[isEn ? 'Lines Read' : 'Baris Terbaca', (s.lines || 0).toLocaleString(), g, '&#128196;'],
+		[isEn ? 'Memory' : 'Memori', (m ? m.rss_mb : '0') + ' MB', b, '&#128190;']
 	];
 	var h = '';
 	for(var i = 0; i < kartu.length; i++){
@@ -4613,6 +4958,7 @@ SN_SUB2 = {
 };
 
 $(function(){
+	snInitLang();
 	snBuka();
 	snStatus();
 	snBans();
@@ -5467,8 +5813,8 @@ function snPanikRefresh(){
    FEEDBACK & BUGS REPORT & TERMS POLICY
    ============================================================ */
 function snBukaMaintenance(subtab){
-	snTop('conf', $('.sn-mtabs span:contains("Setting")').get(0));
-	snSub2('maintenance', $('#top-conf .sn-tabs span:contains("Pemeliharaan")').get(0));
+	snTop('conf', $('.sn-mtabs span[onclick*="\'conf\'"]').get(0));
+	snSub2('maintenance', $('#top-conf .sn-tabs span[onclick*="\'maintenance\'"]').get(0));
 	if(subtab === 'update'){
 		snCheckUpdate();
 	}

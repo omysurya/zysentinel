@@ -97,6 +97,11 @@ pasang_daemon() {
       chmod 644 "$ETC/telemetry.json"
       say "telemetry.json diinisialisasi default aktif (ON)"
     fi
+    if [ ! -f "$ETC/lang.json" ]; then
+      echo '{"lang": "en"}' > "$ETC/lang.json"
+      chmod 644 "$ETC/lang.json"
+      say "lang.json diinisialisasi default English (en)"
+    fi
     # Pasang kunci proteksi anti-tamper (hanya root yang bisa menghapus)
     if [ ! -f "$ETC/uninstall.lock" ]; then
       echo "zysentinel_tamper_protection_locked_by_root" > "$ETC/uninstall.lock"

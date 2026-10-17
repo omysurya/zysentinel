@@ -3806,6 +3806,55 @@ class sentinel_main(object):
         status_text = 'Aktif (ON)' if enabled else 'Nonaktif (OFF)'
         return public.returnMsg(True, 'Pengaturan telemetri Google Tag Manager berhasil diubah: %s' % status_text)
 
+    def get_lang_setting(self, get):
+        """Ambil konfigurasi bahasa antarmuka (default: 'en')."""
+        lang = 'en'
+        target_etc = self._p('etc', 'lang.json')
+        if os.path.exists(target_etc):
+            try:
+                with open(target_etc, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    lang = data.get('lang', 'en')
+            except Exception:
+                pass
+        else:
+            local_p = os.path.join(os.path.dirname(__file__), 'lang.json')
+            if os.path.exists(local_p):
+                try:
+                    with open(local_p, 'r', encoding='utf-8') as f:
+                        data = json.load(f)
+                        lang = data.get('lang', 'en')
+                except Exception:
+                    pass
+        return public.returnMsg(True, {'lang': lang if lang in ('en', 'id') else 'en'})
+
+    def set_lang_setting(self, get):
+        """Simpan preferensi bahasa antarmuka ('en' atau 'id')."""
+        lang = str(get.get('lang', 'en')).strip().lower()
+        if lang not in ('en', 'id'):
+            lang = 'en'
+        payload = {
+            'lang': lang,
+            'updated_at': int(time.time())
+        }
+        target_etc = self._p('etc', 'lang.json')
+        try:
+            os.makedirs(os.path.dirname(target_etc), exist_ok=True)
+            with open(target_etc, 'w', encoding='utf-8') as f:
+                json.dump(payload, f, indent=2)
+        except Exception as e:
+            return public.returnMsg(False, 'Gagal menyimpan preferensi bahasa: %s' % str(e))
+
+        try:
+            local_p = os.path.join(os.path.dirname(__file__), 'lang.json')
+            with open(local_p, 'w', encoding='utf-8') as f:
+                json.dump(payload, f, indent=2)
+        except Exception:
+            pass
+
+        label = 'English' if lang == 'en' else 'Bahasa Indonesia'
+        return public.returnMsg(True, 'Bahasa antarmuka diubah ke %s' % label)
+
     def _send_telemetry(self, event_name, extra_params=None):
         """Kirim statistik telemetri anonim (instalasi/error/pembaruan) ke Google Analytics.
         
