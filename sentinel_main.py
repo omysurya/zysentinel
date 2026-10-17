@@ -3058,7 +3058,7 @@ class sentinel_main(object):
         path = str(get.get('path', '')).strip()
         label = self._only(get, 'label', '')
         engine = str(get.get('engine', 'both')).strip().lower()
-        if engine not in ('clamav', 'rkhunter', 'both'):
+        if engine not in ('clamav', 'rkhunter', 'both', 'all', 'judol', 'ransomware', 'mining', 'sage', 'ai', 'scan-ai'):
             engine = 'both'
 
         if not path or not os.path.isdir(path):
@@ -3076,10 +3076,27 @@ class sentinel_main(object):
 
         return self.av_scan_start(get)
 
+    def av_scan_ai(self, get):
+        """Mulai pemindaian AI Safety (SAGE Prompt Injection & Toxic Skills)."""
+        get['engine'] = 'sage'
+        return self.av_scan_start(get)
+
+    def av_sage_test(self, get):
+        """Jalankan unit test mandiri heuristik SAGE AI Safety."""
+        skrip = self._p('bin', 'sentinel-sage.py')
+        if not os.path.isfile(skrip):
+            skrip = '/www/server/panel/plugin/sentinel/payload/sentinel-sage.py'
+        if not os.path.isfile(skrip):
+            return public.returnMsg(False, 'sentinel-sage.py tidak ditemukan')
+        py = '/www/server/panel/pyenv/bin/python3'
+        cmd = "%s '%s' test" % (py, skrip)
+        rc, o, e = self._sh(cmd, 30)
+        return public.returnMsg(rc == 0, o.strip() if rc == 0 else (e.strip() or o.strip()))
+
     def av_scan_start(self, get):
-        """Mulai pemindaian realtime streaming (ClamAV, Rkhunter, Ransomware, Judol, Mining, atau All-in-One)."""
+        """Mulai pemindaian realtime streaming (ClamAV, Rkhunter, Ransomware, Judol, Mining, SAGE AI Safety, atau All-in-One)."""
         engine = str(get.get('engine', 'both')).strip().lower()
-        if engine not in ('clamav', 'rkhunter', 'both', 'all', 'judol', 'ransomware', 'mining'):
+        if engine not in ('clamav', 'rkhunter', 'both', 'all', 'judol', 'ransomware', 'mining', 'sage', 'ai', 'scan-ai'):
             engine = 'both'
 
         target_type = str(get.get('target_type', 'vhost')).strip().lower()

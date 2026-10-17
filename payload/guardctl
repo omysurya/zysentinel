@@ -193,6 +193,21 @@ case "${1:-}" in
     /www/server/panel/pyenv/bin/python3 -c "import sys; sys.path.insert(0, '/www/server/panel/plugin/sentinel'); import sentinel_main; p = sentinel_main.sentinel_main(); res = p.verify_developer_auth(); import json; print(json.dumps(res, indent=2))"
     ;;
 
+  scan-ai)
+    target="${2:-/www/wwwroot}"
+    sage_bin="${SENTINEL_BIN:-/www/server/sentinel/bin}/sentinel-sage.py"
+    if [ ! -f "$sage_bin" ]; then
+      sage_bin="/www/server/panel/plugin/sentinel/payload/sentinel-sage.py"
+    fi
+    if [ ! -f "$sage_bin" ]; then
+      err "sentinel-sage.py tidak ditemukan di $sage_bin"
+      exit 1
+    fi
+    py_bin="/www/server/panel/pyenv/bin/python3"
+    [ ! -x "$py_bin" ] && py_bin="python3"
+    "$py_bin" "$sage_bin" scan "$target"
+    ;;
+
   logs)
     n="${2:-50}"
     if command -v journalctl >/dev/null 2>&1 && systemctl cat sentinel >/dev/null 2>&1; then
@@ -223,6 +238,7 @@ pakai: guardctl <perintah>
   set <k> <v>       ubah satu key di guardd.conf
   logs [n]          tampilkan n baris log terakhir
   check-auth        periksa otentikasi pengembang resmi & integritas kode
+  scan-ai [path]    pindai prompt injection, toxic skills & aturan AI berbahaya
 EOF
     ;;
 

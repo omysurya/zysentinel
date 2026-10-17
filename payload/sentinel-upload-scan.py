@@ -254,6 +254,34 @@ def scan_file_stream(filepath):
         p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=10)
         out = p.stdout.strip()
         if p.returncode == 0:
+            # 4. Pindai heuristik AI Safety & Toxic Prompt (Gen Digital SAGE)
+            try:
+                fname = os.path.basename(filepath)
+                fext = os.path.splitext(fname)[1].lower()
+                ai_exts = {'.md', '.txt', '.prompt', '.rules', '.json', '.yaml', '.yml', '.sh', '.py', '.php', '.js', '.htaccess'}
+                is_ai_file = fext in ai_exts or fname.startswith('.') or fname in {'SKILL.md', 'AGENTS.md', 'CLAUDE.md'}
+                if is_ai_file and sz <= 15 * 1024 * 1024:
+                    sage_bin = '/www/server/sentinel/bin/sentinel-sage.py'
+                    if not os.path.isfile(sage_bin):
+                        sage_bin = '/www/server/panel/plugin/sentinel/payload/sentinel-sage.py'
+                    if os.path.isfile(sage_bin):
+                        py_bin = '/www/server/panel/pyenv/bin/python3'
+                        if not os.path.isfile(py_bin):
+                            py_bin = 'python3'
+                        sp = subprocess.run([py_bin, sage_bin, 'check', filepath, '--json'],
+                                            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=5)
+                        if sp.returncode != 0 and sp.stdout:
+                            try:
+                                sres = json.loads(sp.stdout)
+                                if sres.get('status') == 'INFECTED':
+                                    th = sres.get('threats', [{}])[0]
+                                    rule_id = th.get('rule_id', 'SAGE.PromptInjection.Detected')
+                                    return 'INFECTED', f"AI.{rule_id}"
+                            except Exception:
+                                pass
+            except Exception as e_sage:
+                log(f"Peringatan evaluasi SAGE upload scan: {e_sage}")
+
             return 'CLEAN', 'Clean'
         elif p.returncode == 1:
             # Malware terdeteksi: parsing nama signature
