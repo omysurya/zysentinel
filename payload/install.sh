@@ -22,6 +22,9 @@ cek_depe() {
   # Dependensi untuk server baru. Tanpa ini instalasi gagal di tengah
   # dengan pesan yang membingungkan (mis. gcc tidak ada -> guardd tidak
   # terkompilasi -> checks gagal -> panel bilang instalasi gagal).
+  if ! command -v python3 >/dev/null 2>&1 && [ -x /www/server/panel/pyenv/bin/python3 ]; then
+    ln -sf /www/server/panel/pyenv/bin/python3 /usr/bin/python3 2>/dev/null || true
+  fi
   local kurang=""
   command -v gcc >/dev/null 2>&1 || kurang="$kurang gcc"
   command -v ipset >/dev/null 2>&1 || kurang="$kurang ipset"
@@ -77,7 +80,7 @@ pasang_daemon() {
         chmod 755 "$BIN/$f"
       fi
     done
-    [ -f "$pay/guardd" ] && cp -p "$pay/guardd" "$BIN/guardd" && chmod 755 "$BIN/guardd"
+    [ -f "$pay/guardd" ] && cp -p --remove-destination "$pay/guardd" "$BIN/guardd" && chmod 755 "$BIN/guardd"
     [ -f "$pay/guardd.c" ] && cp -p "$pay/guardd.c" "$BASE/src/guardd.c"
     # config TIDAK ditimpa bila sudah ada: isinya memuat penyesuaian
     # operator (ambang, geo-ban, throttle) yang tidak boleh hilang saat
@@ -131,15 +134,15 @@ EOF
   fi
   if [ ! -x "$BIN/guardd" ] || ! "$BIN/guardd" -V >/dev/null 2>&1; then
     if [ -f "$pay/guardd" ]; then
-      cp -p "$pay/guardd" "$BIN/guardd"
+      cp -p --remove-destination "$pay/guardd" "$BIN/guardd"
       chmod 755 "$BIN/guardd"
       say "binary guardd dipasang dari payload"
     fi
     if [ ! -x "$BIN/guardd" ] || ! "$BIN/guardd" -V >/dev/null 2>&1; then
       if [ -f "$BASE/src/guardd.c" ] && command -v gcc >/dev/null 2>&1; then
         say "menyusun guardd dari sumber C"
-        gcc -O2 -Wall -Wextra -o "$BIN/guardd" "$BASE/src/guardd.c" \
-            -lsqlite3 -lm || { err "gagal menyusun guardd"; return 1; }
+        gcc -O2 -Wall -Wextra -o "$BIN/guardd.tmp" "$BASE/src/guardd.c" \
+            -lsqlite3 -lm && mv -f "$BIN/guardd.tmp" "$BIN/guardd" || { err "gagal menyusun guardd"; return 1; }
       else
         err "binary guardd tidak dapat dijalankan dan compiler gcc tidak tersedia"
         return 1
@@ -369,8 +372,8 @@ pasang_unit_dari_payload() {
   local pay
   pay="$(dirname "$0")/payload/systemd"
   [ -d "$pay" ] || { say "payload systemd tidak ada, unit tidak dipasang"; return 0; }
-  if ! command -v systemctl >/dev/null 2>&1; then
-    say "systemctl tidak ada, unit tidak dipasang"
+  if [ ! -d /run/systemd/system ] || ! command -v systemctl >/dev/null 2>&1; then
+    say "systemd tidak aktif sebagai init, unit tidak dipasang"
     return 0
   fi
   local f b
@@ -389,23 +392,6 @@ pasang_unit_dari_payload() {
 }
 
 pasang_layanan() {
-  if ! command -v systemctl >/dev/null 2>&1; then
-    say "systemctl tidak ada, layanan tidak dipasang"
-    return 0
-  fi
-  for f in sentinel.service sentinel-fw.service sentinel-fw.timer; do
-    src="/etc/systemd/system/$f"
-    if [ ! -f "$src" ]; then
-      say "unit $f tidak ditemukan di $src, dilewati"
-      continue
-    fi
-  done
-  systemctl daemon-reload 2>/dev/null
-  systemctl enable sentinel.service sentinel-fw.service sentinel-fw.timer \
-      >/dev/null 2>&1
-  systemctl start sentinel-fw.service 2>/dev/null
-  systemctl start sentinel-fw.timer 2>/dev/null
-  systemctl restart sentinel.service 2>/dev/null
   # Pasang SysV init script untuk kendali standar aaPanel dan CLI
   local init_src; init_src="$(dirname "$0")/payload/init.d/sentinel"
   [ -f "$init_src" ] || init_src="/www/server/panel/plugin/sentinel/payload/init.d/sentinel"
@@ -414,7 +400,26 @@ pasang_layanan() {
     chmod 755 /etc/init.d/sentinel
     say "skrip layanan /etc/init.d/sentinel terpasang"
   fi
-  say "layanan sentinel dijalankan"
+
+  if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
+    for f in sentinel.service sentinel-fw.service sentinel-fw.timer; do
+      src="/etc/systemd/system/$f"
+      if [ ! -f "$src" ]; then
+        say "unit $f tidak ditemukan di $src, dilewati"
+        continue
+      fi
+    done
+    systemctl daemon-reload 2>/dev/null
+    systemctl enable sentinel.service sentinel-fw.service sentinel-fw.timer \
+        >/dev/null 2>&1
+    systemctl start sentinel-fw.service 2>/dev/null
+    systemctl start sentinel-fw.timer 2>/dev/null
+    systemctl restart sentinel.service 2>/dev/null
+    say "layanan sentinel dijalankan via systemd"
+  else
+    say "systemd tidak aktif sebagai init (PID 1), menjalankan guardctl start..."
+    /www/server/sentinel/bin/guardctl start 2>/dev/null || true
+  fi
 }
 
 cabut_bersih() {
@@ -467,7 +472,7 @@ cabut_bersih() {
   fi
 
   # 3. Hentikan & hapus seluruh unit systemd
-  if command -v systemctl >/dev/null 2>&1; then
+  if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
     local units="sentinel-upload-scan.service sentinel-proc.service sentinel-intel.timer sentinel-intel.service sentinel-av.timer sentinel-av.service sentinel-fw.timer sentinel-fw.service sentinel-notify.timer sentinel.service"
     for u in $units; do
       systemctl stop "$u" 2>/dev/null || true
@@ -476,6 +481,10 @@ cabut_bersih() {
     rm -f /etc/systemd/system/sentinel* /etc/init.d/sentinel 2>/dev/null || true
     systemctl daemon-reload 2>/dev/null || true
     say "seluruh layanan systemd dihentikan dan unit dicabut"
+  else
+    [ -x "$BIN/guardctl" ] && "$BIN/guardctl" stop 2>/dev/null || true
+    rm -f /etc/systemd/system/sentinel* /etc/init.d/sentinel 2>/dev/null || true
+    say "seluruh layanan dihentikan via guardctl stop"
   fi
 
   # 4. Hapus seluruh direktori kerja, basis data, dan log Sentinel
@@ -493,11 +502,13 @@ pasang_fresh() {
   say "memulai instalasi baru (Fresh Install) ZySentinel..."
   rm -f "$ETC/uninstall.lock" 2>/dev/null || true
   # Hentikan layanan lama bila sedang berjalan
-  if command -v systemctl >/dev/null 2>&1; then
+  if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
     local units="sentinel-upload-scan.service sentinel-proc.service sentinel-intel.timer sentinel-intel.service sentinel-av.timer sentinel-av.service sentinel-fw.timer sentinel-fw.service sentinel-notify.timer sentinel.service"
     for u in $units; do
       systemctl stop "$u" 2>/dev/null || true
     done
+  else
+    [ -x "$BIN/guardctl" ] && "$BIN/guardctl" stop 2>/dev/null || true
   fi
   # Bersihkan data lama untuk fresh slate
   rm -rf "$BASE/data" "$BASE/etc" "$BASE/run" "$BASE/log" "$BASE/av"
@@ -531,12 +542,12 @@ perbaiki_mandiri() {
   # 3. Periksa biner guardd
   if [ ! -x "$BIN/guardd" ] || ! "$BIN/guardd" -V >/dev/null 2>&1; then
     if [ -f "$pay/guardd" ]; then
-      cp -p "$pay/guardd" "$BIN/guardd"
+      cp -p --remove-destination "$pay/guardd" "$BIN/guardd"
       chmod 750 "$BIN/guardd"
       say "biner guardd dipulihkan dari payload"
       dipulihkan=$((dipulihkan + 1))
     elif [ -f "$BASE/src/guardd.c" ] && command -v gcc >/dev/null 2>&1; then
-      gcc -O2 -Wall -Wextra -o "$BIN/guardd" "$BASE/src/guardd.c" -lsqlite3 -lm 2>/dev/null || true
+      gcc -O2 -Wall -Wextra -o "$BIN/guardd.tmp" "$BASE/src/guardd.c" -lsqlite3 -lm 2>/dev/null && mv -f "$BIN/guardd.tmp" "$BIN/guardd" || true
       chmod 750 "$BIN/guardd"
       say "biner guardd dikompilasi ulang dari sumber C"
       dipulihkan=$((dipulihkan + 1))
@@ -566,7 +577,7 @@ perbaiki_mandiri() {
   pasang_unit_dari_payload
 
   # 6. Periksa dan pulihkan status layanan yang macet/mati
-  if command -v systemctl >/dev/null 2>&1; then
+  if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
     for s in sentinel-fw.service sentinel-fw.timer sentinel.service sentinel-proc.service sentinel-upload-scan.service sentinel-intel.timer sentinel-av.timer; do
       if [ -f "/etc/systemd/system/$s" ]; then
         if ! systemctl is-active --quiet "$s"; then
@@ -576,6 +587,10 @@ perbaiki_mandiri() {
         fi
       fi
     done
+  else
+    if [ -x "$BIN/guardctl" ]; then
+      "$BIN/guardctl" start >/dev/null 2>&1 || true
+    fi
   fi
 
   # 7. Periksa aturan firewall kernel

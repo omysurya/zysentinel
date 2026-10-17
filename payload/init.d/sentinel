@@ -13,12 +13,16 @@
 
 SENTINEL_HOME="/www/server/sentinel"
 GUARDCTL="$SENTINEL_HOME/bin/guardctl"
-SYSTEMCTL="$(command -v systemctl 2>/dev/null)"
+
+IS_SYSTEMD=0
+if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
+  IS_SYSTEMD=1
+fi
 
 case "$1" in
   start)
-    if [ -n "$SYSTEMCTL" ]; then
-      $SYSTEMCTL start sentinel.service
+    if [ "$IS_SYSTEMD" -eq 1 ]; then
+      systemctl start sentinel.service
     elif [ -x "$GUARDCTL" ]; then
       $GUARDCTL start
     else
@@ -27,29 +31,29 @@ case "$1" in
     fi
     ;;
   stop)
-    if [ -n "$SYSTEMCTL" ]; then
-      $SYSTEMCTL stop sentinel.service
+    if [ "$IS_SYSTEMD" -eq 1 ]; then
+      systemctl stop sentinel.service
     elif [ -x "$GUARDCTL" ]; then
       $GUARDCTL stop
     fi
     ;;
   restart)
-    if [ -n "$SYSTEMCTL" ]; then
-      $SYSTEMCTL restart sentinel.service
+    if [ "$IS_SYSTEMD" -eq 1 ]; then
+      systemctl restart sentinel.service
     elif [ -x "$GUARDCTL" ]; then
       $GUARDCTL restart
     fi
     ;;
   reload|force-reload)
-    if [ -n "$SYSTEMCTL" ]; then
-      $SYSTEMCTL reload sentinel.service
+    if [ "$IS_SYSTEMD" -eq 1 ]; then
+      systemctl reload sentinel.service
     elif [ -x "$GUARDCTL" ]; then
       $GUARDCTL reload
     fi
     ;;
   status)
-    if [ -n "$SYSTEMCTL" ]; then
-      $SYSTEMCTL status sentinel.service
+    if [ "$IS_SYSTEMD" -eq 1 ]; then
+      systemctl status sentinel.service
     elif [ -x "$GUARDCTL" ]; then
       $GUARDCTL status
     fi

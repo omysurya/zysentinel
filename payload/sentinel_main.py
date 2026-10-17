@@ -20,6 +20,7 @@ import platform
 import sqlite3
 import urllib.request
 import urllib.parse
+import shutil
 
 if sys.version_info[0] == 2:
     reload(sys)
@@ -334,9 +335,27 @@ class sentinel_main(object):
         except Exception as ex:
             return 1, '', str(ex)
 
+    def _is_systemd(self):
+        return os.path.isdir('/run/systemd/system') and shutil.which('systemctl') is not None
+
     def _svc(self, name):
-        rc, o, e = self._sh('systemctl is-active %s' % name, 15)
-        return o.strip() if rc == 0 else 'tidak aktif'
+        if self._is_systemd():
+            rc, o, e = self._sh('systemctl is-active %s' % name, 15)
+            return o.strip() if rc == 0 else 'tidak aktif'
+        if 'sentinel' in name:
+            pid_f = self._p('run', 'guardd.pid')
+            sock_f = self._p('run', 'guardd.sock')
+            if os.path.exists(sock_f):
+                return 'active'
+            if os.path.exists(pid_f):
+                try:
+                    with open(pid_f, 'r') as pf:
+                        gpid = int(pf.read().strip())
+                    os.kill(gpid, 0)
+                    return 'active'
+                except Exception:
+                    pass
+        return 'tidak aktif'
 
     def _self_ip(self):
         """Alamat publik server ini.
@@ -443,6 +462,10 @@ class sentinel_main(object):
                 attackers = b_tot
 
         return attackers, threats, virus
+
+    def get_overview(self, get):
+        """Alias untuk get_status."""
+        return self.get_status(get)
 
     def get_status(self, get):
         """Ringkasan untuk dasbor: kondisi daemon, angka lalu lintas,
@@ -938,7 +961,7 @@ class sentinel_main(object):
                       % (k, v))
 
         # semua nilai lain dibaca sekali saat daemon mulai
-        self._sh('systemctl restart sentinel.service', 60)
+        self.service_action({'action': 'restart'})
         return public.returnMsg(True, '%s diubah menjadi %s, daemon '
                                     'direstart' % (k, v))
 
@@ -1022,14 +1045,19 @@ class sentinel_main(object):
         if aksi not in peta:
             return public.returnMsg(False, 'Aksi tidak dikenal (hanya start, stop, restart, reload)')
 
-        cmd = 'systemctl %s sentinel.service' % peta[aksi]
-        rc, o, e = self._sh(cmd, 60)
+        rc, o, e = 1, '', 'init failed'
+        if self._is_systemd():
+            cmd = 'systemctl %s sentinel.service' % peta[aksi]
+            rc, o, e = self._sh(cmd, 60)
+
         if rc != 0:
-            init_cmd = '/etc/init.d/sentinel %s' % peta[aksi]
-            if os.path.exists('/etc/init.d/sentinel'):
-                rc2, o2, e2 = self._sh(init_cmd, 60)
-                if rc2 == 0:
-                    rc, o, e = rc2, o2, e2
+            guardctl = self._p('bin', 'guardctl')
+            if os.path.exists(guardctl) and os.access(guardctl, os.X_OK):
+                rc2, o2, e2 = self._sh("'%s' %s" % (guardctl, peta[aksi]), 30)
+                rc, o, e = rc2, o2, e2
+            elif os.path.exists('/etc/init.d/sentinel'):
+                rc2, o2, e2 = self._sh('/etc/init.d/sentinel %s' % peta[aksi], 30)
+                rc, o, e = rc2, o2, e2
             elif aksi == 'reload':
                 pid_f = self._p('run', 'guardd.pid')
                 if os.path.exists(pid_f):
@@ -1076,8 +1104,16 @@ class sentinel_main(object):
 
     def service_status(self, get=None):
         """Ambil status detail layanan sentinel.service."""
-        rc, o, _ = self._sh('systemctl is-active sentinel.service', 10)
-        is_active = (rc == 0 and o.strip() == 'active')
+        is_active = False
+        status_str = 'tidak aktif'
+        if self._is_systemd():
+            rc, o, _ = self._sh('systemctl is-active sentinel.service', 10)
+            is_active = (rc == 0 and o.strip() == 'active')
+            status_str = o.strip() if rc == 0 else 'inactive'
+        else:
+            status_str = self._svc('sentinel')
+            is_active = (status_str == 'active')
+
         pid = None
         pid_f = self._p('run', 'guardd.pid')
         if os.path.exists(pid_f):
@@ -1088,7 +1124,7 @@ class sentinel_main(object):
                 pass
         return public.returnMsg(True, {
             'active': is_active,
-            'status': o.strip(),
+            'status': status_str,
             'pid': pid
         })
 
@@ -2531,7 +2567,7 @@ class sentinel_main(object):
             ' SUM(terkirim=0 AND coba>0) gagal FROM notif')
         hasil['antrean'] = t or {'total': 0, 'nunggu': 0, 'gagal': 0}
 
-        timer = self._sh('systemctl is-active sentinel-notify.timer', 15)
+        timer = self._sh('systemctl is-active sentinel-notify.timer', 15) if self._is_systemd() else (0, 'tidak aktif', '')
         hasil['timer'] = timer[1].strip() or 'tidak aktif'
         return public.returnMsg(True, hasil)
 
@@ -2608,8 +2644,9 @@ class sentinel_main(object):
         # Daemon harus tahu URL barunya supaya dia menulis antrean.
         if url:
             self._sh("'%s/bin/guardctl' set notify_url '%s'" % (self.__PATH, url.replace("'", "")), 20)
-        self._sh('systemctl restart sentinel.service', 30)
-        self._sh('systemctl restart sentinel-notify.timer', 30)
+        self.service_action({'action': 'restart'})
+        if self._is_systemd():
+            self._sh('systemctl restart sentinel-notify.timer', 30)
         return public.returnMsg(True, 'tujuan notifikasi disimpan')
 
     def _notif_ada(self, kunci):
@@ -2636,7 +2673,10 @@ class sentinel_main(object):
         self._notif('uji',
                     'Ini notifikasi uji dari ZySentinel. Kalau sampai '
                     'diterima, pengaturan sudah benar.')
-        self._sh('systemctl start sentinel-notify.service', 90)
+        if self._is_systemd():
+            self._sh('systemctl start sentinel-notify.service', 90)
+        else:
+            self._sh("'%s/bin/sentinel-notify.sh' 2>/dev/null" % self.__PATH, 90)
         # Beri waktu skrip menyelesaikan pengiriman.
         import time as _t
         _t.sleep(3)
@@ -3603,9 +3643,16 @@ class sentinel_main(object):
             f.writelines(lines)
             
         if mode == 'off':
-            os.system('systemctl stop sentinel-proc.service 2>/dev/null')
+            if self._is_systemd():
+                os.system('systemctl stop sentinel-proc.service 2>/dev/null')
+            else:
+                os.system("pkill -f '%s/bin/sentinel-proc.py' 2>/dev/null" % self.__PATH)
         else:
-            os.system('systemctl restart sentinel-proc.service 2>/dev/null')
+            if self._is_systemd():
+                os.system('systemctl restart sentinel-proc.service 2>/dev/null')
+            else:
+                os.system("pkill -f '%s/bin/sentinel-proc.py' 2>/dev/null" % self.__PATH)
+                os.system("nohup /www/server/panel/pyenv/bin/python3 '%s/bin/sentinel-proc.py' daemon >/dev/null 2>&1 &" % self.__PATH)
             
         return public.returnMsg(True, 'Process Guard berhasil disetel ke mode: ' + mode.upper())
 
@@ -3764,8 +3811,11 @@ class sentinel_main(object):
             return public.returnMsg(False, 'Gagal mengambil status upload scanner: %s' % (e or o))
         try:
             data = json.loads(o)
-            rc_svc, o_svc, _ = self._sh('systemctl is-active sentinel-upload-scan.service', 5)
-            data['systemd_active'] = (o_svc.strip() == 'active')
+            if self._is_systemd():
+                rc_svc, o_svc, _ = self._sh('systemctl is-active sentinel-upload-scan.service', 5)
+                data['systemd_active'] = (o_svc.strip() == 'active')
+            else:
+                data['systemd_active'] = (self._svc('sentinel-upload-scan') == 'active')
             return public.returnMsg(True, data)
         except Exception as ex:
             return public.returnMsg(False, 'Galat parsing respons status: %s' % str(ex))
@@ -3857,7 +3907,14 @@ class sentinel_main(object):
         action = str(get.get('action', '')).strip().lower()
         if action not in ['start', 'stop', 'restart']:
             return public.returnMsg(False, 'Aksi tidak valid (start|stop|restart)')
-        rc, o, e = self._sh("systemctl %s sentinel-upload-scan.service" % action, 15)
+        if self._is_systemd():
+            rc, o, e = self._sh("systemctl %s sentinel-upload-scan.service" % action, 15)
+        else:
+            if action == 'stop':
+                rc, o, e = self._sh("pkill -f '%s/bin/sentinel-upload-scan.py' 2>/dev/null" % self.__PATH, 15)
+            else:
+                self._sh("pkill -f '%s/bin/sentinel-upload-scan.py' 2>/dev/null" % self.__PATH, 10)
+                rc, o, e = self._sh("nohup /www/server/panel/pyenv/bin/python3 '%s/bin/sentinel-upload-scan.py' daemon >/dev/null 2>&1 &" % self.__PATH, 15)
         if rc != 0:
             return public.returnMsg(False, "Gagal %s layanan: %s" % (action, e or o))
         return public.returnMsg(True, "Layanan sentinel-upload-scan berhasil di-%s" % action)
@@ -3912,6 +3969,14 @@ class sentinel_main(object):
         status_text = 'Aktif (ON)' if enabled else 'Nonaktif (OFF)'
         return public.returnMsg(True, 'Pengaturan telemetri Google Tag Manager berhasil diubah: %s' % status_text)
 
+    def get_telemetry(self, get):
+        """Alias untuk get_telemetry_setting."""
+        return self.get_telemetry_setting(get)
+
+    def set_telemetry(self, get):
+        """Alias untuk set_telemetry_setting."""
+        return self.set_telemetry_setting(get)
+
     def get_lang_setting(self, get):
         """Ambil konfigurasi bahasa antarmuka (default: 'en')."""
         lang = 'en'
@@ -3960,6 +4025,14 @@ class sentinel_main(object):
 
         label = 'English' if lang == 'en' else 'Bahasa Indonesia'
         return public.returnMsg(True, 'Bahasa antarmuka diubah ke %s' % label)
+
+    def get_lang(self, get):
+        """Alias untuk get_lang_setting."""
+        return self.get_lang_setting(get)
+
+    def set_lang(self, get):
+        """Alias untuk set_lang_setting."""
+        return self.set_lang_setting(get)
 
     def _send_telemetry(self, event_name, extra_params=None):
         """Kirim statistik telemetri anonim (instalasi/error/pembaruan) ke Google Analytics.
