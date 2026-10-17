@@ -361,17 +361,88 @@ local function blocked()
     return config['monitor'] == true
 end
 
-local function deny(status, log_name, log_rule, html_body)
+-- [ZySens] Deteksi tipe request: apakah AJAX / JSON atau HTML biasa
+local function is_ajax_or_json_request()
     local ctx = C()
-    if html_body and not blocked() then
-        return_html(status, html_body)
+    local headers = ctx.request_header or ngx.req.get_headers() or {}
+
+    -- 1. Header X-Requested-With (jQuery, Axios, XMLHttpRequest, fetch)
+    local xrw = headers["x-requested-with"]
+    if xrw and type(xrw) == "string" and xrw:lower() == "xmlhttprequest" then
         return true
     end
+
+    -- 2. Header Accept (prioritas JSON)
+    local accept = headers["accept"]
+    if accept and type(accept) == "string" then
+        local acc = accept:lower()
+        if acc:find("application/json", 1, true) then
+            return true
+        end
+    end
+
+    -- 3. Header Content-Type
+    local ctype = headers["content-type"]
+    if ctype and type(ctype) == "string" then
+        local ct = ctype:lower()
+        if ct:find("application/json", 1, true) then
+            return true
+        end
+    end
+
+    -- 4. Pola URI .json atau /api/
+    local uri = ctx.uri or ngx.var.uri or ""
+    if uri:sub(-5):lower() == ".json" or uri:find("/api/", 1, true) then
+        return true
+    end
+
+    return false
+end
+
+-- [ZySens] Kirim respon pemblokiran sesuai tipe request (JSON atau HTML)
+local function return_blocked_response(status, log_name, log_rule, html_template)
+    local ctx = C()
+    local ip = ctx.ip or ngx.var.remote_addr or "unknown"
+    local st = tonumber(status) or 403
+    local req_id = string.format("ZY-%d-%04d", os.time(), math.random(1000, 9999))
+
+    if is_ajax_or_json_request() then
+        ngx.status = st
+        ngx.header.content_type = "application/json; charset=utf-8"
+        ngx.header["X-Protected-By"] = "ZySens"
+        local res = {
+            status = false,
+            code = st,
+            error = "Forbidden",
+            message = "Permintaan Anda diblokir oleh sistem keamanan web server karena terdeteksi anomali atau ancaman.",
+            client_ip = ip,
+            incident_id = req_id,
+            protected_by = "ZySens"
+        }
+        ngx.say(json.encode(res))
+        ngx.exit(st)
+        return true
+    else
+        ngx.status = st
+        ngx.header.content_type = "text/html; charset=utf-8"
+        ngx.header["X-Protected-By"] = "ZySens"
+        local body = html_template or get_html or ""
+        body = body:gsub("{{CLIENT_IP}}", ip)
+        body = body:gsub("{{REQ_ID}}", req_id)
+        body = body:gsub("{{STATUS}}", tostring(st))
+        ngx.say(body)
+        ngx.exit(st)
+        return true
+    end
+end
+
+local function deny(status, log_name, log_rule, html_body)
+    local ctx = C()
     write_log(log_name, log_rule)
     if blocked() then
         return false
     end
-    ngx.exit(status)
+    return_blocked_response(status, log_name, log_rule, html_body)
     return true
 end
 
@@ -521,7 +592,8 @@ function drop_abroad()
         write_log('drop_abroad', '禁止大陆以外地区访问')
         return false
     end
-    ngx.exit(config['drop_abroad']['status'])
+    write_log('drop_abroad', '禁止大陆以外地区访问')
+    return_blocked_response(config['drop_abroad']['status'] or 403, 'drop_abroad', 'geo_blocked')
     return true
 end
 
@@ -533,7 +605,7 @@ function drop()
     if not count then return false end
     if count > (tonumber(ctx.retry) or 6) then
         if blocked() then return false end
-        ngx.exit(config['cc']['status'])
+        return_blocked_response(config['cc']['status'] or 403, 'drop', 'ip_retry_exceeded')
         return true
     end
     return false
@@ -570,7 +642,7 @@ function cc()
             write_log('cc', msg)
             write_drop_ip('cc', lock_time)
             if blocked() then return false end
-            ngx.exit(config['cc']['status'])
+            return_blocked_response(config['cc']['status'] or 403, 'cc', msg)
             return true
         else
             shared:incr(token, 1)
@@ -625,7 +697,7 @@ function cc2()
                 write_log('cc', msg)
                 write_drop_ip('cc', lock_time)
                 if blocked() then return false end
-                ngx.exit(config['cc']['status'])
+                return_blocked_response(config['cc']['status'] or 403, 'cc', msg)
                 return true
             end
             if not blocked() then
@@ -720,6 +792,9 @@ end
 function url_white()
     local ctx = C()
     if ngx.var.document_root == '/www/server/phpmyadmin' then return true end
+    if ctx.uri and (ctx.uri:sub(1, 28) == "/.well-known/acme-challenge/" or ctx.uri:sub(1, 13) == "/.well-known/") then
+        return true
+    end
     if is_ngx_match(url_white_rules, ctx.request_uri, false) then
         local url_data = split2(ctx.request_uri, '?')
         if not url_data or not url_data[1] then
@@ -1092,22 +1167,15 @@ function min_route()
 end
 
 function return_message(status, msg)
-    ngx.header.content_type = "application/json;"
+    ngx.header.content_type = "application/json; charset=utf-8"
+    ngx.header["X-Protected-By"] = "ZySens"
     ngx.status = status
     ngx.say(json.encode(msg))
     ngx.exit(status)
 end
 
 function return_html(status, html)
-    if not html then
-        ngx.status = status
-        ngx.exit(status)
-        return
-    end
-    ngx.header.content_type = "text/html"
-    ngx.status = status
-    ngx.say(html)
-    ngx.exit(status)
+    return return_blocked_response(status, "block", "html_direct", html)
 end
 
 ------------------------------------------------------------------- main loop --
@@ -1122,6 +1190,11 @@ function run_btwaf()
     ctx.ipn = arrip(ctx.ip)
     ctx.request_uri = ngx.var.request_uri
     ctx.uri = ngx.unescape_uri(ngx.var.uri)
+
+    -- Bypass WAF inspection for Let's Encrypt / ACME challenge verification
+    if ctx.uri and (ctx.uri:sub(1, 28) == "/.well-known/acme-challenge/" or ctx.uri:sub(1, 13) == "/.well-known/") then
+        return false
+    end
     ctx.uri_request_args = ngx.req.get_uri_args() or {}
     ctx.cycle = config['cc']['cycle']
     ctx.endtime = config['cc']['endtime']
