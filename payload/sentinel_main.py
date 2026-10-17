@@ -366,7 +366,7 @@ class sentinel_main(object):
             con.close()
             return rows
         except Exception as e:
-            return public.returnMsg(False, 'kueri basis data gagal: %s' % str(e))
+            return []
 
     def _sql1(self, query, args=()):
         """Satu baris saja, atau None.
@@ -872,9 +872,13 @@ class sentinel_main(object):
             "SELECT b.ip, b.kind, b.score, b.start, b.until, b.offenses, "
             "b.reason FROM bans b WHERE b.until >= ? "
             "ORDER BY b.until DESC LIMIT 200", (int(time.time()),))
-        for r in riwayat:
-            r['ip'] = self._numip(r['ip'])
-            r['sisa'] = max(0, int(r['until']) - int(time.time()))
+        if isinstance(riwayat, list):
+            for r in riwayat:
+                if isinstance(r, dict):
+                    r['ip'] = self._numip(r.get('ip', 0))
+                    r['sisa'] = max(0, int(r.get('until', 0)) - int(time.time()))
+        else:
+            riwayat = []
 
         rc, o, e = self._sh('ipset list sentinel_ban 2>/dev/null | '
                             "sed -n 's/^\\([0-9.]*\\).*/\\1/p'", 15)
