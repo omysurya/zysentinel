@@ -13,7 +13,7 @@
    Accents: Emerald Green (#10b981), Electric Cyan (#00f0ff), Amber (#f59e0b), Red (#ef4444)
    Typography: Monospace (JetBrains Mono, Consolas, monospace), Sans (-apple-system, sans-serif)
    ============================================================ */
-.sn-wrap{
+:root, .sn-wrap, .layui-layer{
   --bg-primary:#030712;
   --bg-secondary:#080f21;
   --bg-card:rgba(11,20,38,0.85);
@@ -51,7 +51,8 @@
   --radius:12px;
   --radius-sm:8px;
   --t:160ms cubic-bezier(.4,0,.2,1);
-
+}
+.sn-wrap{
   font-size:13.5px;color:var(--text-main);padding:0;
   font-family:var(--sans-font);
   -webkit-font-smoothing:antialiased;
@@ -185,21 +186,77 @@ table.sn-tb th.r,table.sn-tb td.r{text-align:right}
 .sn-clip{max-width:330px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sn-ell{display:inline-block;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
 
-/* ---- Tombol ---- */
-.sn-btn{display:inline-flex;align-items:center;gap:6px;padding:6px 14px;border:1px solid var(--border-subtle);
-  background:rgba(11,20,38,0.85);border-radius:var(--radius-sm);cursor:pointer;font-family:var(--mono-font);
-  font-size:12px;color:var(--text-main);font-weight:600;letter-spacing:0.4px;
-  transition:var(--transition);user-select:none;-webkit-user-select:none}
-.sn-btn:hover{background:var(--bg-card-hover);border-color:var(--accent-cyan);color:var(--accent-cyan);box-shadow:0 0 12px rgba(0,240,255,0.25);transform:translateY(-1px)}
-.sn-btn:active{transform:translateY(1px)}
-.sn-btn.pri{background:var(--accent-green);color:#030712;border:1px solid var(--accent-green);font-weight:700;box-shadow:0 0 18px rgba(16,185,129,0.4)}
-.sn-btn.pri:hover{background:#0ea5e9;border-color:#0ea5e9;color:#fff;box-shadow:0 0 25px rgba(14,165,233,0.6);transform:translateY(-1px)}
-.sn-btn.dgr{background:rgba(239,68,68,0.15);color:#ef4444;border:1px solid rgba(239,68,68,0.4);font-weight:700}
-.sn-btn.dgr:hover{background:#ef4444;color:#fff;box-shadow:0 0 20px rgba(239,68,68,0.55);transform:translateY(-1px)}
-.sn-btn.ok{background:rgba(16,185,129,0.15);color:var(--accent-green);border:1px solid rgba(16,185,129,0.4);font-weight:700}
-.sn-btn.ok:hover{background:var(--accent-green);color:#030712;box-shadow:0 0 16px rgba(16,185,129,0.5);transform:translateY(-1px)}
-.sn-btn:disabled{opacity:.5;cursor:not-allowed;transform:none}
-.sn-btn.sn-sm{padding:4px 10px;font-size:11.5px}
+/* ---- Tombol (CyberMatrix Button System) ---- */
+button.sn-btn, input[type="button"].sn-btn, a.sn-btn, span.sn-btn, .sn-btn{
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:6px 14px;
+  border:1px solid var(--border-subtle, rgba(255,255,255,0.12)) !important;
+  background:rgba(11,20,38,0.85) !important;border-radius:var(--radius-sm, 8px) !important;
+  cursor:pointer;font-family:var(--mono-font, 'JetBrains Mono', Consolas, monospace) !important;
+  font-size:12px !important;color:#f1f5f9 !important;font-weight:600;letter-spacing:0.4px;
+  text-decoration:none !important;line-height:1.4;outline:none;
+  transition:var(--transition);user-select:none;-webkit-user-select:none;
+  box-shadow:0 1px 4px rgba(0,0,0,0.4);
+}
+button.sn-btn:hover, a.sn-btn:hover, span.sn-btn:hover, .sn-btn:hover{
+  background:var(--bg-card-hover, rgba(16,28,54,0.95)) !important;
+  border-color:var(--accent-cyan, #00f0ff) !important;
+  color:#00f0ff !important;
+  box-shadow:0 0 14px rgba(0,240,255,0.3) !important;
+  transform:translateY(-1px);
+}
+button.sn-btn:active, a.sn-btn:active, span.sn-btn:active, .sn-btn:active{
+  transform:translateY(1px);
+}
+button.sn-btn.pri, a.sn-btn.pri, span.sn-btn.pri, .sn-btn.pri{
+  background:var(--accent-green, #10b981) !important;
+  color:#ffffff !important;
+  border:1px solid var(--accent-green, #10b981) !important;
+  font-weight:700 !important;
+  box-shadow:0 0 18px rgba(16,185,129,0.45) !important;
+  text-shadow:0 1px 2px rgba(0,0,0,0.3);
+}
+button.sn-btn.pri:hover, a.sn-btn.pri:hover, span.sn-btn.pri:hover, .sn-btn.pri:hover{
+  background:#0ea5e9 !important;
+  border-color:#0ea5e9 !important;
+  color:#ffffff !important;
+  box-shadow:0 0 25px rgba(14,165,233,0.65) !important;
+  transform:translateY(-1px);
+}
+button.sn-btn.dgr, a.sn-btn.dgr, span.sn-btn.dgr, .sn-btn.dgr{
+  background:rgba(239,68,68,0.18) !important;
+  color:#f87171 !important;
+  border:1px solid rgba(239,68,68,0.45) !important;
+  font-weight:700 !important;
+}
+button.sn-btn.dgr:hover, a.sn-btn.dgr:hover, span.sn-btn.dgr:hover, .sn-btn.dgr:hover{
+  background:#ef4444 !important;
+  border-color:#ef4444 !important;
+  color:#ffffff !important;
+  box-shadow:0 0 20px rgba(239,68,68,0.6) !important;
+  transform:translateY(-1px);
+}
+button.sn-btn.ok, a.sn-btn.ok, span.sn-btn.ok, .sn-btn.ok{
+  background:rgba(16,185,129,0.18) !important;
+  color:#34d399 !important;
+  border:1px solid rgba(16,185,129,0.45) !important;
+  font-weight:700 !important;
+}
+button.sn-btn.ok:hover, a.sn-btn.ok:hover, span.sn-btn.ok:hover, .sn-btn.ok:hover{
+  background:var(--accent-green, #10b981) !important;
+  border-color:var(--accent-green, #10b981) !important;
+  color:#ffffff !important;
+  box-shadow:0 0 16px rgba(16,185,129,0.5) !important;
+  transform:translateY(-1px);
+}
+.sn-btn:disabled, button.sn-btn:disabled{
+  opacity:.5 !important;
+  cursor:not-allowed !important;
+  transform:none !important;
+}
+.sn-btn.sn-sm, button.sn-btn.sn-sm{
+  padding:4px 10px !important;
+  font-size:11.5px !important;
+}
 
 /* ---- Input & Formulir ---- */
 .sn-inp,.sn-in{padding:7px 10px;border:1px solid var(--border-subtle);border-radius:var(--radius-sm);font-size:12.5px;
@@ -258,7 +315,7 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 .sn-switch .o{padding:6px 14px;border-radius:999px;font-family:var(--mono-font);font-size:12px;font-weight:600;
   color:var(--text-muted);cursor:pointer;transition:var(--transition);user-select:none;-webkit-user-select:none}
 .sn-switch .o:hover{color:#fff}
-.sn-switch .o.on{background:var(--accent-green);color:#030712;font-weight:800;box-shadow:0 0 12px rgba(16,185,129,0.45)}
+.sn-switch .o.on{background:var(--accent-green, #10b981) !important;color:#ffffff !important;font-weight:800 !important;box-shadow:0 0 12px rgba(16,185,129,0.45) !important}
 .sn-tag{display:inline-block;padding:2px 8px;border-radius:6px;font-size:11.5px;font-weight:700;background:rgba(255,255,255,0.06);color:var(--text-muted);font-family:var(--mono-font)}
 .sn-tag.port{background:rgba(0,240,255,0.1);color:var(--accent-cyan);border:1px solid var(--border-cyan)}
 .sn-tag.proto{background:rgba(255,255,255,0.08);color:#e2e8f0}
@@ -272,10 +329,12 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 .layui-layer{background:#080f21 !important;border:1px solid rgba(16,185,129,0.35) !important;color:#f1f5f9 !important;border-radius:10px !important;box-shadow:0 15px 50px rgba(0,0,0,0.85),0 0 30px rgba(16,185,129,0.18) !important}
 .layui-layer-title{background:rgba(11,20,38,0.95) !important;color:#fff !important;border-bottom:1px solid rgba(255,255,255,0.08) !important;font-family:var(--mono-font) !important;font-size:13.5px !important;font-weight:700 !important}
 .layui-layer-content{color:#f1f5f9 !important}
-.layui-layer-btn{background:rgba(8,15,33,0.95) !important;border-top:1px solid rgba(255,255,255,0.08) !important;padding:10px 14px !important}
-.layui-layer-btn a{font-family:var(--mono-font) !important;font-size:12px !important;font-weight:600 !important;border-radius:6px !important;transition:all .18s !important}
-.layui-layer-btn .layui-layer-btn0{background:var(--accent-green) !important;color:#030712 !important;border:1px solid var(--accent-green) !important;box-shadow:0 0 14px rgba(16,185,129,0.4) !important}
-.layui-layer-btn .layui-layer-btn1{background:rgba(11,20,38,0.8) !important;color:#f1f5f9 !important;border:1px solid rgba(255,255,255,0.12) !important}
+.layui-layer-btn{background:rgba(8,15,33,0.98) !important;border-top:1px solid rgba(255,255,255,0.08) !important;padding:10px 14px !important}
+.layui-layer-btn a{font-family:var(--mono-font, 'JetBrains Mono', Consolas, monospace) !important;font-size:12px !important;font-weight:600 !important;border-radius:6px !important;transition:all .18s !important;padding:6px 16px !important;height:auto !important;line-height:normal !important}
+.layui-layer-btn .layui-layer-btn0{background:var(--accent-green, #10b981) !important;color:#ffffff !important;border:1px solid var(--accent-green, #10b981) !important;box-shadow:0 0 14px rgba(16,185,129,0.4) !important;text-shadow:0 1px 2px rgba(0,0,0,0.3) !important}
+.layui-layer-btn .layui-layer-btn0:hover{background:#0ea5e9 !important;border-color:#0ea5e9 !important;color:#ffffff !important}
+.layui-layer-btn .layui-layer-btn1{background:rgba(11,20,38,0.85) !important;color:#f1f5f9 !important;border:1px solid rgba(255,255,255,0.15) !important}
+.layui-layer-btn .layui-layer-btn1:hover{background:rgba(16,28,54,0.95) !important;color:#00f0ff !important;border-color:rgba(0,240,255,0.3) !important}
 .layui-layer-setwin .layui-layer-close1{filter:invert(1) !important}
 </style>
 
@@ -1453,7 +1512,7 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 						<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;margin-bottom:16px">
 							<!-- KARTU KENDALI LAYANAN (SERVICE CONTROL) -->
 							<div class="sn-card" style="margin-bottom:0;border-left:4px solid #10b981">
-								<h3 style="color:#047857" data-i18n="maint_svc_title">⚙️ Kendali Layanan (Service Control)</h3>
+								<h3 style="color:#10b981" data-i18n="maint_svc_title">⚙️ Kendali Layanan (Service Control)</h3>
 								<p style="font-size:12.5px;color:var(--ink-2);margin:6px 0 12px;line-height:1.5" data-i18n="maint_svc_desc">
 									Kelola status operasional daemon sentinel secara langsung: Jalankan (Start), Hentikan (Stop), Mulai Ulang (Restart), atau Muat Ulang konfigurasi (Reload) tanpa jeda koneksi.
 								</p>
@@ -1470,7 +1529,7 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 
 							<!-- KARTU FRESH INSTALL -->
 							<div class="sn-card" style="margin-bottom:0;border-left:4px solid #10b981">
-								<h3 style="color:#047857">✨ Fresh Install</h3>
+								<h3 style="color:#10b981">✨ Fresh Install</h3>
 								<p style="font-size:12.5px;color:var(--ink-2);margin:6px 0 12px;line-height:1.5">
 									Memasang ulang ZySentinel dari awal dengan konfigurasi bersih. Berguna jika ingin me-reset seluruh basis data dan memulai dari setelan default bawaan pabrik.
 								</p>
@@ -1482,7 +1541,7 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 
 							<!-- KARTU PEMBARUAN (UPDATE) -->
 							<div class="sn-card" style="margin-bottom:0;border-left:4px solid #3b82f6">
-								<h3 style="color:#1d4ed8">🔄 Pembaruan (Update)</h3>
+								<h3 style="color:#38bdf8">🔄 Pembaruan (Update)</h3>
 								<p style="font-size:12.5px;color:var(--ink-2);margin:6px 0 12px;line-height:1.5">
 									Memeriksa rilis terbaru dari repository resmi GitHub (<span class="sn-mono">omysurya/zysentinel</span>). Melakukan patch versi dan pembaruan biner tanpa menghapus data atau konfigurasi Anda.
 								</p>
@@ -1494,19 +1553,19 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 
 							<!-- KARTU SELF-HEAL (REPAIR) -->
 							<div class="sn-card" style="margin-bottom:0;border-left:4px solid #f59e0b">
-								<h3 style="color:#b45309">🩹 Perbaikan Mandiri (Repair)</h3>
+								<h3 style="color:#f59e0b">🩹 Perbaikan Mandiri (Repair)</h3>
 								<p style="font-size:12.5px;color:var(--ink-2);margin:6px 0 12px;line-height:1.5">
 									Mendeteksi anomali atau kerusakan berkas, menyusun ulang biner yang hilang, memulihkan file konfigurasi default, dan mengaktifkan kembali daemon yang macet secara otomatis <b>tanpa downtime</b> pada server.
 								</p>
 								<div style="display:flex;align-items:center;justify-content:space-between;margin-top:auto">
 									<span style="font-size:11.5px;color:#059669">● Zero Downtime</span>
-									<button class="sn-btn" style="background:#fef3c7;color:#92400e;border:1px solid #fde68a" onclick="snDoSelfHeal()" title="Jalankan Diagnostik & Perbaikan Mandiri Tanpa Downtime">Jalankan Self-Heal</button>
+									<button class="sn-btn" style="background:rgba(245,158,11,0.15) !important;color:var(--accent-amber) !important;border:1px solid rgba(245,158,11,0.4) !important;font-weight:700" onclick="snDoSelfHeal()" title="Jalankan Diagnostik & Perbaikan Mandiri Tanpa Downtime">Jalankan Self-Heal</button>
 								</div>
 							</div>
 
 							<!-- KARTU UNINSTALL BERSIH -->
 							<div class="sn-card" style="margin-bottom:0;border-left:4px solid #ef4444">
-								<h3 style="color:#b91c1c">🗑️ Pencabutan Bersih (Uninstall)</h3>
+								<h3 style="color:#ef4444">🗑️ Pencabutan Bersih (Uninstall)</h3>
 								<p style="font-size:12.5px;color:var(--ink-2);margin:6px 0 12px;line-height:1.5">
 									Menghentikan seluruh proses proteksi, mencabut rantai aturan firewall kernel, melepas hook WAF dari Nginx, dan menghapus seluruh berkas di <span class="sn-mono">/www/server/sentinel</span> secara bersih tanpa sisa.
 								</p>
@@ -6086,15 +6145,15 @@ function snCheckUpdate(){
 		var updHtml = '<div style="padding:16px 20px;font-size:13px;line-height:1.5">'
 			+ '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid var(--line)">'
 			+ '<div><b>Versi Aktif:</b> <span class="sn-mono">' + vCur + '</span></div>'
-			+ '<div><b>Rilis GitHub:</b> <span class="sn-mono" style="color:' + (hasUpd ? '#2563eb' : '#059669') + ';font-weight:700">' + vLat + '</span></div>'
+			+ '<div><b>Rilis GitHub:</b> <span class="sn-mono" style="color:' + (hasUpd ? '#38bdf8' : '#10b981') + ';font-weight:700">' + vLat + '</span></div>'
 			+ '</div>'
 			+ '<div style="margin-bottom:8px;font-weight:600;color:var(--ink-2)">Catatan Rilis:</div>'
 			+ '<pre style="max-height:180px;overflow-y:auto;background:#020611;color:#38bdf8;padding:10px;border-radius:6px;border:1px solid rgba(0,240,255,0.2);font-size:12px;white-space:pre-wrap">'
 			+ notes
 			+ '</pre>'
 			+ (hasUpd 
-				? '<div style="margin-top:12px;color:#1d4ed8;font-size:12px">Pembaruan tersedia! Paket akan diunduh dan dipasang otomatis dari repository resmi.</div>'
-				: '<div style="margin-top:12px;color:#059669;font-size:12px">Anda sudah menggunakan versi terbaru atau patch terkini.</div>')
+				? '<div style="margin-top:12px;color:#38bdf8;font-size:12px">Pembaruan tersedia! Paket akan diunduh dan dipasang otomatis dari repository resmi.</div>'
+				: '<div style="margin-top:12px;color:#10b981;font-size:12px">Anda sudah menggunakan versi terbaru atau patch terkini.</div>')
 			+ '</div>';
 
 		layer.open({
