@@ -99,8 +99,50 @@ case "${1:-}" in
     exit $rc
     ;;
 
+  start)
+    if command -v systemctl >/dev/null 2>&1 && systemctl is-active sentinel.service >/dev/null 2>&1; then
+      say "sentinel.service sudah aktif dan berjalan"
+      exit 0
+    fi
+    if command -v systemctl >/dev/null 2>&1; then
+      systemctl start sentinel.service && say "sentinel.service berhasil dijalankan"
+    else
+      BINDIR="$(dirname "$0")"
+      "$BINDIR/guardd" -c "$CONF" &
+      say "guardd dimulai di latar belakang"
+    fi
+    ;;
+
   stop)
-    ctl "stop" && say "permintaan berhenti dikirim, guardd akan menutup diri"
+    if command -v systemctl >/dev/null 2>&1 && systemctl is-active sentinel.service >/dev/null 2>&1; then
+      systemctl stop sentinel.service && say "sentinel.service berhasil dihentikan"
+    else
+      ctl "stop" 2>/dev/null && say "permintaan berhenti dikirim, guardd akan menutup diri" || {
+        if [ -f "$PIDFILE" ]; then
+          kill "$(cat "$PIDFILE")" 2>/dev/null && say "guardd dihentikan via PID"
+        fi
+      }
+    fi
+    ;;
+
+  restart)
+    if command -v systemctl >/dev/null 2>&1; then
+      systemctl restart sentinel.service && say "sentinel.service berhasil dimulai ulang"
+    else
+      "$0" stop
+      sleep 1
+      "$0" start
+    fi
+    ;;
+
+  reload)
+    if command -v systemctl >/dev/null 2>&1 && systemctl is-active sentinel.service >/dev/null 2>&1; then
+      systemctl reload sentinel.service && say "konfigurasi sentinel.service berhasil dimuat ulang (SIGHUP)"
+    elif [ -f "$PIDFILE" ]; then
+      kill -HUP "$(cat "$PIDFILE")" 2>/dev/null && say "SIGHUP dikirim ke PID $(cat "$PIDFILE")"
+    else
+      ctl "rescan" 2>/dev/null && say "perintah rescan dikirim ke daemon" || err "gagal memuat ulang daemon"
+    fi
     ;;
 
   set)

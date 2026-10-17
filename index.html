@@ -217,7 +217,7 @@ select.sn-inp{cursor:pointer}
 					</div>
 				</div>
 			</h2>
-			<span id="bGuard" class="sn-badge sn-off" title="Daemon Guardd: Pemantau log akses & mitigasi anomali realtime">Guardd: Inactive</span>
+			<span id="bGuard" class="sn-badge sn-off" style="cursor:pointer" onclick="snClickGuardBadge()" title="Daemon Guardd: Pemantau log akses & mitigasi anomali realtime (Klik untuk kelola layanan)">Guardd: Inactive</span>
 			<span id="bAv" class="sn-badge sn-off" title="Antivirus ClamAV: Pemindaian streaming berkas & karantina malware">ClamAV: Inactive</span>
 			<span id="bFw" class="sn-badge sn-off" title="Kernel Firewall: Rantai iptables & ipset perlindungan paket jaringan">Firewall: Inactive</span>
 			<span id="bBackend" class="sn-badge sn-info" title="Backend Firewall: Subsistem kernel Linux yang aktif menegakkan aturan">Backend: Iptables-NFT</span>
@@ -1242,7 +1242,36 @@ select.sn-inp{cursor:pointer}
 						<div class="sn-fl">
 							<span class="sn-btn pri" onclick="snSetConf('enforce','0',this)" data-i18n="btn_monitor_only" title="Switch Mode to Monitor: Log Without Blocking">Monitor Only</span>
 							<span class="sn-btn dgr" onclick="snSetConf('enforce','1',this)" data-i18n="btn_enable_blocking" title="Switch Mode to Enforce: Block Violators in Kernel">Enable Blocking</span>
-							<span class="sn-btn" onclick="snSvc('restart')" data-i18n="btn_restart_daemon" title="Restart Sentinel Daemon Service">Restart Daemon</span>
+						</div>
+
+						<div style="font-weight:600;margin:18px 0 7px" data-i18n="sec_service_ctrl">Daemon Service Lifecycle</div>
+						<div class="sn-card" style="margin-bottom:14px;border-left:4px solid #10b981;background:#f8fafc">
+							<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+								<div style="flex:1;min-width:260px">
+									<div style="display:flex;align-items:center;gap:8px;font-weight:600;font-size:13.5px;color:var(--ink)">
+										<span data-i18n="svc_guardd_title">ZySentinel Daemon (guardd)</span>
+										<span id="badgeGuarddSvc" class="sn-badge sn-ok" style="font-weight:700">RUNNING</span>
+										<span id="txtGuarddPid" class="sn-mono" style="font-size:11.5px;color:var(--ink-3)">PID: -</span>
+									</div>
+									<p style="font-size:12px;color:var(--ink-2);margin:4px 0 0;line-height:1.5" data-i18n="svc_guardd_desc">
+										Controls the core background monitoring daemon. Reload re-scans active vhost logs &amp; allowlists with zero downtime.
+									</p>
+								</div>
+								<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+									<button id="btnSvcStart" class="sn-btn ok" onclick="snSvc('start')" style="font-weight:600;padding:6px 12px" data-i18n="btn_start_svc" data-i18n-title="tip_start_svc" title="Start ZySentinel Daemon Service">
+										▶ Start
+									</button>
+									<button id="btnSvcStop" class="sn-btn dgr" onclick="snSvc('stop')" style="font-weight:600;padding:6px 12px" data-i18n="btn_stop_svc" data-i18n-title="tip_stop_svc" title="Stop ZySentinel Daemon Service">
+										⏹ Stop
+									</button>
+									<button id="btnSvcRestart" class="sn-btn" onclick="snSvc('restart')" style="font-weight:600;padding:6px 12px;background:#f1f5f9;color:#334155;border:1px solid #cbd5e1" data-i18n="btn_restart_svc" data-i18n-title="tip_restart_svc" title="Restart ZySentinel Daemon Service">
+										🔄 Restart
+									</button>
+									<button id="btnSvcReload" class="sn-btn pri" onclick="snSvc('reload')" style="font-weight:600;padding:6px 12px" data-i18n="btn_reload_svc" data-i18n-title="tip_reload_svc" title="Reload Configuration &amp; Sites via SIGHUP (Zero Downtime)">
+										⚡ Reload
+									</button>
+								</div>
+							</div>
 						</div>
 
 						<div style="font-weight:600;margin:18px 0 7px" data-i18n="sec_language">Language / Bahasa</div>
@@ -1338,6 +1367,23 @@ select.sn-inp{cursor:pointer}
 						</div>
 
 						<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;margin-bottom:16px">
+							<!-- KARTU KENDALI LAYANAN (SERVICE CONTROL) -->
+							<div class="sn-card" style="margin-bottom:0;border-left:4px solid #10b981">
+								<h3 style="color:#047857" data-i18n="maint_svc_title">⚙️ Kendali Layanan (Service Control)</h3>
+								<p style="font-size:12.5px;color:var(--ink-2);margin:6px 0 12px;line-height:1.5" data-i18n="maint_svc_desc">
+									Kelola status operasional daemon sentinel secara langsung: Jalankan (Start), Hentikan (Stop), Mulai Ulang (Restart), atau Muat Ulang konfigurasi (Reload) tanpa jeda koneksi.
+								</p>
+								<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-top:auto">
+									<span id="snMaintSvcStatus" style="font-size:11.5px;color:#059669;font-weight:600">● Status: RUNNING</span>
+									<div style="display:flex;gap:5px;flex-wrap:wrap">
+										<button class="sn-btn ok sn-sm" onclick="snSvc('start')" title="Start Daemon">Start</button>
+										<button class="sn-btn dgr sn-sm" onclick="snSvc('stop')" title="Stop Daemon">Stop</button>
+										<button class="sn-btn sn-sm" onclick="snSvc('restart')" title="Restart Daemon">Restart</button>
+										<button class="sn-btn pri sn-sm" onclick="snSvc('reload')" title="Reload Daemon">Reload</button>
+									</div>
+								</div>
+							</div>
+
 							<!-- KARTU FRESH INSTALL -->
 							<div class="sn-card" style="margin-bottom:0;border-left:4px solid #10b981">
 								<h3 style="color:#047857">✨ Fresh Install</h3>
@@ -1501,6 +1547,19 @@ var SN_I18N = {
 		btn_monitor_only: "Monitor Only",
 		btn_enable_blocking: "Enable Blocking",
 		btn_restart_daemon: "Restart Daemon",
+		sec_service_ctrl: "Daemon Service Lifecycle",
+		svc_guardd_title: "ZySentinel Daemon (guardd)",
+		svc_guardd_desc: "Controls the core background monitoring daemon. Reload re-scans active vhost logs & allowlists with zero downtime.",
+		btn_start_svc: "▶ Start",
+		btn_stop_svc: "⏹ Stop",
+		btn_restart_svc: "🔄 Restart",
+		btn_reload_svc: "⚡ Reload",
+		tip_start_svc: "Start ZySentinel Daemon Service",
+		tip_stop_svc: "Stop ZySentinel Daemon Service",
+		tip_restart_svc: "Restart ZySentinel Daemon Service",
+		tip_reload_svc: "Reload Configuration & Sites via SIGHUP (Zero Downtime)",
+		maint_svc_title: "⚙️ Service Control (guardd)",
+		maint_svc_desc: "Manage the operational status of the sentinel daemon: Start, Stop, Restart, or Reload configurations without dropping connections.",
 		sec_language: "Interface Language / Bahasa Antarmuka",
 		lang_title: "Interface Language",
 		lang_desc: "Select the display language for ZySentinel. Defaults to English with instantaneous switching to Bahasa Indonesia.",
@@ -1588,6 +1647,19 @@ var SN_I18N = {
 		btn_monitor_only: "Hanya Monitor",
 		btn_enable_blocking: "Aktifkan Pemblokiran",
 		btn_restart_daemon: "Mulai Ulang Daemon",
+		sec_service_ctrl: "Siklus Hidup Layanan Daemon",
+		svc_guardd_title: "Daemon ZySentinel (guardd)",
+		svc_guardd_desc: "Mengendalikan daemon pemantau latar belakang utama. Reload memindai ulang log vhost dan allowlist tanpa jeda (zero downtime).",
+		btn_start_svc: "▶ Jalankan",
+		btn_stop_svc: "⏹ Hentikan",
+		btn_restart_svc: "🔄 Mulai Ulang",
+		btn_reload_svc: "⚡ Muat Ulang",
+		tip_start_svc: "Jalankan Layanan Daemon ZySentinel",
+		tip_stop_svc: "Hentikan Layanan Daemon ZySentinel",
+		tip_restart_svc: "Mulai Ulang Layanan Daemon ZySentinel",
+		tip_reload_svc: "Muat Ulang Konfigurasi & Vhost via SIGHUP (Tanpa Downtime)",
+		maint_svc_title: "⚙️ Kendali Layanan (Service Control)",
+		maint_svc_desc: "Kelola status operasional daemon sentinel secara langsung: Jalankan (Start), Hentikan (Stop), Mulai Ulang (Restart), atau Muat Ulang konfigurasi (Reload) tanpa jeda koneksi.",
 		sec_language: "Bahasa Antarmuka / Interface Language",
 		lang_title: "Bahasa Tampilan",
 		lang_desc: "Pilih bahasa pengantar antarmuka ZySentinel. Pengaturan akan langsung diterapkan ke seluruh halaman dasbor dan tersimpan otomatis.",
@@ -2663,10 +2735,25 @@ function snStatus(){
 		snWafLencana();
 		snAvLencana();
 
+		// Update Daemon Lifecycle Card & Controls
+		var gPid = (s && s.pid) ? s.pid : ((m && m.pid) ? m.pid : '-');
+		$('#badgeGuarddSvc').text(gAct ? 'RUNNING' : 'STOPPED').attr('class', 'sn-badge ' + (gAct ? 'sn-ok' : 'sn-bad'));
+		$('#txtGuarddPid').text(gPid !== '-' ? ('PID: ' + gPid) : (gAct ? '' : 'PID: -'));
+		$('#snMaintSvcStatus').html(gAct ? '<span style="color:#059669">● Status: RUNNING' + (gPid !== '-' ? ' (PID ' + gPid + ')' : '') + '</span>' : '<span style="color:#dc2626">● Status: STOPPED</span>');
+		if(gAct){
+			$('#btnSvcStart').css({'opacity': '0.45', 'pointer-events': 'none'}).attr('disabled', true);
+			$('#btnSvcStop').css({'opacity': '1.0', 'pointer-events': 'auto'}).removeAttr('disabled');
+			$('#btnSvcReload').css({'opacity': '1.0', 'pointer-events': 'auto'}).removeAttr('disabled');
+		} else {
+			$('#btnSvcStart').css({'opacity': '1.0', 'pointer-events': 'auto'}).removeAttr('disabled');
+			$('#btnSvcStop').css({'opacity': '0.45', 'pointer-events': 'none'}).attr('disabled', true);
+			$('#btnSvcReload').css({'opacity': '0.45', 'pointer-events': 'none'}).attr('disabled', true);
+		}
+
 		var nota = $('#stNote');
 		if(m.guardd_service !== 'active'){
-			nota.html('<b>guardd tidak berjalan.</b> Aturan kernel masih ada, tetapi ban dan throttle dari ZySentinel tidak akan bertambah. '
-				+ 'Coba: <span class="sn-mono">systemctl status sentinel.service</span>').show();
+			nota.html('<b>guardd tidak berjalan.</b> Aturan kernel masih ada, tetapi pemantauan akses dan klasifikasi penyerang sedang nonaktif. '
+				+ '<button class="sn-btn ok sn-sm" style="margin-left:10px;font-weight:600" onclick="snSvc(\'start\')">▶ Start Daemon</button>').show();
 		} else if(Number(s.enforce) === 0){
 			nota.html('<b>Mode monitor saja.</b> ZySentinel menghitung dan mencatat tetapi tidak memblokir siapa pun. '
 				+ 'Aturan kernel sudah terpasang, tetapi tidak ada IP yang masuk ke dalam set. '
@@ -2976,9 +3063,26 @@ function snSetConf(k, v, el){
 	});
 }
 function snSvc(aksi){
+	var labels = {
+		'start': (SN_LANG === 'id' ? 'Menjalankan daemon ZySentinel...' : 'Starting ZySentinel daemon...'),
+		'stop': (SN_LANG === 'id' ? 'Menghentikan daemon ZySentinel...' : 'Stopping ZySentinel daemon...'),
+		'restart': (SN_LANG === 'id' ? 'Memulai ulang daemon ZySentinel...' : 'Restarting ZySentinel daemon...'),
+		'reload': (SN_LANG === 'id' ? 'Memuat ulang konfigurasi & vhost...' : 'Reloading configuration & sites...')
+	};
+	var loadIdx = layer.msg(labels[aksi] || 'Processing...', {icon: 16, time: 0, shade: 0.1});
 	snAjax('service_action', {action: aksi}, function(m){
-		if(m){ layer.msg(m, {time:2500}); setTimeout(snStatus, 2500); }
+		layer.close(loadIdx);
+		if(m){
+			var text = (typeof m === 'string') ? m : (aksi.toUpperCase() + ' Success');
+			layer.msg(text, {icon: 1, time: 2500});
+			setTimeout(snStatus, 1200);
+		}
 	});
+}
+
+function snClickGuardBadge(){
+	snTop('conf', $('span[onclick*="\'conf\'"]')[0]);
+	snSub2('atur', $('span[onclick*="\'atur\'"]')[0]);
 }
 
 /* ---------- rate limits ---------- */

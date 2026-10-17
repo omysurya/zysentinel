@@ -445,9 +445,6 @@ class sentinel_main(object):
         """Ringkasan untuk dasbor: kondisi daemon, angka lalu lintas,
         dan status tiga lapis pertahanan."""
         st = self._status()
-        if st is None:
-            return public.returnMsg(False, 'guardd tidak menulis status.json; '
-                                         'daemon belum berjalan')
         guardd = self._svc('sentinel.service')
         timer = self._svc('sentinel-fw.timer')
         rc_c, _, _ = self._sh('iptables -C IN_BT -j SENTINEL 2>/dev/null || iptables -C INPUT -j SENTINEL 2>/dev/null || iptables -L SENTINEL -n 2>/dev/null', 5)
@@ -458,10 +455,33 @@ class sentinel_main(object):
         self_ip = self._self_ip()
 
         tot_attackers, tot_threats, tot_virus = self._get_security_totals()
-        if st is not None:
-            st['total_attackers'] = tot_attackers
-            st['total_threats'] = tot_threats
-            st['total_virus'] = tot_virus
+        if st is None:
+            pid = None
+            pid_f = self._p('run', 'guardd.pid')
+            if os.path.exists(pid_f):
+                try:
+                    with open(pid_f, 'r') as pf:
+                        pid = int(pf.read().strip())
+                except Exception:
+                    pass
+            st = {
+                'enforce': 0,
+                'uptime': 0,
+                'ts': int(time.time()),
+                'pid': pid,
+                'rss_kb': 0,
+                'rescan_interval': 30,
+                'req_total': 0,
+                'total_req': 0,
+                'total_bytes': 0,
+                'running': (guardd == 'active')
+            }
+        else:
+            st['running'] = (guardd == 'active')
+
+        st['total_attackers'] = tot_attackers
+        st['total_threats'] = tot_threats
+        st['total_virus'] = tot_virus
 
         return public.returnMsg(True, {
             'status': st,
@@ -994,14 +1014,80 @@ class sentinel_main(object):
     # kendali daemon dan firewall                                        #
     # ------------------------------------------------------------------ #
     def service_action(self, get):
-        aksi = (get.get('action') or '').strip()
-        peta = {'start': 'start', 'stop': 'stop', 'restart': 'restart'}
+        aksi = (get.get('action') or '').strip().lower()
+        peta = {'start': 'start', 'stop': 'stop', 'restart': 'restart', 'reload': 'reload'}
         if aksi not in peta:
-            return public.returnMsg(False, 'aksi tidak dikenal')
-        rc, o, e = self._sh('systemctl %s sentinel.service' % peta[aksi], 60)
+            return public.returnMsg(False, 'Aksi tidak dikenal (hanya start, stop, restart, reload)')
+
+        cmd = 'systemctl %s sentinel.service' % peta[aksi]
+        rc, o, e = self._sh(cmd, 60)
         if rc != 0:
-            return public.returnMsg(False, 'gagal: %s' % (e.strip() or o.strip()))
-        return public.returnMsg(True, 'sentinel.service %s' % aksi)
+            init_cmd = '/etc/init.d/sentinel %s' % peta[aksi]
+            if os.path.exists('/etc/init.d/sentinel'):
+                rc2, o2, e2 = self._sh(init_cmd, 60)
+                if rc2 == 0:
+                    rc, o, e = rc2, o2, e2
+            elif aksi == 'reload':
+                pid_f = self._p('run', 'guardd.pid')
+                if os.path.exists(pid_f):
+                    try:
+                        with open(pid_f, 'r') as pf:
+                            gpid = pf.read().strip()
+                        if gpid:
+                            rc3, o3, e3 = self._sh('kill -HUP %s' % gpid, 10)
+                            if rc3 == 0:
+                                rc, o, e = 0, 'SIGHUP sent to PID %s' % gpid, ''
+                    except Exception:
+                        pass
+
+        if rc != 0:
+            return public.returnMsg(False, 'Gagal melakukan %s: %s' % (aksi, e.strip() or o.strip()))
+
+        msgs = {
+            'start': 'Daemon ZySentinel berhasil dijalankan (Started)',
+            'stop': 'Daemon ZySentinel berhasil dihentikan (Stopped)',
+            'restart': 'Daemon ZySentinel berhasil dimulai ulang (Restarted)',
+            'reload': 'Konfigurasi daemon ZySentinel berhasil dimuat ulang via SIGHUP (Reloaded)'
+        }
+        try:
+            public.WriteLog('ZySentinel', 'sentinel.service %s' % aksi)
+        except Exception:
+            pass
+        return public.returnMsg(True, msgs.get(aksi, 'sentinel.service %s' % aksi))
+
+    def start(self, get=None):
+        """Memulai daemon ZySentinel (start)."""
+        return self.service_action({'action': 'start'})
+
+    def stop(self, get=None):
+        """Menghentikan daemon ZySentinel (stop)."""
+        return self.service_action({'action': 'stop'})
+
+    def restart(self, get=None):
+        """Memulai ulang daemon ZySentinel (restart)."""
+        return self.service_action({'action': 'restart'})
+
+    def reload(self, get=None):
+        """Memuat ulang konfigurasi & vhosts tanpa downtime (reload SIGHUP)."""
+        return self.service_action({'action': 'reload'})
+
+    def service_status(self, get=None):
+        """Ambil status detail layanan sentinel.service."""
+        rc, o, _ = self._sh('systemctl is-active sentinel.service', 10)
+        is_active = (rc == 0 and o.strip() == 'active')
+        pid = None
+        pid_f = self._p('run', 'guardd.pid')
+        if os.path.exists(pid_f):
+            try:
+                with open(pid_f, 'r') as f:
+                    pid = int(f.read().strip())
+            except Exception:
+                pass
+        return public.returnMsg(True, {
+            'active': is_active,
+            'status': o.strip(),
+            'pid': pid
+        })
 
     def fw_action(self, get):
         aksi = (get.get('action') or '').strip()

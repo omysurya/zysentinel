@@ -405,6 +405,14 @@ pasang_layanan() {
   systemctl start sentinel-fw.service 2>/dev/null
   systemctl start sentinel-fw.timer 2>/dev/null
   systemctl restart sentinel.service 2>/dev/null
+  # Pasang SysV init script untuk kendali standar aaPanel dan CLI
+  local init_src; init_src="$(dirname "$0")/payload/init.d/sentinel"
+  [ -f "$init_src" ] || init_src="/www/server/panel/plugin/sentinel/payload/init.d/sentinel"
+  if [ -f "$init_src" ]; then
+    cp -p "$init_src" /etc/init.d/sentinel
+    chmod 755 /etc/init.d/sentinel
+    say "skrip layanan /etc/init.d/sentinel terpasang"
+  fi
   say "layanan sentinel dijalankan"
 }
 
@@ -464,7 +472,7 @@ cabut_bersih() {
       systemctl stop "$u" 2>/dev/null || true
       systemctl disable "$u" 2>/dev/null || true
     done
-    rm -f /etc/systemd/system/sentinel* 2>/dev/null || true
+    rm -f /etc/systemd/system/sentinel* /etc/init.d/sentinel 2>/dev/null || true
     systemctl daemon-reload 2>/dev/null || true
     say "seluruh layanan systemd dihentikan dan unit dicabut"
   fi
