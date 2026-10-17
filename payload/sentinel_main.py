@@ -1294,7 +1294,7 @@ class sentinel_main(object):
         return public.returnMsg(True, 'Port firewall %s' % ('diaktifkan' if new_st else 'dinonaktifkan'))
 
     # ------------------------------------------------------------------ #
-    # free_waf engine (Nginx free firewall, difork ke Sentinel)             #
+    # Lua WAF engine (Nginx Lua firewall, difork ke Sentinel)            #
     #                                                                     #
     # Engine Lua ini hanya jalan di nginx. Konfigurasi global dan per     #
     # situs dibaca init.lua sekali saat worker start, jadi setiap         #
@@ -1302,7 +1302,7 @@ class sentinel_main(object):
     # ------------------------------------------------------------------ #
     # Master aset WAF ada di bawah sentinel (sejak konsolidasi); path
     # lama /www/server/free_waf tetap ada sebagai symlink untuk nginx.
-    FW_HOME = '/www/server/sentinel/waf/free_waf/'
+    FW_HOME = '/www/server/sentinel/waf/lua_waf/' if os.path.exists('/www/server/sentinel/waf/lua_waf') else '/www/server/sentinel/waf/free_waf/'
     FW_MODUL = ['cc', 'get', 'post', 'cookie', 'user-agent', 'scan',
                 'url_black', 'drop_abroad']
 

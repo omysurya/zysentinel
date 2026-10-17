@@ -204,16 +204,20 @@ konsolidasi_waf() {
   # supaya semua ada di dalam folder sentinel sejak awal.
   local pay; pay="$(dirname "$0")/payload/waf"
   if [ -d "$pay" ]; then
-    for d in modsec crs free_waf; do
+    for d in modsec crs lua_waf free_waf; do
       if [ -d "$pay/$d" ] && [ ! -e "$BASE/waf/$d" ]; then
         cp -a "$pay/$d" "$BASE/waf/$d"
         say "aset $d disalin dari payload ke sentinel/waf"
       fi
     done
   fi
+  # Pastikan backward compatibility symlink di dalam sentinel/waf/
+  if [ -d "$BASE/waf/lua_waf" ] && [ ! -e "$BASE/waf/free_waf" ]; then
+    ln -sfn lua_waf "$BASE/waf/free_waf"
+  fi
   # Pindahkan direktori lama (server yang sudah terpasang) + symlink.
   local pair src dst
-  for pair in "modsec:modsec" "modsecurity-crs:crs" "free_waf:free_waf"; do
+  for pair in "modsec:modsec" "modsecurity-crs:crs" "lua_waf:lua_waf" "free_waf:lua_waf"; do
     src="/www/server/${pair%%:*}"; dst="$BASE/waf/${pair##*:}"
     if [ -d "$src" ] && [ ! -L "$src" ]; then
       if [ ! -e "$dst" ]; then
@@ -234,7 +238,7 @@ konsolidasi_waf() {
 
 pasang_waf() {
   # Pasang engine WAF sesuai webserver yang TERPASANG di mesin ini.
-  # nginx + lua -> engine free_waf dari payload (idempoten, config
+  # nginx + lua -> engine Lua WAF dari payload (idempoten, config
   #   yang sudah ada tidak ditimpa).
   # apache / openlitespeed -> engine Lua tidak berlaku di sana; yang
   #   dipakai jalur snippet ModSecurity (dikelola tab Config > WAF).
@@ -244,18 +248,18 @@ pasang_waf() {
   local nginx_bin="/www/server/nginx/sbin/nginx"
   if [ -x "$nginx_bin" ]; then
     if "$nginx_bin" -V 2>&1 | grep -q 'lua_nginx_module'; then
-      say "nginx + lua terdeteksi, memasang engine free_waf"
+      say "nginx + lua terdeteksi, memasang engine Lua WAF"
       bash "$skrip" freewaf-install || {
-        err "pemasangan engine free_waf gagal (lihat pesan di atas)"
+        err "pemasangan engine Lua WAF gagal (lihat pesan di atas)"
         return 1
       }
     else
       say "nginx ada tetapi TANPA lua_nginx_module."
-      say "Engine free_waf dilewati. Bangun ulang nginx dengan modul lua,"
+      say "Engine Lua WAF dilewati. Bangun ulang nginx dengan modul lua,"
       say "lalu jalankan: bash $skrip freewaf-install"
     fi
   else
-    say "nginx tidak terpasang, engine free_waf dilewati."
+    say "nginx tidak terpasang, engine Lua WAF dilewati."
   fi
   local ada_apache=0 ada_ols=0
   [ -x /www/server/apache/bin/httpd ] && ada_apache=1
@@ -425,10 +429,10 @@ cabut_bersih() {
 
   # 1. Cabut hook WAF webserver dan reload Nginx
   if [ -x "$BIN/sentinel-waf.sh" ]; then
-    say "Mencabut hook free_waf dan Coraza dari webserver"
+    say "Mencabut hook Lua WAF dan Coraza dari webserver"
     bash "$BIN/sentinel-waf.sh" freewaf-remove 2>/dev/null || true
   fi
-  rm -f /www/server/panel/vhost/nginx/free_waf.conf 2>/dev/null || true
+  rm -f /www/server/panel/vhost/nginx/sentinel_waf.conf /www/server/panel/vhost/nginx/free_waf.conf 2>/dev/null || true
   if [ -x /www/server/nginx/sbin/nginx ]; then
     if /www/server/nginx/sbin/nginx -t >/dev/null 2>&1; then
       /etc/init.d/nginx reload >/dev/null 2>&1 || true
@@ -618,20 +622,22 @@ kunci_keamanan_benteng() {
   chmod 700 "$BASE/av" "$BASE/av/baseline" "$BASE/av/last" "$BASE/av/quarantine" 2>/dev/null || true
   chmod -R 700 "$BASE/av/quarantine" 2>/dev/null || true
 
-  # 7. Amankan aturan WAF free_waf: Hapus izin world-writable (666) yang berbahaya
-  if [ -d "$BASE/waf/free_waf/rule" ]; then
-    chown -R root:root "$BASE/waf/free_waf" 2>/dev/null || true
-    chmod 755 "$BASE/waf/free_waf" "$BASE/waf/free_waf/rule" 2>/dev/null || true
-    chmod 644 "$BASE/waf/free_waf/rule"/*.json 2>/dev/null || true
-    chmod 644 "$BASE/waf/free_waf"/*.lua 2>/dev/null || true
-    chmod 644 "$BASE/waf/free_waf"/*.json 2>/dev/null || true
-    chmod 640 "$BASE/waf/free_waf"/*.bak* 2>/dev/null || true
-    touch "$BASE/waf/free_waf/drop_ip.log" "$BASE/waf/free_waf/total.json" 2>/dev/null || true
-    chown www:www "$BASE/waf/free_waf/drop_ip.log" "$BASE/waf/free_waf/total.json" 2>/dev/null \
-      || chown nobody:nogroup "$BASE/waf/free_waf/drop_ip.log" "$BASE/waf/free_waf/total.json" 2>/dev/null || true
-    chmod 660 "$BASE/waf/free_waf/drop_ip.log" "$BASE/waf/free_waf/total.json" 2>/dev/null || true
-    chmod o-rw "$BASE/waf/free_waf/drop_ip.log" "$BASE/waf/free_waf/total.json" 2>/dev/null || true
-  fi
+  # 7. Amankan aturan WAF Lua WAF: Hapus izin world-writable (666) yang berbahaya
+  for waf_d in "$BASE/waf/lua_waf" "$BASE/waf/free_waf"; do
+    if [ -d "$waf_d/rule" ] && [ ! -L "$waf_d" ]; then
+      chown -R root:root "$waf_d" 2>/dev/null || true
+      chmod 755 "$waf_d" "$waf_d/rule" 2>/dev/null || true
+      chmod 644 "$waf_d/rule"/*.json 2>/dev/null || true
+      chmod 644 "$waf_d"/*.lua 2>/dev/null || true
+      chmod 644 "$waf_d"/*.json 2>/dev/null || true
+      chmod 640 "$waf_d"/*.bak* 2>/dev/null || true
+      touch "$waf_d/drop_ip.log" "$waf_d/total.json" 2>/dev/null || true
+      chown www:www "$waf_d/drop_ip.log" "$waf_d/total.json" 2>/dev/null \
+        || chown nobody:nogroup "$waf_d/drop_ip.log" "$waf_d/total.json" 2>/dev/null || true
+      chmod 660 "$waf_d/drop_ip.log" "$waf_d/total.json" 2>/dev/null || true
+      chmod o-rw "$waf_d/drop_ip.log" "$waf_d/total.json" 2>/dev/null || true
+    fi
+  done
 
   # 8. Amankan seluruh direktori plugin panel aaPanel dari modifikasi non-root
   local panel_plugin_dir="/www/server/panel/plugin"

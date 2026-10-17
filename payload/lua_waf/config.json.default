@@ -1,6 +1,6 @@
 {
  "open": true,
- "reqfile_path": "/www/server/free_waf/html",
+ "reqfile_path": "/www/server/sentinel/waf/lua_waf/html",
  "logs_path": "/www/wwwlogs/free_waf_log",
  "log": true,
  "log_save": 30,

@@ -835,7 +835,7 @@ select.sn-inp{cursor:pointer}
 				<div class="sn-card">
 					<div class="sn-tabs">
 						<span class="on" onclick="snWafTab('coraza',this)" title="Mesin WAF Coraza Terintegrasi Nginx">Coraza</span>
-						<span onclick="snWafTab('lua',this)" title="Mesin WAF Ringan Berbasis Nginx Lua">LUA (Free Nginx)</span>
+						<span onclick="snWafTab('lua',this)" title="Mesin WAF Ringan Berbasis Nginx Lua">Lua WAF</span>
 						<span onclick="snWafTab('upload',this)" title="Perlindungan Upload Berkas Realtime Ala Imunify360">Real-Time Upload Protection</span>
 					</div>
 
@@ -893,9 +893,9 @@ select.sn-inp{cursor:pointer}
 						</div>
 						<div class="sn-note" id="nwNote">loading</div>
 						<div class="sn-fl" style="margin:0 0 12px">
-							<span class="sn-btn pri" onclick="snNwInstall()" title="Pasang Modul LUA Free WAF ke Nginx">Install Engine</span>
-							<span class="sn-btn dgr" onclick="snNwRemove()" title="Cabut Modul LUA Free WAF dari Nginx">Remove Engine</span>
-							<span class="sn-btn" onclick="snNwMuat()" title="Periksa Status Kesiapan Engine LUA">Check Status</span>
+							<span class="sn-btn pri" onclick="snNwInstall()" title="Pasang Modul Lua WAF ke Nginx">Install Engine</span>
+							<span class="sn-btn dgr" onclick="snNwRemove()" title="Cabut Modul Lua WAF dari Nginx">Remove Engine</span>
+							<span class="sn-btn" onclick="snNwMuat()" title="Periksa Status Kesiapan Engine Lua WAF">Check Status</span>
 							<span style="font-weight:600;margin-left:12px">Engine Detail</span>
 						</div>
 						<pre class="sn-pre" id="nwDetail" style="margin-bottom:14px">loading</pre>
@@ -3725,16 +3725,16 @@ function snEngineMuat(){
 			+ '<div class="pilih">' + czBtn + '</div></div>';
 		$('#snCorazaHeroCard').html(czHtml);
 
-		// 2. Hero Card Free Nginx WAF (khusus untuk subpage LUA #w-lua)
+		// 2. Hero Card Lua WAF (khusus untuk subpage LUA #w-lua)
 		var isFwActive = (m.pilih === 'free_waf');
 		var fwBtn = isFwActive
 			? '<span class="sn-badge sn-ok" style="font-size:12px;padding:3px 10px">✓ Aktif (Engine Utama)</span>'
-			: '<span class="sn-btn pri" onclick="snEnginePilih(\'free_waf\');event.stopPropagation();" title="Pilih dan Terapkan Engine Free Nginx WAF">Gunakan Free Nginx WAF</span>';
+			: '<span class="sn-btn pri" onclick="snEnginePilih(\'free_waf\');event.stopPropagation();" title="Pilih dan Terapkan Engine Lua WAF">Gunakan Lua WAF</span>';
 
 		var fwHtml = ''
-			+ '<div class="sn-engcard ' + (isFwActive ? 'on' : '') + '" title="Klik untuk mengaktifkan engine Free Nginx WAF" onclick="snCardClick(\'free_waf\')">'
-			+ '<div class="t">Free Nginx WAF</div>'
-			+ '<div class="d">WAF Lua di dalam nginx. Ringan, cepat, memeriksa pola serangan umum dan CC per IP. Cocok untuk semua jenis situs.</div>'
+			+ '<div class="sn-engcard ' + (isFwActive ? 'on' : '') + '" title="Klik untuk mengaktifkan engine Lua WAF" onclick="snCardClick(\'free_waf\')">'
+			+ '<div class="t">Lua WAF</div>'
+			+ '<div class="d">Modul WAF tertanam native di dalam nginx. Ringan, cepat, memeriksa pola serangan injeksi web dan proteksi CC per IP.</div>'
 			+ '<div class="st">' + fwSt + fwJalan
 			+ '<span class="sn-badge sn-off">Lua: ' + (fw.lua || '-') + '</span></div>'
 			+ '<div class="pilih">' + fwBtn + '</div></div>';
@@ -3760,7 +3760,7 @@ function snCardClick(eng){
 		snEnginePilih(eng);
 		return;
 	}
-	var nama = (eng === 'coraza') ? 'Coraza + OWASP CRS' : 'Free Nginx WAF';
+	var nama = (eng === 'coraza') ? 'Coraza + OWASP CRS' : 'Lua WAF';
 	if(SN_ENG.pilih === eng){
 		layer.msg('Engine ' + nama + ' saat ini sudah aktif sebagai mesin utama.', {time: 2500});
 	} else {
@@ -3769,10 +3769,10 @@ function snCardClick(eng){
 }
 
 function snEnginePilih(eng){
-	var nama = (eng === 'coraza') ? 'Coraza + OWASP CRS' : 'Free Nginx WAF';
+	var nama = (eng === 'coraza') ? 'Coraza + OWASP CRS' : 'Lua WAF';
 	var tanya = (eng === 'coraza')
 		? 'Pilih dan aktifkan engine ' + nama + '? Aset disiapkan bila belum ada; engine baru berjalan setelah konektor nginx terpasang.'
-		: 'Pilih dan aktifkan engine ' + nama + '? WAF Lua di dalam nginx akan diaktifkan sebagai engine utama.';
+		: 'Pilih dan aktifkan engine ' + nama + '? WAF tertanam native di dalam nginx akan diaktifkan sebagai engine utama.';
 	layer.confirm(tanya, {title: 'Pilih Engine WAF: ' + nama}, function(idx){
 		layer.close(idx);
 		snAjax('set_waf_engine', {engine: eng}, function(m){
@@ -4037,17 +4037,17 @@ function snNwMuat(){
 		$('#nwDetail').text(detail.join('\n'));
 		var ket = '';
 		if(s.lua !== 'ada'){
-			ket = 'nginx di server ini TIDAK punya lua_nginx_module. Engine free_waf tidak bisa dipasang. Bangun ulang nginx dengan modul lua di panel, lalu ulangi.';
+			ket = 'nginx di server ini TIDAK punya lua_nginx_module. Engine Lua WAF tidak bisa dipasang. Bangun ulang nginx dengan modul lua di panel, lalu ulangi.';
 		} else if(s.loaded === 'ya'){
-			ket = 'Engine termuat dan berjalan (mode ' + (s.mode || '-') + '). Instalasi ulang bersifat idempoten dan tidak menghapus config yang sudah ada.';
+			ket = 'Engine Lua WAF termuat dan berjalan (mode ' + (s.mode || '-') + '). Instalasi ulang bersifat idempoten dan tidak menghapus config yang sudah ada.';
 		} else {
-			ket = 'Engine belum terpasang. Install Engine menyalin berkas dari payload plugin tanpa menimpa config yang sudah ada.';
+			ket = 'Engine Lua WAF belum terpasang. Install Engine menyalin berkas dari payload plugin tanpa menimpa config yang sudah ada.';
 		}
 		$('#nwNote').html('<b>Status:</b> ' + ket + ' Untuk apache dan openlitespeed engine ini tidak berlaku; pakai tab <b>Config &rsaquo; WAF</b>.');
 	});
 }
 function snNwInstall(){
-	layer.confirm('Pasang engine free_waf dari payload plugin? Berkas config yang sudah ada tidak ditimpa.', function(idx){
+	layer.confirm('Pasang engine Lua WAF dari payload plugin? Berkas config yang sudah ada tidak ditimpa.', function(idx){
 		layer.close(idx);
 		snAjax('freewaf_engine', {action: 'install'}, function(m){
 			if(m){ layer.msg(m, {time:4000}); snNwMuat(); snLuaMuat(); }
@@ -4055,7 +4055,7 @@ function snNwInstall(){
 	});
 }
 function snNwRemove(){
-	layer.confirm('Cabut hook free_waf dari nginx? Data config dan log dipertahankan.', function(idx){
+	layer.confirm('Cabut hook Lua WAF dari nginx? Data config dan log dipertahankan.', function(idx){
 		layer.close(idx);
 		snAjax('freewaf_engine', {action: 'remove'}, function(m){
 			if(m){ layer.msg(m, {time:4000}); snNwMuat(); snLuaMuat(); }
