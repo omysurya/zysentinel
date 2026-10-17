@@ -1924,8 +1924,6 @@ function snToggleTelemetry(){
 		});
 	});
 }
-	);
-}
 
 function snInjectGtm(){
 	if(!SN_TELEMETRY_ENABLED) return;
@@ -4774,6 +4772,7 @@ function snVhostMuat(){
 			var s5v = v.err5_persen > 0 ? (v.err5_persen >= 1
 				? '<span class="sn-badge sn-bad">' + v.err5_persen + '%</span>'
 				: '<span class="sn-badge sn-warn">' + v.err5_persen + '%</span>')
+				: '<span class="sn-badge sn-off">0%</span>';
 			var threats = (v.threats !== undefined ? v.threats : (v.serangan || 0));
 			var attackers = (v.attackers !== undefined ? v.attackers : (v.ip_penyerang || 0));
 			var virus = (v.virus !== undefined ? v.virus : 0);
