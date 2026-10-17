@@ -390,6 +390,57 @@ class sentinel_main(object):
     # ------------------------------------------------------------------ #
     # tampilan utama                                                     #
     # ------------------------------------------------------------------ #
+    def _get_security_totals(self):
+        """Hitung total penyerang unik, total ancaman (threats), dan total virus."""
+        attackers = 0
+        threats = 0
+        virus = 0
+        try:
+            import sqlite3
+            con = sqlite3.connect(self._db(), timeout=5)
+            cur = con.cursor()
+            try:
+                r_ev = cur.execute('SELECT COUNT(*), COUNT(DISTINCT ip) FROM events').fetchone()
+                if r_ev:
+                    threats += (r_ev[0] or 0)
+                    attackers += (r_ev[1] or 0)
+            except Exception:
+                pass
+            try:
+                r_proc = cur.execute('SELECT COUNT(*) FROM proc_alerts').fetchone()
+                if r_proc:
+                    threats += (r_proc[0] or 0)
+            except Exception:
+                pass
+            try:
+                r_vq = cur.execute('SELECT COUNT(*) FROM vhost_quarantine').fetchone()
+                if r_vq:
+                    virus += (r_vq[0] or 0)
+            except Exception:
+                pass
+            con.close()
+        except Exception:
+            pass
+
+        # Tambahkan deteksi dari file scan ClamAV per vhost
+        try:
+            all_scan = self._p('av', 'last', 'all.json')
+            if os.path.isfile(all_scan):
+                with open(all_scan, 'r', encoding='utf-8') as f:
+                    v_data = json.load(f)
+                    virus += v_data.get('total_found', 0)
+        except Exception:
+            pass
+
+        # Fallback bans bila events kosong
+        st = self._status()
+        if st:
+            b_tot = st.get('bans_total', 0)
+            if b_tot > attackers:
+                attackers = b_tot
+
+        return attackers, threats, virus
+
     def get_status(self, get):
         """Ringkasan untuk dasbor: kondisi daemon, angka lalu lintas,
         dan status tiga lapis pertahanan."""
@@ -406,6 +457,12 @@ class sentinel_main(object):
             fw = self._svc('sentinel-fw.service')
         self_ip = self._self_ip()
 
+        tot_attackers, tot_threats, tot_virus = self._get_security_totals()
+        if st is not None:
+            st['total_attackers'] = tot_attackers
+            st['total_threats'] = tot_threats
+            st['total_virus'] = tot_virus
+
         return public.returnMsg(True, {
             'status': st,
             'guardd_service': guardd,
@@ -414,6 +471,9 @@ class sentinel_main(object):
             'enforce': st.get('enforce', 0),
             'self_ip': self_ip,
             'rss_mb': round(st.get('rss_kb', 0) / 1024.0, 1),
+            'total_attackers': tot_attackers,
+            'total_threats': tot_threats,
+            'total_virus': tot_virus,
         })
 
     # cache CPU. Persentase CPU butuh dua pembacaan /proc/stat dengan
@@ -2592,38 +2652,45 @@ class sentinel_main(object):
             return Adv
 
         peta_serang = dict((r['host'], r) for r in Adv)
+
+        # Ambil virus per vhost dari vhost_quarantine dan hasil scan ClamAV
+        peta_virus = {}
+        try:
+            vq = self._sql('SELECT vhost, COUNT(*) cnt FROM vhost_quarantine GROUP BY vhost')
+            if vq and isinstance(vq, list):
+                for row in vq:
+                    vh = row.get('vhost')
+                    if vh:
+                        peta_virus[vh] = row.get('cnt', 0)
+        except Exception:
+            pass
+
         hasil = []
         for r in trafik:
+            vh_name = r['host']
             req = r['req'] or 0
             s2 = r['s2'] or 0
             s3 = r['s3'] or 0
             s4 = r['s4'] or 0
             s5 = r['s5'] or 0
 
-            # 4xx dan 5xx DIBEDAKAN, bukan dijumlahkan.
-            #
-            # Kalau dijumlahkan, hampir semua vhost di server ini akan
-            # terlihat 100 persen error: hrd.phs.co.id memang begitu
-            # karena memang selalu 403, tapi wa.sentris.web.id memiliki
-            # 1.285 respons 2xx dari 1.455 permintaan dan tetap akan
-            # terlihat salah kalau disebut 100 persen error.
-            #
-            # Yang perlu diketahui operator bukan "berapa persen gagal",
-            # tapi "berapa yang butuh diperbaiki". 5xx adalah kegagalan
-            # server dan itu yang penting. 4xx sering hal wajar: 401
-            # dari auth, 404 dari path yang memang tidak ada, 403 dari
-            # WAF yang bekerja. Jadi keduanya dilaporkan terpisah.
-            #
-            # Pembagi memakai seluruh respons yang tercatat (req),
-            # bukan total_resp = req - 2xx - 3xx. Kalau memakai yang
-            # kedua, setiap vhost yang tidak punya 2xx akan otomatis
-            # terlihat 100 persen.
+            # Cek juga hasil scan ClamAV per vhost
+            v_cnt = peta_virus.get(vh_name, 0)
+            try:
+                vf = self._p('av', 'last', vh_name + '.json')
+                if os.path.isfile(vf):
+                    with open(vf, 'r', encoding='utf-8') as f:
+                        sc = json.load(f)
+                        v_cnt += sc.get('found', 0)
+            except Exception:
+                pass
+
             def _pct(jumlah):
                 return round(jumlah * 100.0 / req, 2) if req > 0 else 0.0
 
-            s = peta_serang.get(r['host'], {})
+            s = peta_serang.get(vh_name, {})
             hasil.append({
-                'host': r['host'],
+                'host': vh_name,
                 'req': req,
                 'bytes': r['bytes'] or 0,
                 's2': s2,
@@ -2635,10 +2702,13 @@ class sentinel_main(object):
                 'err4_persen': _pct(s4),
                 'err5_persen': _pct(s5),
                 'serangan': s.get('n', 0),
+                'threats': s.get('n', 0),
                 'skor_total': s.get('skor', 0),
                 'skor_puncak': s.get('puncak', 0),
                 'ip_penyerang': s.get('ip_unik', 0),
+                'attackers': s.get('ip_unik', 0),
                 'jenis_serang': s.get('jenis', 0),
+                'virus': v_cnt,
             })
         return public.returnMsg(True, hasil)
 
@@ -3690,12 +3760,60 @@ class sentinel_main(object):
     # MANAJEMEN SIKLUS HIDUP (LIFECYCLE): FRESH | UPDATE | REPAIR | UNINSTALL
     # DUKUNGAN TELEMETRI GOOGLE ANALYTICS & TERMS POLICY
     # -------------------------------------------------------------------------
+    def _is_telemetry_enabled(self):
+        """Periksa apakah pengiriman statistik telemetri GTM / GA4 diizinkan. Default adalah On (True)."""
+        conf_p = self._p('etc', 'telemetry.json')
+        if not os.path.isfile(conf_p):
+            conf_p = os.path.join(os.path.dirname(__file__), 'telemetry.json')
+        if os.path.isfile(conf_p):
+            try:
+                with open(conf_p, 'r', encoding='utf-8') as f:
+                    cfg = json.load(f)
+                    return bool(cfg.get('enabled', True))
+            except Exception:
+                return True
+        return True
+
+    def get_telemetry_setting(self, get):
+        """Ambil konfigurasi telemetri statistik Google Tag Manager."""
+        return public.returnMsg(True, {
+            'enabled': self._is_telemetry_enabled()
+        })
+
+    def set_telemetry_setting(self, get):
+        """Ubah konfigurasi On/Off telemetri statistik Google Tag Manager."""
+        val = str(get.get('enabled', '1')).strip().lower()
+        enabled = val in ('1', 'true', 'on', 'yes')
+        payload = {
+            'enabled': enabled,
+            'updated_at': int(time.time())
+        }
+        target_etc = self._p('etc', 'telemetry.json')
+        try:
+            os.makedirs(os.path.dirname(target_etc), exist_ok=True)
+            with open(target_etc, 'w', encoding='utf-8') as f:
+                json.dump(payload, f, indent=2)
+        except Exception as e:
+            return public.returnMsg(False, 'Gagal menyimpan konfigurasi telemetri: %s' % str(e))
+
+        try:
+            local_p = os.path.join(os.path.dirname(__file__), 'telemetry.json')
+            with open(local_p, 'w', encoding='utf-8') as f:
+                json.dump(payload, f, indent=2)
+        except Exception:
+            pass
+
+        status_text = 'Aktif (ON)' if enabled else 'Nonaktif (OFF)'
+        return public.returnMsg(True, 'Pengaturan telemetri Google Tag Manager berhasil diubah: %s' % status_text)
+
     def _send_telemetry(self, event_name, extra_params=None):
         """Kirim statistik telemetri anonim (instalasi/error/pembaruan) ke Google Analytics.
         
         Sesuai kebijakan privasi lisensi: HANYA metrik umum sistem yang dikirim.
         TIDAK ADA kredensial, password, token, atau informasi pribadi/rahasia server.
         """
+        if not self._is_telemetry_enabled():
+            return
         try:
             cid = 'anon-sentinel'
             if os.path.exists('/etc/machine-id'):

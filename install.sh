@@ -92,6 +92,11 @@ pasang_daemon() {
       cp -p "$pay/proc_whitelist.json.default" "$ETC/proc_whitelist.json"
       say "proc_whitelist.json dibuat dari default"
     fi
+    if [ ! -f "$ETC/telemetry.json" ]; then
+      echo '{"enabled": true}' > "$ETC/telemetry.json"
+      chmod 644 "$ETC/telemetry.json"
+      say "telemetry.json diinisialisasi default aktif (ON)"
+    fi
     # Pasang kunci proteksi anti-tamper (hanya root yang bisa menghapus)
     if [ ! -f "$ETC/uninstall.lock" ]; then
       echo "zysentinel_tamper_protection_locked_by_root" > "$ETC/uninstall.lock"

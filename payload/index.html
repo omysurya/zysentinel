@@ -406,10 +406,13 @@ select.sn-inp{cursor:pointer}
 							<thead><tr>
 								<th>Vhost</th><th class="r">Requests</th><th class="r">Data</th>
 								<th class="r">2xx</th><th class="r">4xx</th><th class="r">5xx</th>
-								<th class="r">429</th><th class="r">Attacks</th>
-								<th class="r">Attacker IPs</th><th class="r">Peak Score</th>
+								<th class="r">429</th>
+								<th class="r" title="Total Ancaman & Serangan Terdeteksi">Threats</th>
+								<th class="r" title="Total IP Penyerang Terdeteksi">Attackers</th>
+								<th class="r" title="Total Virus & Malware Terdeteksi">Virus</th>
+								<th class="r">Peak Score</th>
 							</tr></thead>
-							<tbody id="tbVhost"><tr><td colspan="10" class="sn-empty">loading</td></tr></tbody>
+							<tbody id="tbVhost"><tr><td colspan="11" class="sn-empty">loading</td></tr></tbody>
 						</table>
 						<div class="sn-note" style="margin-top:12px">
 							<b>4xx dan 5xx sengaja tidak dijumlahkan.</b> 4xx sering hal yang wajar:
@@ -1241,6 +1244,26 @@ select.sn-inp{cursor:pointer}
 							<span class="sn-btn dgr" onclick="snSetConf('enforce','1',this)" title="Ubah Mode ke Enforce: Blokir Pelanggar di Kernel">Enable Blocking</span>
 							<span class="sn-btn" onclick="snSvc('restart')" title="Mulai Ulang Layanan Daemon sentinel.service">Restart Daemon</span>
 						</div>
+
+						<div style="font-weight:600;margin:18px 0 7px">Telemetry &amp; Google Tag Manager</div>
+						<div class="sn-card" style="margin-bottom:0;border-left:4px solid #3b82f6;background:#f8fafc">
+							<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+								<div style="flex:1;min-width:260px">
+									<div style="display:flex;align-items:center;gap:8px;font-weight:600;font-size:13.5px;color:var(--ink)">
+										<span>Statistik Telemetri (Google Tag Manager)</span>
+										<span id="badgeTelemetry" class="sn-badge sn-ok" style="font-weight:700">AKTIF (ON)</span>
+									</div>
+									<p style="font-size:12px;color:var(--ink-2);margin:4px 0 0;line-height:1.5">
+										Mengirim data telemetri anonim (versi rilis plugin, status operasional, kejadian pembaruan/instalasi) ke Google Tag Manager untuk membantu tim pengembang ZySentinel memantau kestabilan sistem. <b>Tidak ada data kredensial, kunci, atau informasi sensitif vhost yang dikirim.</b>
+									</p>
+								</div>
+								<div style="display:flex;align-items:center;gap:10px">
+									<button id="btnTelemetryToggle" class="sn-btn ok" onclick="snToggleTelemetry()" style="font-weight:600;padding:6px 14px" title="Nyalakan atau Matikan Pengiriman Data Telemetri GTM">
+										● Telemetri: ON (Aktif)
+									</button>
+								</div>
+							</div>
+						</div>
 					</div>
 
 					<div class="sn-subpage" id="c-laju">
@@ -1392,6 +1415,89 @@ var SN_SUB2 = {};
 var SN_WAFTAB = 'coraza';
 var SN_SYS_T = 0;
 
+/* =========================================================================
+   TELEMETRI STATISTIK GOOGLE TAG MANAGER (GTM / GA4)
+   Default: Aktif (ON) dengan kontrol On/Off di menu Setting
+   ========================================================================= */
+var SN_TELEMETRY_ENABLED = true;
+
+function snInitTelemetry(){
+	snAjax('get_telemetry_setting', {}, function(data){
+		if(data && typeof data.enabled !== 'undefined'){
+			SN_TELEMETRY_ENABLED = !!data.enabled;
+		} else {
+			SN_TELEMETRY_ENABLED = true;
+		}
+		snUpdateTelemetryUI();
+		if(SN_TELEMETRY_ENABLED){
+			snInjectGtm();
+		}
+	});
+}
+
+function snUpdateTelemetryUI(){
+	var badge = $('#badgeTelemetry');
+	var btn = $('#btnTelemetryToggle');
+	if(SN_TELEMETRY_ENABLED){
+		badge.attr('class', 'sn-badge sn-ok').text('AKTIF (ON)');
+		btn.attr('class', 'sn-btn ok').html('● Telemetri: ON (Aktif)');
+	} else {
+		badge.attr('class', 'sn-badge sn-off').text('NONAKTIF (OFF)');
+		btn.attr('class', 'sn-btn').html('○ Telemetri: OFF (Mati)');
+	}
+}
+
+function snToggleTelemetry(){
+	var targetVal = SN_TELEMETRY_ENABLED ? '0' : '1';
+	var txtAksi = SN_TELEMETRY_ENABLED ? 'menonaktifkan' : 'mengaktifkan';
+	layer.confirm('Apakah Anda yakin ingin ' + txtAksi + ' pengiriman statistik telemetri Google Tag Manager?',
+		{title: 'Konfigurasi Telemetri', icon: 3},
+		function(idx){
+			layer.close(idx);
+			var loadIdx = layer.msg('Menyimpan pengaturan telemetri...', {time:0, shade:[0.2,'#000']});
+			snAjax('set_telemetry_setting', {enabled: targetVal}, function(res){
+				layer.close(loadIdx);
+				SN_TELEMETRY_ENABLED = (targetVal === '1');
+				snUpdateTelemetryUI();
+				layer.msg(res || 'Pengaturan telemetri berhasil diperbarui', {icon: 1, time: 2500});
+				if(SN_TELEMETRY_ENABLED){
+					snInjectGtm();
+				}
+			});
+		}
+	);
+}
+
+function snInjectGtm(){
+	if(!SN_TELEMETRY_ENABLED) return;
+	window.dataLayer = window.dataLayer || [];
+	if(typeof window.gtag !== 'function'){
+		window.gtag = function(){
+			if(window.SN_TELEMETRY_ENABLED !== false){
+				window.dataLayer.push(arguments);
+			}
+		};
+		window.gtag('js', new Date());
+		window.gtag('config', 'G-8DBL8LPYQZ', {
+			'cookie_domain': 'auto',
+			'cookie_flags': 'SameSite=Lax',
+			'send_page_view': true,
+			'page_title': 'ZySentinel Dashboard'
+		});
+	}
+	if(!document.getElementById('gtag-sentinel')){
+		var gs = document.createElement('script');
+		gs.id = 'gtag-sentinel';
+		gs.async = true;
+		gs.src = 'https://www.googletagmanager.com/gtag/js?id=G-8DBL8LPYQZ';
+		document.head.appendChild(gs);
+	}
+	window.gtag('event', 'sentinel_active', {
+		'app_version': '1.6.1',
+		'server_host': window.location.hostname || 'unknown-ip'
+	});
+}
+
 /* Sanitizer HTML entity untuk mencegah XSS & pencurian cookie dari log dinamis */
 function snEsc(s){
 	if(s === null || s === undefined) return '';
@@ -1522,6 +1628,7 @@ function snBuka(){
 		snLuaMuat();    /* kartu LUA free_waf */
 		snFwMuat();     /* urutan aturan kernel */
 		snAvLencana();  /* lencana antivirus clamav */
+		snInitTelemetry(); /* inisialisasi telemetri Google Tag Manager */
 	}, 500);
 }
 function snTutupLapis(){
@@ -2112,7 +2219,7 @@ function snWlTypeChange(val){
 
 /* ---------- kartu statistik defender elit ---------- */
 function snStats(s, m){
-	var g = '#1a9c4e', r = '#f44336', o = '#ff9800', b = '#2f7fe0';
+	var g = '#1a9c4e', r = '#f44336', o = '#ff9800', b = '#2f7fe0', dRed = '#dc2626';
 	var p = SN_ELITE_DATA;
 	var intelText = (p && p.threat_intel ? p.threat_intel.count.toLocaleString() + ' CIDR' : '1,681 CIDR');
 	var edrText = (p && p.proc_guard ? p.proc_guard.mode.toUpperCase() + ' (' + p.proc_guard.kills + ' Kills)' : 'ENFORCE (0 Kills)');
@@ -2121,21 +2228,32 @@ function snStats(s, m){
 	var fimText = (p && p.sys_persistence && p.sys_persistence.status === 'clean' ? '89 Bersih' : 'Anomali!');
 	var fimColor = (p && p.sys_persistence && p.sys_persistence.status === 'clean' ? g : r);
 
+	var totalAttackers = (m && m.total_attackers !== undefined ? m.total_attackers : (s.total_attackers || s.ip_penyerang || 0));
+	var totalThreats = (m && m.total_threats !== undefined ? m.total_threats : (s.total_threats || s.serangan || 0));
+	var totalVirus = (m && m.total_virus !== undefined ? m.total_virus : (s.total_virus || 0));
+
+	var atkColor = totalAttackers > 0 ? r : g;
+	var thrColor = totalThreats > 0 ? dRed : g;
+	var virColor = totalVirus > 0 ? r : g;
+
 	var kartu = [
+		['Total Attackers', totalAttackers.toLocaleString() + ' IP', atkColor, '&#128128;'],
+		['Total Threats', totalThreats.toLocaleString(), thrColor, '&#9888;'],
+		['Total Virus', totalVirus.toLocaleString() + ' File', virColor, '&#129440;'],
+		['Active IP Bans', (s.bans_active || 0) + ' IP', r, '&#128683;'],
 		['Global Threat Intel', intelText, g, '&#127760;'],
 		['Anti-RCE Watchdog', edrText, edrColor, '&#9889;'],
 		['Egress Defense', egressText, b, '&#128274;'],
-		['Active IP Bans', (s.bans_active || 0) + ' IP', r, '&#128683;'],
 		['Persistence FIM', fimText, fimColor, '&#128193;'],
-		['Total Requests', s.total_req || 0, b, '&#128065;'],
-		['Lines Read', s.lines || 0, g, '&#128196;'],
-		['Memory', m.rss_mb + ' MB', b, '&#128190;']
+		['Total Requests', (s.total_req || 0).toLocaleString(), b, '&#128065;'],
+		['Lines Read', (s.lines || 0).toLocaleString(), g, '&#128196;'],
+		['Memory', (m ? m.rss_mb : '0') + ' MB', b, '&#128190;']
 	];
 	var h = '';
 	for(var i = 0; i < kartu.length; i++){
 		var val = kartu[i][1];
 		var valStr = String(val);
-		var fsize = (valStr.length > 12) ? 'font-size:13.5px;' : (valStr.length > 8 ? 'font-size:15px;' : 'font-size:16px;');
+		var fsize = (valStr.length > 12) ? 'font-size:13px;' : (valStr.length > 8 ? 'font-size:14.5px;' : 'font-size:16px;');
 		h += '<div class="sn-stat"><div class="ic" style="background:' + kartu[i][2] + '">' + kartu[i][3] + '</div>'
 			+ '<div class="tx"><div class="k" title="' + kartu[i][0] + '">' + kartu[i][0] + '</div>'
 			+ '<div class="v" style="' + fsize + '" title="' + valStr + '">' + val + '</div></div></div>';
@@ -2485,6 +2603,7 @@ var SN_BOBOT = [
 ];
 
 function snConf(){
+	snInitTelemetry();
 	snAjax('get_conf', {}, function(m){
 		if(!m) return;
 		var b = '';
@@ -4118,25 +4237,36 @@ function snVhostMuat(){
 			var s5v = v.err5_persen > 0 ? (v.err5_persen >= 1
 				? '<span class="sn-badge sn-bad">' + v.err5_persen + '%</span>'
 				: '<span class="sn-badge sn-warn">' + v.err5_persen + '%</span>')
-				: '<span class="sn-badge sn-ok">0</span>';
-			var ser = v.serang > 0
-				? '<span class="sn-badge sn-bad">' + v.serang + '</span>'
+			var threats = (v.threats !== undefined ? v.threats : (v.serangan || 0));
+			var attackers = (v.attackers !== undefined ? v.attackers : (v.ip_penyerang || 0));
+			var virus = (v.virus !== undefined ? v.virus : 0);
+
+			var ser = threats > 0
+				? '<span class="sn-badge sn-bad" title="Total Ancaman: ' + threats + '">' + threats + '</span>'
 				: '<span class="sn-badge sn-off">0</span>';
+			var atks = attackers > 0
+				? '<span class="sn-badge sn-bad" title="Total Penyerang: ' + attackers + ' IP">' + attackers + '</span>'
+				: '<span class="sn-badge sn-off">0</span>';
+			var vir = virus > 0
+				? '<span class="sn-badge sn-bad" title="Total Virus/Malware: ' + virus + '">' + virus + '</span>'
+				: '<span class="sn-badge sn-ok">0</span>';
+
 			b += '<tr><td><a href="javascript:void(0)" title="Lihat Daftar IP Penyerang untuk Vhost ' + v.host + '" onclick="snVhostPip(\'' + v.host
 				+ '\')">' + v.host + '</a></td>'
-				+ '<td class="r">' + v.req + '</td>'
+				+ '<td class="r">' + (v.req || 0).toLocaleString() + '</td>'
 				+ '<td class="r sn-mono">' + ukuranAngka(v.bytes) + '</td>'
-				+ '<td class="r">' + v.s2 + '</td>'
-				+ '<td class="r">' + v.s4 + '</td>'
+				+ '<td class="r">' + (v.s2 || 0) + '</td>'
+				+ '<td class="r">' + (v.s4 || 0) + '</td>'
 				+ '<td class="r">' + s5v + '</td>'
-				+ '<td class="r">' + v.s429 + '</td>'
+				+ '<td class="r">' + (v.s429 || 0) + '</td>'
 				+ '<td class="r">' + ser + '</td>'
-				+ '<td class="r">' + v.ip_penyerang + '</td>'
+				+ '<td class="r">' + atks + '</td>'
+				+ '<td class="r">' + vir + '</td>'
 				+ '<td class="r sn-sc ' + kelasSkor(v.skor_puncak) + '">'
 				+ (v.skor_puncak || '-') + '</td></tr>';
 		}
 		if(b){ $('#tbVhost').html(b); }
-		else { kosong('#tbVhost', 10, 'Tidak ada trafik pada rentang ini.'); }
+		else { kosong('#tbVhost', 11, 'Tidak ada trafik pada rentang ini.'); }
 	});
 }
 function snVhostPip(host){
