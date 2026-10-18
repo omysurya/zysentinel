@@ -74,9 +74,13 @@
   background:linear-gradient(180deg, #080f21 0%, #030712 100%);
   box-shadow:var(--shadow-hi);overflow:hidden;max-width:calc(100% - 44px);
   width:min(1780px,100%);max-height:calc(100vh - 50px);display:flex;flex-direction:column}
-.sn-mhead{display:flex;align-items:center;gap:8px;padding:12px 20px;background:rgba(8,15,33,0.95);
+.sn-mhead{display:flex;align-items:center;gap:12px;padding:14px 22px;background:rgba(8,15,33,0.95);
   backdrop-filter:blur(14px);border-bottom:1px solid var(--border-subtle);box-shadow:0 4px 20px rgba(0,0,0,0.5)}
-.sn-mhead .sn-badge{font-size:10px !important;padding:2px 7px !important;gap:4px !important;letter-spacing:0.2px !important;white-space:nowrap !important;flex:0 0 auto !important;line-height:1.4 !important;cursor:pointer}
+.sn-status-strip{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;
+  padding:10px 14px;margin-bottom:14px;background:rgba(8,15,33,0.7);border:1px solid var(--border-subtle);
+  border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.3)}
+.sn-status-list{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.sn-status-strip .sn-badge{font-size:11px;padding:3px 9px;gap:4px;letter-spacing:0.3px;white-space:nowrap;flex:0 0 auto;line-height:1.4;cursor:pointer}
 
 /* Tombol tutup */
 .sn-mclose{flex:0 0 auto;width:32px;height:32px;line-height:30px;text-align:center;
@@ -361,16 +365,9 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 					</div>
 				</div>
 			</h2>
-			<span id="bGuard" class="sn-badge sn-off" style="cursor:pointer" onclick="snClickGuardBadge()" data-i18n-title="tip_b_guard_inact" title="Daemon Guardd: Pemantau log akses & mitigasi anomali realtime (Klik untuk kelola layanan)">🛡️ Guardd: Inactive</span>
-			<span id="bAv" class="sn-badge sn-off" style="cursor:pointer" onclick="snTop('antivirus',$('.sn-mtabs span[onclick*=\'antivirus\']')[0])" data-i18n-title="tip_b_av" title="Antivirus ClamAV: Pemindaian streaming berkas & karantina malware">🦠 ClamAV: Inactive</span>
-			<span id="bFw" class="sn-badge sn-off" style="cursor:pointer" onclick="snTop('firewall',$('.sn-mtabs span[onclick*=\'firewall\']')[0])" data-i18n-title="tip_b_fw_inact" title="Kernel Firewall: Rantai iptables & ipset perlindungan paket jaringan">🔥 Firewall: Inactive</span>
-			<span id="bBackend" class="sn-badge sn-info" style="cursor:pointer" onclick="snTop('firewall',$('.sn-mtabs span[onclick*=\'firewall\']')[0])" data-i18n-title="tip_b_backend" title="Backend Firewall: Subsistem kernel Linux yang aktif menegakkan aturan">⚙️ NFT</span>
-			<span id="bWaf" class="sn-badge sn-off" style="cursor:pointer" onclick="snTop('waf',$('.sn-mtabs span[onclick*=\'waf\']')[0])" data-i18n-title="tip_b_waf" title="Web Application Firewall: Filter L7 inspeksi HTTP pencegah SQLi, XSS, dan exploit web">🌐 WAF: Off</span>
-			<span id="bPanic" class="sn-badge sn-ok" style="cursor:pointer" onclick="snTop('conf',$('.sn-mtabs span[onclick*=\'conf\']')[0])" data-i18n-title="tip_b_panic_off" title="Tombol Panik: Matikan darurat seluruh akses web bila server diserang masif">🚨 Panic: Off</span>
 			<span style="flex:1"></span>
 			<span id="snVerBadge" class="sn-badge" style="background:rgba(0,240,255,0.08);color:var(--accent-cyan);border:1px solid var(--border-cyan);cursor:pointer" onclick="snBukaMaintenance('update')" data-i18n-title="tip_ver_info" title="Version Information & Updates">v1.6.1</span>
 			<button id="btnHeaderMaint" class="sn-btn sn-sm" onclick="snBukaMaintenance()" style="background:rgba(16,185,129,0.1);color:var(--accent-green);border:1px solid var(--border-accent);font-weight:600" data-i18n="btn_maintenance" data-i18n-title="tip_maintenance" title="Open Maintenance, Updates & Diagnostics">⚙️ Maintenance</button>
-			<button id="btnHeaderFeedback" class="sn-btn sn-sm" onclick="snBukaFeedback()" style="background:rgba(245,158,11,0.12);color:var(--accent-amber);border:1px solid rgba(245,158,11,0.35);font-weight:600" data-i18n="btn_feedback" data-i18n-title="tip_feedback" title="Send Feedback or Bug Report to Developers">💬 Feedback</button>
 			<span class="sn-mclose" onclick="snTutup()" data-i18n-title="tip_close" title="Close ZySentinel Dashboard">✕</span>
 		</div>
 
@@ -383,6 +380,21 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 		</div>
 
 		<div class="sn-mbody">
+
+			<!-- STATUS BAR OPERASIONAL (BODY PANEL PALING ATAS) -->
+			<div class="sn-status-strip" id="snStatusStrip">
+				<div class="sn-status-list">
+					<span id="bGuard" class="sn-badge sn-off" style="cursor:pointer" onclick="snClickGuardBadge()" data-i18n-title="tip_b_guard_inact" title="Daemon Guardd: Pemantau log akses & mitigasi anomali realtime (Klik untuk kelola layanan)">🛡️ Guardd: Inactive</span>
+					<span id="bAv" class="sn-badge sn-off" style="cursor:pointer" onclick="snTop('antivirus',$('.sn-mtabs span[onclick*=\'antivirus\']')[0])" data-i18n-title="tip_b_av" title="Antivirus ClamAV: Pemindaian streaming berkas & karantina malware">🦠 ClamAV: Inactive</span>
+					<span id="bFw" class="sn-badge sn-off" style="cursor:pointer" onclick="snTop('firewall',$('.sn-mtabs span[onclick*=\'firewall\']')[0])" data-i18n-title="tip_b_fw_inact" title="Kernel Firewall: Rantai iptables & ipset perlindungan paket jaringan">🔥 Firewall: Inactive</span>
+					<span id="bBackend" class="sn-badge sn-info" style="cursor:pointer" onclick="snTop('firewall',$('.sn-mtabs span[onclick*=\'firewall\']')[0])" data-i18n-title="tip_b_backend" title="Backend Firewall: Subsistem kernel Linux yang aktif menegakkan aturan">⚙️ NFT</span>
+					<span id="bWaf" class="sn-badge sn-off" style="cursor:pointer" onclick="snTop('waf',$('.sn-mtabs span[onclick*=\'waf\']')[0])" data-i18n-title="tip_b_waf" title="Web Application Firewall: Filter L7 inspeksi HTTP pencegah SQLi, XSS, dan exploit web">🌐 WAF: Off</span>
+					<span id="bPanic" class="sn-badge sn-ok" style="cursor:pointer" onclick="snTop('conf',$('.sn-mtabs span[onclick*=\'conf\']')[0])" data-i18n-title="tip_b_panic_off" title="Tombol Panik: Matikan darurat seluruh akses web bila server diserang masif">🚨 Panic: Off</span>
+				</div>
+				<div class="sn-status-actions">
+					<button id="btnHeaderFeedback" class="sn-btn sn-sm" onclick="snBukaFeedback()" style="background:rgba(245,158,11,0.12);color:var(--accent-amber);border:1px solid rgba(245,158,11,0.35);font-weight:600" data-i18n="btn_feedback" data-i18n-title="tip_feedback" title="Send Feedback or Bug Report to Developers">💬 Feedback</button>
+				</div>
+			</div>
 
 			<div id="stNote" class="sn-note" style="display:none;margin:0 0 12px"></div>
 
