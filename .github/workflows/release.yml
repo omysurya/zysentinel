@@ -48,6 +48,7 @@ jobs:
                     --exclude='__pycache__' \
                     --exclude='*.pyc' \
                     --exclude='build-release.sh' \
+                    --exclude='tests' \
                     ./ "$STAGE_DIR/"
 
           # Pastikan hak akses berkas biner & skrip dapat dieksekusi

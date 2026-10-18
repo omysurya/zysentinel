@@ -36,6 +36,7 @@ rsync -rltD --exclude='.git' \
             --exclude='__pycache__' \
             --exclude='*.pyc' \
             --exclude='build-release.sh' \
+            --exclude='tests' \
             "$SCRIPT_DIR/" "$STAGE_DIR/sentinel/"
 
 # 4. Pastikan izin eksekusi berkas skrip
