@@ -7457,15 +7457,15 @@ function snBukaFeedback(){
 		+ '<span>☕</span> <span>' + (isEn ? 'Support ZySentinel Development' : 'Dukung Pengembangan ZySentinel') + '</span>'
 		+ '</div>'
 		+ '<div style="font-size:11.5px;color:var(--ink-2);margin-top:2px">'
-		+ (isEn ? 'Voluntary donation to support continuous security research & updates:' : 'Donasi sukarela untuk mendukung riset keamanan & kelanjutan fitur:')
+		+ (isEn ? 'Send funds to support continuous security research & updates:' : 'Kirim dana sukarela untuk mendukung riset keamanan & kelanjutan fitur:')
 		+ '</div>'
 		+ '</div>'
 		+ '<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'
-		+ '<a href="https://saweria.co/omysurya" target="_blank" rel="noopener noreferrer" class="sn-btn" style="background:#f59e0b;color:#1e293b;font-weight:700;font-size:11.5px;padding:6px 12px;text-decoration:none;display:inline-flex;align-items:center;gap:5px;border:none;border-radius:6px;box-shadow:0 0 12px rgba(245,158,11,0.25)" title="' + (isEn ? 'Donate via Saweria (IDR, QRIS, GoPay, OVO, Dana)' : 'Donasi via Saweria (QRIS, GoPay, OVO, Dana)') + '">'
+		+ '<a href="https://saweria.co/omysurya" target="_blank" rel="noopener noreferrer" class="sn-btn" style="background:#f59e0b;color:#1e293b;font-weight:700;font-size:11.5px;padding:6px 12px;text-decoration:none;display:inline-flex;align-items:center;gap:5px;border:none;border-radius:6px;box-shadow:0 0 12px rgba(245,158,11,0.25)" title="' + (isEn ? 'Support via Saweria (IDR, QRIS, GoPay, OVO, Dana)' : 'Dukungan via Saweria (QRIS, GoPay, OVO, Dana)') + '">'
 		+ '💛 Saweria'
 		+ '</a>'
-		+ '<a href="https://www.paypal.com/cgi-bin/webscr?cmd=_donations&business=moelyhana%40gmail.com&currency_code=USD" target="_blank" rel="noopener noreferrer" class="sn-btn" style="background:#0284c7;color:#ffffff;font-weight:700;font-size:11.5px;padding:6px 12px;text-decoration:none;display:inline-flex;align-items:center;gap:5px;border:none;border-radius:6px;box-shadow:0 0 12px rgba(2,132,199,0.25)" title="PayPal: moelyhana@gmail.com">'
-		+ '🅿️ PayPal <span style="font-size:10.5px;opacity:.9;font-weight:400">(moelyhana@gmail.com)</span>'
+		+ '<a href="https://www.paypal.com/myaccount/transfer/homepage/send" target="_blank" rel="noopener noreferrer" onclick="snCopyPayPal(event)" class="sn-btn" style="background:#0284c7;color:#ffffff;font-weight:700;font-size:11.5px;padding:6px 12px;text-decoration:none;display:inline-flex;align-items:center;gap:5px;border:none;border-radius:6px;box-shadow:0 0 12px rgba(2,132,199,0.25)" title="' + (isEn ? 'Send Money via PayPal to moelyhana@gmail.com (click to copy email & open PayPal)' : 'Kirim Uang via PayPal ke moelyhana@gmail.com (klik untuk salin email & buka PayPal)') + '">'
+		+ '🅿️ ' + (isEn ? 'Send Money' : 'Kirim Uang') + ' <span style="font-size:10.5px;opacity:.9;font-weight:400">(moelyhana@gmail.com)</span>'
 		+ '</a>'
 		+ '</div>'
 		+ '</div>'
@@ -7516,6 +7516,24 @@ function snFbUpdatePreview(){
 	var topic = ($('#snFbTopicIn').val() || 'Topik').trim() || 'Topik';
 	var hostname = window.SN_HOSTNAME || location.hostname || 'server1';
 	$('#snFbSubjectPreview').text(type + ' [' + topic + '] [' + hostname + ']');
+}
+
+function snCopyPayPal(e){
+	var email = 'moelyhana@gmail.com';
+	var isEn = (SN_LANG !== 'id');
+	try {
+		if(navigator.clipboard && navigator.clipboard.writeText){
+			navigator.clipboard.writeText(email);
+		} else {
+			var t = document.createElement('textarea');
+			t.value = email;
+			document.body.appendChild(t);
+			t.select();
+			document.execCommand('copy');
+			document.body.removeChild(t);
+		}
+		layer.msg(isEn ? 'PayPal email moelyhana@gmail.com copied to clipboard! Opening PayPal Send Money...' : 'Email PayPal moelyhana@gmail.com berhasil disalin! Membuka halaman Kirim Uang PayPal...', {time: 2500, icon: 1});
+	} catch(err){}
 }
 
 function snLoadFeedbackHistory(){
