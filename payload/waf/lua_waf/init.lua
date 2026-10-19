@@ -18,10 +18,41 @@
 	  9. Mode monitor ("monitor": true di config.json) -> hanya log, tidak memblokir
 ]]
 
-local cpath = "/www/server/free_waf/"
+local cpath = "/www/server/sentinel/waf/lua_waf/"
+do
+    local fp = io.open(cpath .. "config.json", "r")
+    if fp then
+        fp:close()
+    else
+        cpath = "/www/server/lua_waf/"
+        local fp2 = io.open(cpath .. "config.json", "r")
+        if fp2 then fp2:close() else cpath = "/www/server/sentinel/waf/free_waf/" end
+    end
+end
 local jpath = cpath .. "rule/"
 local json = require "cjson"
 local ngx_match = ngx.re.find
+
+-- [ZySens] Shared dictionary helpers (dukungan native sentinel_waf dengan fallback free_waf)
+local function get_dict_waf()
+    return ngx.shared.sentinel_waf or ngx.shared.free_waf
+end
+
+local function get_dict_drop_ip()
+    return ngx.shared.sentinel_waf_drop_ip or ngx.shared.free_waf_drop_ip
+end
+
+local function get_dict_drop_sum()
+    return ngx.shared.sentinel_waf_drop_sum or ngx.shared.free_waf_drop_sum
+end
+
+local function get_dict_stat()
+    return ngx.shared.sentinel_waf_stat or ngx.shared.free_waf_stat
+end
+
+local function get_dict_stat_lock()
+    return ngx.shared.sentinel_waf_stat_lock or ngx.shared.free_waf_stat_lock
+end
 
 --------------------------------------------------------------------- context --
 -- Semua state per-request disimpan di ngx.ctx (aman terhadap coroutine).
@@ -361,17 +392,88 @@ local function blocked()
     return config['monitor'] == true
 end
 
-local function deny(status, log_name, log_rule, html_body)
+-- [ZySens] Deteksi tipe request: apakah AJAX / JSON atau HTML biasa
+local function is_ajax_or_json_request()
     local ctx = C()
-    if html_body and not blocked() then
-        return_html(status, html_body)
+    local headers = ctx.request_header or ngx.req.get_headers() or {}
+
+    -- 1. Header X-Requested-With (jQuery, Axios, XMLHttpRequest, fetch)
+    local xrw = headers["x-requested-with"]
+    if xrw and type(xrw) == "string" and xrw:lower() == "xmlhttprequest" then
         return true
     end
+
+    -- 2. Header Accept (prioritas JSON)
+    local accept = headers["accept"]
+    if accept and type(accept) == "string" then
+        local acc = accept:lower()
+        if acc:find("application/json", 1, true) then
+            return true
+        end
+    end
+
+    -- 3. Header Content-Type
+    local ctype = headers["content-type"]
+    if ctype and type(ctype) == "string" then
+        local ct = ctype:lower()
+        if ct:find("application/json", 1, true) then
+            return true
+        end
+    end
+
+    -- 4. Pola URI .json atau /api/
+    local uri = ctx.uri or ngx.var.uri or ""
+    if uri:sub(-5):lower() == ".json" or uri:find("/api/", 1, true) then
+        return true
+    end
+
+    return false
+end
+
+-- [ZySens] Kirim respon pemblokiran sesuai tipe request (JSON atau HTML)
+local function return_blocked_response(status, log_name, log_rule, html_template)
+    local ctx = C()
+    local ip = ctx.ip or ngx.var.remote_addr or "unknown"
+    local st = tonumber(status) or 403
+    local req_id = string.format("ZY-%d-%04d", os.time(), math.random(1000, 9999))
+
+    if is_ajax_or_json_request() then
+        ngx.status = st
+        ngx.header.content_type = "application/json; charset=utf-8"
+        ngx.header["X-Protected-By"] = "ZySens"
+        local res = {
+            status = false,
+            code = st,
+            error = "Forbidden",
+            message = "Permintaan Anda diblokir oleh sistem keamanan web server karena terdeteksi anomali atau ancaman.",
+            client_ip = ip,
+            incident_id = req_id,
+            protected_by = "ZySens"
+        }
+        ngx.say(json.encode(res))
+        ngx.exit(st)
+        return true
+    else
+        ngx.status = st
+        ngx.header.content_type = "text/html; charset=utf-8"
+        ngx.header["X-Protected-By"] = "ZySens"
+        local body = html_template or get_html or ""
+        body = body:gsub("{{CLIENT_IP}}", ip)
+        body = body:gsub("{{REQ_ID}}", req_id)
+        body = body:gsub("{{STATUS}}", tostring(st))
+        ngx.say(body)
+        ngx.exit(st)
+        return true
+    end
+end
+
+local function deny(status, log_name, log_rule, html_body)
+    local ctx = C()
     write_log(log_name, log_rule)
     if blocked() then
         return false
     end
-    ngx.exit(status)
+    return_blocked_response(status, log_name, log_rule, html_body)
     return true
 end
 
@@ -379,7 +481,7 @@ end
 function write_log(name, rule)
     local ctx = C()
     local ip = ctx.ip
-    local shared = ngx.shared.free_waf_drop_ip
+    local shared = get_dict_drop_ip()
     if not shared then return false end
     local count = shared:get(ip)
     if count then
@@ -404,7 +506,7 @@ function write_log(name, rule)
     local logstr = json.encode(logtmp) .. "\n"
     local c2 = shared:get(ip)
     if c2 and c2 > retry and name ~= 'cc' then
-        local sum = ngx.shared.free_waf_drop_sum
+        local sum = get_dict_drop_sum()
         local safe_count = 1
         if sum then
             local sc = sum:get(ip)
@@ -444,8 +546,8 @@ end
 -- [FIX 4] total.json: akumulasi di shared dict, flush max 1x / 2 detik,
 --          tulis atomik. Menghindari rewrite file pada setiap request + race.
 local function flush_total()
-    local stat = ngx.shared.free_waf_stat
-    local lock = ngx.shared.free_waf_stat_lock
+    local stat = get_dict_stat()
+    local lock = get_dict_stat_lock()
     if not stat or not lock then return false end
     local got = lock:incr('lock', 1, 0, 2)
     if not got or got ~= 1 then return false end
@@ -487,7 +589,7 @@ end
 
 function inc_log(name, rule)
     local ctx = C()
-    local stat = ngx.shared.free_waf_stat
+    local stat = get_dict_stat()
     if not stat then return false end
     stat:incr(ctx.server_name .. '|' .. name, 1, 0)
     flush_total()
@@ -521,19 +623,20 @@ function drop_abroad()
         write_log('drop_abroad', '禁止大陆以外地区访问')
         return false
     end
-    ngx.exit(config['drop_abroad']['status'])
+    write_log('drop_abroad', '禁止大陆以外地区访问')
+    return_blocked_response(config['drop_abroad']['status'] or 403, 'drop_abroad', 'geo_blocked')
     return true
 end
 
 function drop()
     local ctx = C()
-    local shared = ngx.shared.free_waf_drop_ip
+    local shared = get_dict_drop_ip()
     if not shared then return false end
     local count = shared:get(ctx.ip)
     if not count then return false end
     if count > (tonumber(ctx.retry) or 6) then
         if blocked() then return false end
-        ngx.exit(config['cc']['status'])
+        return_blocked_response(config['cc']['status'] or 403, 'drop', 'ip_retry_exceeded')
         return true
     end
     return false
@@ -542,14 +645,14 @@ end
 function cc()
     local ctx = C()
     if not config['cc'] or not config['cc']['open'] or not ctx.site_cc then return false end
-    local shared = ngx.shared.free_waf
+    local shared = get_dict_waf()
     if not shared then return false end
     local token = ngx.md5(ctx.ip .. '_' .. ctx.request_uri)
     local count = shared:get(token)
     local limit = tonumber(ctx.limit) or 120
     if count then
         if count > limit then
-            local sum = ngx.shared.free_waf_drop_sum
+            local sum = get_dict_drop_sum()
             local safe_count = 1
             if sum then
                 local sc = sum:get(ctx.ip)
@@ -563,14 +666,14 @@ function cc()
             local endtime = tonumber(ctx.endtime) or 300
             local lock_time = (endtime * safe_count)
             if lock_time > 86400 then lock_time = 86400 end
-            if ngx.shared.free_waf_drop_ip then
-                ngx.shared.free_waf_drop_ip:set(ctx.ip, (tonumber(ctx.retry) or 6) + 1, lock_time)
+            if get_dict_drop_ip() then
+                get_dict_drop_ip():set(ctx.ip, (tonumber(ctx.retry) or 6) + 1, lock_time)
             end
             local msg = (tonumber(ctx.cycle) or 60) .. '秒内累计超过' .. limit .. '次请求,封锁' .. lock_time .. '秒'
             write_log('cc', msg)
             write_drop_ip('cc', lock_time)
             if blocked() then return false end
-            ngx.exit(config['cc']['status'])
+            return_blocked_response(config['cc']['status'] or 403, 'cc', msg)
             return true
         else
             shared:incr(token, 1)
@@ -588,7 +691,7 @@ function cc2()
     local cc_conf = site_config[ctx.server_name]['cc']
     if type(cc_conf) ~= 'table' or not cc_conf['increase'] then return false end
     if ngx_match(ctx.uri, "\\.(jpg|png|gif|css|js|swf|ts)$", "isjo") then return false end
-    local shared = ngx.shared.free_waf
+    local shared = get_dict_waf()
     if not shared then return false end
     local sv = shared:get(ctx.ip)
     if sv == 666 then return false end
@@ -602,7 +705,7 @@ function cc2()
     local count = shared:get(token2)
     if count then
         if count > cc2_limit then
-            local sum = ngx.shared.free_waf_drop_sum
+            local sum = get_dict_drop_sum()
             local safe_count = 1
             if sum then
                 local sc = sum:get(ctx.ip)
@@ -618,14 +721,14 @@ function cc2()
                 local endtime = tonumber(ctx.endtime) or 300
                 local lock_time = (endtime * safe_count)
                 if lock_time > 86400 then lock_time = 86400 end
-                if ngx.shared.free_waf_drop_ip then
-                    ngx.shared.free_waf_drop_ip:set(ctx.ip, retry + 1, lock_time)
+                if get_dict_drop_ip() then
+                    get_dict_drop_ip():set(ctx.ip, retry + 1, lock_time)
                 end
                 local msg = (tonumber(ctx.cycle) or 60) .. '秒内累计超过' .. limit .. '次请求,封锁' .. lock_time .. '秒'
                 write_log('cc', msg)
                 write_drop_ip('cc', lock_time)
                 if blocked() then return false end
-                ngx.exit(config['cc']['status'])
+                return_blocked_response(config['cc']['status'] or 403, 'cc', msg)
                 return true
             end
             if not blocked() then
@@ -645,18 +748,18 @@ function security_verification()
     local ctx = C()
     if blocked() then return false end
     if ctx.uri_request_args['btwaf'] then
-        local vn3 = ngx.shared.free_waf:get(ctx.ip)
+        local vn3 = get_dict_waf():get(ctx.ip)
         if tostring(vn3) == ctx.uri_request_args['btwaf'] then
-            ngx.shared.free_waf:delete(ctx.ip)
-            ngx.shared.free_waf:delete(ngx.md5(ctx.ip .. '_' .. ctx.uri))
-            ngx.shared.free_waf:set(ctx.ip, 666, 3600)
+            get_dict_waf():delete(ctx.ip)
+            get_dict_waf():delete(ngx.md5(ctx.ip .. '_' .. ctx.uri))
+            get_dict_waf():set(ctx.ip, 666, 3600)
             return false
         end
     end
     local n1 = math.random(0, 20)
     local n2 = math.random(0, 20)
     local n3 = n1 + n2
-    ngx.shared.free_waf:set(ctx.ip, n3, 300)
+    get_dict_waf():set(ctx.ip, n3, 300)
     local vargs = '&btwaf='
     local sargs = string.gsub(ctx.request_uri, '.?btwaf=.*', '')
     if not string.find(sargs, '?', 1, true) then vargs = '?btwaf=' end
@@ -1055,7 +1158,7 @@ function get_return_state(rstate, rmsg)
 end
 
 function get_btwaf_drop_ip()
-    local shared = ngx.shared.free_waf_drop_ip
+    local shared = get_dict_drop_ip()
     if not shared then return {} end
     return shared:get_keys(0)
 end
@@ -1064,17 +1167,17 @@ function remove_btwaf_drop_ip()
     local ctx = C()
     local target = ctx.uri_request_args['ip']
     if not target or not is_ipaddr(target) then return get_return_state(true, '格式错误') end
-    if ngx.shared.free_waf_drop_ip then
-        ngx.shared.free_waf_drop_ip:delete(target)
+    if get_dict_drop_ip() then
+        get_dict_drop_ip():delete(target)
     end
     return get_return_state(true, target .. '已解封')
 end
 
 function clean_btwaf_drop_ip()
     local data = get_btwaf_drop_ip()
-    if ngx.shared.free_waf_drop_ip then
+    if get_dict_drop_ip() then
         for _, value in ipairs(data) do
-            ngx.shared.free_waf_drop_ip:delete(value)
+            get_dict_drop_ip():delete(value)
         end
     end
     return get_return_state(true, '已解封所有封锁IP')
@@ -1095,22 +1198,15 @@ function min_route()
 end
 
 function return_message(status, msg)
-    ngx.header.content_type = "application/json;"
+    ngx.header.content_type = "application/json; charset=utf-8"
+    ngx.header["X-Protected-By"] = "ZySens"
     ngx.status = status
     ngx.say(json.encode(msg))
     ngx.exit(status)
 end
 
 function return_html(status, html)
-    if not html then
-        ngx.status = status
-        ngx.exit(status)
-        return
-    end
-    ngx.header.content_type = "text/html"
-    ngx.status = status
-    ngx.say(html)
-    ngx.exit(status)
+    return return_blocked_response(status, "block", "html_direct", html)
 end
 
 ------------------------------------------------------------------- main loop --

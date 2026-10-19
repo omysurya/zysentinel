@@ -897,6 +897,54 @@ EOF
   fi
 
   # ------------------------------------------------------------------
+  # TAHAP 6: DETEKSI AI SAFETY, PROMPT INJECTION & TOXIC SKILLS (SAGE)
+  # ------------------------------------------------------------------
+  if [ "$engine" = "sage" ] || [ "$engine" = "all" ] || [ "$engine" = "both" ] || [ "$engine" = "ai" ] || [ "$engine" = "scan-ai" ]; then
+    echo ""
+    echo "----------------------------------------------------------------------"
+    echo "[*] [TAHAP 6] Deteksi AI Safety, Prompt Injection & Toxic Skills (SAGE)"
+    echo "----------------------------------------------------------------------"
+    local sage_bin="/www/server/sentinel/bin/sentinel-sage.py"
+    [ ! -f "$sage_bin" ] && sage_bin="/www/server/panel/plugin/sentinel/payload/sentinel-sage.py"
+    if [ ! -f "$sage_bin" ]; then
+      echo "[-] Mesin SAGE AI Safety (sentinel-sage.py) tidak ditemukan."
+    elif [ ! -d "$path" ] && [ ! -f "$path" ]; then
+      echo "[-] Path target tidak ditemukan untuk analisis AI Safety."
+    else
+      echo "[*] Menjalankan pemindaian SAGE AI Safety pada $path..."
+      local py_bin="/www/server/panel/pyenv/bin/python3"
+      [ ! -x "$py_bin" ] && py_bin="python3"
+
+      local q_arg=""
+      if [ "${ACTION_ON_DETECT:-quarantine}" = "quarantine" ]; then
+        q_arg="--quarantine $(q_files)"
+      fi
+
+      local sage_tmp; sage_tmp="$(mktemp /tmp/zysentinel-sage.XXXXXX)"
+      $py_bin "$sage_bin" scan "$path" $q_arg > "$sage_tmp" 2>&1 || true
+
+      local sage_infected=0
+      while IFS= read -r s_line; do
+        [ -z "$s_line" ] && continue
+        echo "$s_line"
+        case "$s_line" in
+          *"[!] ANCAMAN AI TERDETEKSI:"*)
+            sage_infected=$((sage_infected + 1))
+            found_malware=$((found_malware + 1))
+            ;;
+        esac
+      done < "$sage_tmp"
+      rm -f "$sage_tmp"
+
+      if [ "$sage_infected" -eq 0 ]; then
+        echo "[OK] SAGE AI Safety: Bersih. Tidak ditemukan prompt injection, toxic skills, atau aturan berbahaya."
+      else
+        echo "[!] SAGE AI Safety: Terdeteksi $sage_infected ancaman instruksi berbahaya / toxic skills!"
+      fi
+    fi
+  fi
+
+  # ------------------------------------------------------------------
   # RINGKASAN AKHIR
   # ------------------------------------------------------------------
   local t1; t1=$(date +%s)
@@ -967,6 +1015,7 @@ case "${1:-status}" in
   status)             do_status ;;
   scan)               do_scan "${2:-}" "${3:-}" ;;
   scan-stream)        do_scan_stream "${2:-both}" "${3:-/}" "${4:-}" ;;
+  scan-ai)            do_scan_stream "sage" "${2:-/}" "${3:-}" ;;
   scan-all)           do_scan_all ;;
   quarantine-list)    do_q_list ;;
   quarantine-restore) do_q_restore "${2:-}" ;;
@@ -980,5 +1029,5 @@ case "${1:-status}" in
   db-update)          do_db_update ;;
   rkhunter-propupd)   do_rkhunter_propupd ;;
   rkhunter-update)    do_rkhunter_update ;;
-  *) echo "pakai: $0 {status|scan <path> [label]|scan-stream <engine> <path> [label]|scan-all|quarantine-list|quarantine-restore <id>|quarantine-delete <id>|quarantine-purge|baseline <path> [label]|baseline-sys|check <path> [label]|check-sys|integ-list [label]|db-update|rkhunter-propupd|rkhunter-update}"; exit 1 ;;
+  *) echo "Usage: $0 {status|scan <path> [label]|scan-stream <engine> <path> [label]|scan-ai <path> [label]|scan-all|quarantine-list|quarantine-restore <id>|quarantine-delete <id>|quarantine-purge|baseline <path> [label]|baseline-sys|check <path> [label]|check-sys|integ-list [label]|db-update|rkhunter-propupd|rkhunter-update}"; exit 1 ;;
 esac

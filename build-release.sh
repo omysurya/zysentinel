@@ -8,7 +8,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VERSION="${1:-$(grep -o '"versions": "[^"]*"' "$SCRIPT_DIR/info.json" | cut -d'"' -f4 || echo "1.6.0")}"
+VERSION="${1:-$(grep -o '"versions": "[^"]*"' "$SCRIPT_DIR/info.json" | cut -d'"' -f4 || echo "1.6.1")}"
 OUT_DIR="${2:-/www/backup}"
 STAGE_DIR="/tmp/sentinel_build_staging"
 
@@ -36,6 +36,7 @@ rsync -rltD --exclude='.git' \
             --exclude='__pycache__' \
             --exclude='*.pyc' \
             --exclude='build-release.sh' \
+            --exclude='tests' \
             "$SCRIPT_DIR/" "$STAGE_DIR/sentinel/"
 
 # 4. Pastikan izin eksekusi berkas skrip

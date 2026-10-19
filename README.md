@@ -65,7 +65,7 @@ sentinel_main.py  ── Controller: reads state, validates inputs, lifecycle ma
 ### Method 1: aaPanel App Store (Recommended GUI) / Metode App Store
 
 #### English:
-1. **Download Release:** Download `zysentinel-v1.6.0.zip` (or `sentinel.zip`) from [GitHub Releases](https://github.com/omysurya/zysentinel/releases/latest).
+1. **Download Release:** Download `zysentinel-v1.6.1.zip` (or `sentinel.zip`) from [GitHub Releases](https://github.com/omysurya/zysentinel/releases/latest).
 2. **Access aaPanel:** Log in to your aaPanel dashboard (`https://<YOUR-SERVER-IP>:<PANEL-PORT>/`).
 3. **Open App Store:** Navigate to **App Store** on the left menu.
 4. **Import Plugin:** Click **Import third-party plugin** (or **Import plugin**) located at the top-right corner.
@@ -74,7 +74,7 @@ sentinel_main.py  ── Controller: reads state, validates inputs, lifecycle ma
 7. **Launch Dashboard:** Click on **ZySentinel** in the App Store to open the centralized security monitoring dashboard.
 
 #### Bahasa Indonesia:
-1. **Unduh Paket Rilis:** Unduh berkas `zysentinel-v1.6.0.zip` (atau `sentinel.zip`) dari [GitHub Releases](https://github.com/omysurya/zysentinel/releases/latest).
+1. **Unduh Paket Rilis:** Unduh berkas `zysentinel-v1.6.1.zip` (atau `sentinel.zip`) dari [GitHub Releases](https://github.com/omysurya/zysentinel/releases/latest).
 2. **Buka aaPanel:** Masuk ke dasbor web aaPanel Anda (`https://<IP-SERVER>:<PORT-PANEL>/`).
 3. **Buka App Store:** Klik menu **App Store** pada bilah navigasi sebelah kiri.
 4. **Impor Plugin:** Klik tombol **Import third-party plugin** (atau **Import plugin**) di kanan atas.
@@ -91,8 +91,8 @@ sentinel_main.py  ── Controller: reads state, validates inputs, lifecycle ma
 # 1. Pastikan direktori plugin panel tersedia / Ensure plugin directory exists
 mkdir -p /www/server/panel/plugin
 
-# 2. Clone repositori resmi / Clone official repository (branch v1.6.0)
-git clone -b v1.6.0 https://github.com/omysurya/zysentinel.git /www/server/panel/plugin/sentinel
+# 2. Clone repositori resmi / Clone official repository (branch v1.6.1)
+git clone -b v1.6.1 https://github.com/omysurya/zysentinel.git /www/server/panel/plugin/sentinel
 
 # 3. Jalankan skrip instalasi / Execute installation script
 cd /www/server/panel/plugin/sentinel
@@ -106,7 +106,7 @@ bash /www/server/sentinel/bin/sentinel-fw.sh status
 #### B. Install via GitHub Release Archive (ZIP):
 ```bash
 # 1. Unduh rilis zip resmi dari GitHub / Download official release zip from GitHub
-curl -fsSL -o /tmp/sentinel.zip https://github.com/omysurya/zysentinel/releases/download/v1.6.0/zysentinel-v1.6.0.zip
+curl -fsSL -o /tmp/sentinel.zip https://github.com/omysurya/zysentinel/releases/download/v1.6.1/zysentinel-v1.6.1.zip
 
 # 2. Ekstrak ke folder plugin / Extract to plugin directory
 mkdir -p /www/server/panel/plugin
@@ -122,11 +122,11 @@ bash install.sh install
 ## Lifecycle Management & Updates / Pemeliharaan & Pembaruan
 
 ### 1. Automatic Updates from GitHub / Pembaruan Otomatis dari GitHub
-- **Via Web UI:** In the ZySentinel header, click the version badge `v1.6.0` or go to **Settings ➔ Maintenance**, click **Check GitHub Update**, and apply the update directly with one click.
+- **Via Web UI:** In the ZySentinel header, click the version badge `v1.6.1` or go to **Settings ➔ Maintenance**, click **Check GitHub Update**, and apply the update directly with one click.
 - **Via Terminal (CLI):**
   ```bash
   cd /www/server/panel/plugin/sentinel
-  git pull origin v1.6.0
+  git pull origin v1.6.1
   bash install.sh update
   ```
   *Idempotent Update: Updates binaries and scripts without overwriting custom operator configs (`guardd.conf`, `ports.json`, `proc_whitelist.json`, notification tokens, or audit logs).*
@@ -146,9 +146,69 @@ To cleanly remove ZySentinel without residue:
 - **Via Terminal (CLI):**
   ```bash
   cd /www/server/panel/plugin/sentinel
-  bash install.sh cabut --clean
+  bash install.sh uninstall --clean
   ```
+  *(Alias `bash install.sh uninstall` or legacy `cabut --clean` are also supported for backward compatibility).*
   *Removes WAF hooks, revokes firewall chains/ipsets, stops systemd services, and cleans all `/www/server/sentinel` files without affecting existing production websites.*
+
+---
+
+## CLI Command Reference / Referensi Perintah CLI
+
+All management scripts use standardized global English command options:
+
+### 1. Plugin Lifecycle (`install.sh`)
+```bash
+cd /www/server/panel/plugin/sentinel
+bash install.sh <command>
+```
+| Command Option | Action (English) | Aksi (Bahasa Indonesia) | Aliases |
+| :--- | :--- | :--- | :--- |
+| `install` | Full setup of daemon, firewall, WAF, AV, and systemd units | Instalasi lengkap daemon, firewall, WAF, AV, dan unit systemd | `pasang` |
+| `fresh` | Fresh install reset with clean default configurations | Instalasi baru bersih dengan konfigurasi awal bawaan | `fresh-install` |
+| `update` | Idempotent upgrade preserving existing operator configs | Pembaruan idempoten tanpa menimpa config & aturan yang ada | `upgrade` |
+| `repair` | Self-heal diagnostics restoring missing binaries/units zero downtime | Perbaikan mandiri memulihkan berkas/unit yang hilang tanpa downtime | `self-heal`, `perbaiki` |
+| `uninstall` | Clean uninstall (`--clean`), purges rules, WAF hooks, and `/www/server/sentinel` | Pencabutan bersih, menghapus aturan kernel, hook WAF, dan direktori kerja | `cabut` |
+| `lock` | Enforce file permission hardening & anti-tamper security locks | Pengerasan izin berkas dan penguncian benteng anti-tamper | `kunci` |
+
+### 2. Daemon & Threat Response CLI (`guardctl`)
+```bash
+/www/server/sentinel/bin/guardctl <command>
+```
+| Command | Description (EN) | Deskripsi (ID) |
+| :--- | :--- | :--- |
+| `status` | Show full daemon JSON status | Tampilkan status daemon JSON lengkap |
+| `brief` | Display one-line summary metrics | Ringkasan metrik status satu baris |
+| `live` | Realtime interactive dashboard (2s refresh) | Tampilan live interaktif diperbarui tiap 2 detik |
+| `ban <ip>` | Ban an IP immediately in kernel ipset | Blokir IP langsung di set firewall kernel |
+| `unban <ip>` | Unban an IP and clear from ban list | Lepas blokir IP dan bersihkan dari daftar |
+| `allow <ip>` | Whitelist an IP permanently | Masukkan IP ke daftar putih permanen |
+| `unreview <ip>` | Dismiss IP from review queue | Lepas IP dari antrean review tanpa blokir |
+| `rescan` | Force re-detection of access log files | Paksa pemindaian ulang berkas access log |
+| `flush` | Flush runtime metrics to SQLite database | Paksa penyimpanan statistik ke basis data |
+| `panic-on` | Emergency lockdown of public web ports | Matikan darurat seluruh akses port web |
+| `panic-off` | Disable emergency panic lockdown | Cabut blokir panik dan pulihkan akses web |
+| `panic-status`| Check panic lockdown status | Cek status aktif/nonaktif tombol panik |
+| `scan-ai [path]`| Scan for AI prompt injections & toxic skills | Pindai prompt injection dan skill AI berbahaya |
+| `check-auth` | Verify official developer authority & code integrity | Verifikasi otentikasi pengembang resmi |
+
+### 3. Kernel Firewall CLI (`sentinel-fw.sh`)
+```bash
+bash /www/server/sentinel/bin/sentinel-fw.sh <command>
+```
+Standard options: `install` | `remove` | `flush` | `status` | `backend` | `panic-on` | `panic-off` | `panic-status` | `egress-on` | `egress-off` | `egress-status` | `geo-apply` | `geo-clear` | `geo-status` | `ports-apply` | `ports-status` | `ports-reset`
+
+### 4. WAF Engine & OWASP CRS CLI (`sentinel-waf.sh`)
+```bash
+bash /www/server/sentinel/bin/sentinel-waf.sh <command>
+```
+Standard options: `engine` | `engine-set <name>` | `mode-get` | `mode-set <mode>` | `rules` | `rule-on <rule>` | `rule-off <rule>` | `vhosts` | `vhost-on <ws> <site>` | `vhost-off <ws> <site>` | `coraza-status` | `coraza-download` | `freewaf-status` | `freewaf-install` | `freewaf-remove`
+
+### 5. Antivirus & File Integrity CLI (`sentinel-av.sh`)
+```bash
+bash /www/server/sentinel/bin/sentinel-av.sh <command>
+```
+Standard options: `status` | `scan <path>` | `scan-stream <engine> <path>` | `scan-ai <path>` | `scan-all` | `quarantine-list` | `quarantine-restore <id>` | `quarantine-delete <id>` | `quarantine-purge` | `baseline <path>` | `baseline-sys` | `check <path>` | `check-sys` | `integ-list` | `db-update` | `rkhunter-propupd` | `rkhunter-update`
 
 ---
 

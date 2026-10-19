@@ -177,7 +177,7 @@ vhost_dir() {
 # Berkas di direktori vhost yang BUKAN situs: helper panel, status,
 # dan pemantau. Tanpa daftar ini UI akan menawarkan WAF untuk berkas
 # yang bukan situs.
-BUKAN_SITUS="free_waf phpfpm_status waf2monitor_data"
+BUKAN_SITUS="free_waf sentinel_waf phpfpm_status waf2monitor_data"
 
 do_vhosts() {
   # Keluaran: ws|site|keadaan. keadaan dibaca dari snippet sentinel.
@@ -341,8 +341,8 @@ waf_set() {
 #    serangan umum + CC per IP, CRS memeriksa pola OWASP. Keduanya
 #    tidak saling menimpa karena levelnya berbeda (Lua vs ModSecurity).
 # ==================================================================
-FREEWAF_HOME="${SENTINEL_FREEWAF_HOME:-$WAF_BASE/free_waf}"
-FREEWAF_CONF="${SENTINEL_FREEWAF_CONF:-/www/server/panel/vhost/nginx/free_waf.conf}"
+FREEWAF_HOME="${SENTINEL_FREEWAF_HOME:-$WAF_BASE/lua_waf}"
+FREEWAF_CONF="${SENTINEL_FREEWAF_CONF:-/www/server/panel/vhost/nginx/sentinel_waf.conf}"
 FREEWAF_LOGDIR="${SENTINEL_FREEWAF_LOGDIR:-/www/wwwlogs/free_waf_log}"
 
 payload_dir() {
@@ -390,9 +390,10 @@ do_freewaf_status() {
   local lua mod conf loaded mode
   lua="tidak-ada"; nginx_has_lua && lua="ada"
   mod="tidak-ada"; [ -d "$FREEWAF_HOME/rule" ] && mod="ada"
-  conf="tidak-ada"; [ -f "$FREEWAF_CONF" ] && conf="ada"
+  conf="tidak-ada"
+  { [ -f "$FREEWAF_CONF" ] || [ -f "/www/server/panel/vhost/nginx/free_waf.conf" ]; } && conf="ada"
   loaded="tidak"
-  if [ -x "$NGINX_BIN" ] && "$NGINX_BIN" -T 2>/dev/null | grep -q 'access_by_lua_file.*/www/server/free_waf/waf.lua'; then
+  if [ -x "$NGINX_BIN" ] && "$NGINX_BIN" -T 2>/dev/null | grep -qE 'access_by_lua_file.*/waf\.lua'; then
     loaded="ya"
   fi
   mode="$(freewaf_mode)"
@@ -401,11 +402,13 @@ do_freewaf_status() {
 }
 
 do_freewaf_install() {
-  # Pasang engine free_waf untuk nginx. Idempoten: berkas config dan
+  # Pasang engine WAF untuk nginx. Idempoten: berkas config dan
   # site yang sudah ada TIDAK PERNAH ditimpa (isinya adalah keadaan
   # produksi). Hanya berkas yang hilang yang disalin dari payload.
   local P; P="$(payload_dir)"
-  [ -d "$P/free_waf" ] || { err "payload tidak ditemukan: $P/free_waf"; return 1; }
+  local P_WAF="$P/lua_waf"
+  [ -d "$P_WAF" ] || P_WAF="$P/free_waf"
+  [ -d "$P_WAF" ] || { err "payload tidak ditemukan: $P/lua_waf"; return 1; }
   if ! nginx_has_lua; then
     err "nginx tanpa lua_nginx_module. Engine tidak bisa dipasang."
     err "Bangun ulang nginx dengan modul lua di panel, lalu ulangi."
@@ -432,30 +435,35 @@ do_freewaf_install() {
     say "resty.core ditautkan ke path Lua bawaan"
   fi
   # engine: selalu segarkan dari payload (kode, bukan keadaan)
-  cp -p "$P/free_waf/init.lua" "$P/free_waf/waf.lua" "$FREEWAF_HOME/"
+  cp -p "$P_WAF/init.lua" "$P_WAF/waf.lua" "$FREEWAF_HOME/"
   # rules: hanya yang hilang (operator boleh menambah rule sendiri)
   local f b
-  for f in "$P/free_waf/rule"/*.json; do
+  for f in "$P_WAF/rule"/*.json; do
     b="$(basename "$f")"
     [ -f "$FREEWAF_HOME/rule/$b" ] || cp -p "$f" "$FREEWAF_HOME/rule/$b"
   done
-  for f in "$P/free_waf/html"/*.html; do
+  for f in "$P_WAF/html"/*.html; do
     b="$(basename "$f")"
     [ -f "$FREEWAF_HOME/html/$b" ] || cp -p "$f" "$FREEWAF_HOME/html/$b"
   done
   # keadaan: JANGAN timpa bila sudah ada
   for f in config.json site.json total.json drop_ip.log; do
     if [ ! -f "$FREEWAF_HOME/$f" ]; then
-      cp -p "$P/free_waf/$f.default" "$FREEWAF_HOME/$f"
+      cp -p "$P_WAF/$f.default" "$FREEWAF_HOME/$f"
       say "dibuat: $FREEWAF_HOME/$f (dari default)"
     fi
   done
   chown -R www:www "$FREEWAF_HOME" 2>/dev/null || true
   chmod 755 "$FREEWAF_HOME" "$FREEWAF_HOME/rule" "$FREEWAF_HOME/html" 2>/dev/null || true
 
-  # hook nginx: tulis conf dari template
+  # hook nginx: tulis sentinel_waf.conf dari template dan bersihkan hook lama
+  rm -f /www/server/panel/vhost/nginx/free_waf.conf 2>/dev/null || true
   if [ ! -f "$FREEWAF_CONF" ]; then
-    cp -p "$P/free_waf/free_waf.conf.template" "$FREEWAF_CONF"
+    if [ -f "$P_WAF/sentinel_waf.conf.template" ]; then
+      cp -p "$P_WAF/sentinel_waf.conf.template" "$FREEWAF_CONF"
+    else
+      cp -p "$P_WAF/free_waf.conf.template" "$FREEWAF_CONF"
+    fi
     say "ditulis: $FREEWAF_CONF"
   fi
   # guard duplikat: luawaf panel tidak boleh aktif bersamaan
@@ -471,17 +479,17 @@ do_freewaf_install() {
     return 1
   fi
   nginx_reload_ok || return 1
-  say "engine free_waf terpasang dan termuat."
+  say "engine WAF terpasang dan termuat."
 }
 
 do_freewaf_remove() {
   # Cabut hook nginx. Data (config, site, log, drop_ip) SENGAJA
   # dipertahankan supaya install ulang tidak menghilangkan keadaan.
-  rm -f "$FREEWAF_CONF"
+  rm -f "$FREEWAF_CONF" /www/server/panel/vhost/nginx/free_waf.conf 2>/dev/null || true
   "$NGINX_BIN" -t 2>&1 | grep -q 'test is successful' \
     || { err "nginx -t gagal setelah pencabutan"; return 1; }
   nginx_reload_ok || return 1
-  say "hook free_waf dicabut. Data di $FREEWAF_HOME tetap ada."
+  say "hook WAF dicabut. Data di $FREEWAF_HOME tetap ada."
 }
 
 nginx_reload_ok() {
@@ -756,7 +764,7 @@ case "${1:-help}" in
   freewaf-install) do_freewaf_install ;;
   freewaf-remove) do_freewaf_remove ;;
   help|*) cat <<'EOF'
-pakai: sentinel-waf.sh <perintah>
+Usage: sentinel-waf.sh <command>
   engine              deteksi engine WAF per webserver
   rules               daftar rule OWASP (nama|on|off|berkas)
   rule-on <nama>      aktifkan satu rule group

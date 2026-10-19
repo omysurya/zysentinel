@@ -60,7 +60,7 @@
 
 #include <sqlite3.h>
 
-#define VERSION "v1.6.0"
+#define VERSION "v1.6.1"
 
 /* ------------------------------------------------------------------ *
  * Batas keras. Semua angka di sini adalah pagu memori/CPU, bukan saran.
@@ -2171,6 +2171,9 @@ static void handle_ctl(int cfd)
     ssize_t n = read(cfd, buf, sizeof(buf) - 1);
     if (n <= 0) return;
     buf[n] = '\0';
+    while (n > 0 && (buf[n - 1] == '\r' || buf[n - 1] == '\n' || buf[n - 1] == ' ' || buf[n - 1] == '\t')) {
+        buf[--n] = '\0';
+    }
 
     char cmd[64] = "", arg[128] = "";
     char *sp = strchr(buf, ' ');
