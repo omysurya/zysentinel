@@ -466,12 +466,19 @@ do_freewaf_install() {
   # hook nginx: tulis sentinel_waf.conf dari template dan bersihkan hook lama
   rm -f /www/server/panel/vhost/nginx/free_waf.conf 2>/dev/null || true
   if [ ! -f "$FREEWAF_CONF" ]; then
-    if [ -f "$P_WAF/sentinel_waf.conf.template" ]; then
-      cp -p "$P_WAF/sentinel_waf.conf.template" "$FREEWAF_CONF"
-    else
-      cp -p "$P_WAF/free_waf.conf.template" "$FREEWAF_CONF"
+    # Template conf hanya ada di payload/lua_waf, sedangkan P_WAF bisa
+    # menunjuk payload/waf/lua_waf. Cari di semua lokasi payload.
+    local tpl="" t
+    for t in "$P_WAF/sentinel_waf.conf.template" "$P/lua_waf/sentinel_waf.conf.template" \
+             "$P/waf/lua_waf/sentinel_waf.conf.template" "$P_WAF/free_waf.conf.template" \
+             "$P/lua_waf/free_waf.conf.template"; do
+      [ -f "$t" ] && { tpl="$t"; break; }
+    done
+    if [ -z "$tpl" ] || ! cp -p "$tpl" "$FREEWAF_CONF"; then
+      err "template sentinel_waf.conf tidak ditemukan di payload ($P), hook WAF tidak dipasang."
+      return 1
     fi
-    say "ditulis: $FREEWAF_CONF"
+    say "ditulis: $FREEWAF_CONF (dari $tpl)"
   fi
   # guard duplikat: luawaf panel tidak boleh aktif bersamaan
   if grep -qE '^[[:space:]]*include[[:space:]]+luawaf\.conf' "$NGINX_CONF" 2>/dev/null; then
@@ -486,6 +493,11 @@ do_freewaf_install() {
     return 1
   fi
   nginx_reload_ok || return 1
+  # Bukti, bukan klaim: konfigurasi aktif harus memuat waf.lua.
+  if ! "$NGINX_BIN" -T 2>/dev/null | grep -qE 'access_by_lua_file.*/waf\.lua'; then
+    err "reload berhasil tetapi waf.lua tidak termuat (cek $FREEWAF_CONF)."
+    return 1
+  fi
   say "engine WAF terpasang dan termuat."
 }
 

@@ -7,9 +7,15 @@
 # berkali-kali: tidak menghapus apa pun milik panel maupun pemilik.
 # ============================================================
 set -u
+export PATH=/www/server/panel/pyenv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH
 BASE=/www/server/sentinel
 BIN="$BASE/bin"
 ETC="$BASE/etc"
+PANEL_PLUG=/www/server/panel/plugin/sentinel
+PYENV=/www/server/panel/pyenv/bin/python3
+REPO_GH=omysurya/zysentinel
+LOG_DEPS="$BASE/log/install-deps.log"
+STATUS_DEPS="$BASE/log/deps-status.txt"
 
 say() { echo "[zysentinel] $*"; }
 err() { echo "[zysentinel] GALAT: $*" >&2; }
@@ -18,9 +24,113 @@ butuh_root() {
   [ "$(id -u)" -eq 0 ] || { err "jalankan sebagai root"; exit 1; }
 }
 
+# Lokasi skrip ini sebenarnya. $0 tidak bisa dipercaya: panel memanggil
+# "bash install.sh" dari cwd plugin, UI memanggil path absolut, dan
+# pemasangan satu baris memanggil lewat /dev/fd/63.
+SKRIP="$(readlink -f "${BASH_SOURCE[0]:-$0}" 2>/dev/null || echo "$0")"
+PLUG_DIR="$(cd "$(dirname "$SKRIP")" 2>/dev/null && pwd || echo "$PANEL_PLUG")"
+PAY=""
+
+versi_plugin() {
+  local f v=""
+  for f in "$PLUG_DIR/info.json" "$PANEL_PLUG/info.json"; do
+    [ -f "$f" ] || continue
+    v="$(grep -o '"versions": *"[^"]*"' "$f" | head -1 | cut -d'"' -f4)"
+    [ -n "$v" ] && break
+  done
+  printf '%s' "${v:-1.6.2}"
+}
+
+payload_sah() {
+  # Payload dianggap utuh hanya bila berkas inti ada, bukan sekadar
+  # foldernya. Folder kosong sisa ekstraksi gagal tidak boleh lolos.
+  [ -f "$1/guardctl" ] && [ -f "$1/sentinel-fw.sh" ] && [ -f "$1/guardd.conf.default" ] && [ -d "$1/systemd" ]
+}
+
+ekstrak_zip() {
+  # unzip tidak selalu ada di image minimal; zipfile Python selalu ada.
+  local zip="$1" tujuan="$2" py
+  if command -v unzip >/dev/null 2>&1; then
+    unzip -o -q "$zip" -d "$tujuan" && return 0
+  fi
+  py="$PYENV"; [ -x "$py" ] || py="$(command -v python3 2>/dev/null)"
+  [ -n "$py" ] || return 1
+  "$py" -c 'import sys,zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])' "$zip" "$tujuan"
+}
+
+unduh_berkas() {
+  local url="$1" ke="$2"
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL --connect-timeout 15 --max-time 300 -o "$ke" "$url" && return 0
+  fi
+  if command -v wget >/dev/null 2>&1; then
+    wget -q -T 30 -O "$ke" "$url" && return 0
+  fi
+  return 1
+}
+
+unduh_payload() {
+  # Payload hilang (dipanggil lewat pipa, atau folder plugin belum ada):
+  # ambil paket resmi versi yang sama dari GitHub lalu pasang ke folder
+  # plugin panel, supaya UI panel dan payload ikut lengkap.
+  local ver tmp url zip src
+  ver="$(versi_plugin)"
+  # Mesin baru bisa belum punya alat unduh/ekstrak sama sekali.
+  deteksi_os
+  { ada curl || ada wget; } || pm_pasang curl ca-certificates || true
+  { ada unzip || [ -x "$PYENV" ] || ada python3; } || pm_pasang unzip || true
+  tmp="$(mktemp -d /tmp/zysentinel-fetch.XXXXXX)" || return 1
+  zip="$tmp/paket.zip"
+  for url in \
+      "https://github.com/$REPO_GH/releases/download/v$ver/zysentinel-v$ver.zip" \
+      "https://github.com/$REPO_GH/archive/refs/heads/v$ver.zip"; do
+    say "payload tidak ditemukan, mengunduh paket resmi: $url"
+    unduh_berkas "$url" "$zip" && [ -s "$zip" ] && break
+    rm -f "$zip"
+  done
+  [ -s "$zip" ] || { rm -rf "$tmp"; return 1; }
+  mkdir -p "$tmp/x"
+  ekstrak_zip "$zip" "$tmp/x" || { rm -rf "$tmp"; return 1; }
+  src="$(find "$tmp/x" -maxdepth 3 -type f -name install.sh -path '*/install.sh' \
+          -exec dirname {} \; 2>/dev/null | while read -r d; do payload_sah "$d/payload" && { echo "$d"; break; }; done)"
+  [ -n "$src" ] || { rm -rf "$tmp"; return 1; }
+  mkdir -p "$PANEL_PLUG"
+  # Jangan timpa repositori git pengembang yang sudah ada.
+  if [ ! -d "$PANEL_PLUG/.git" ]; then
+    cp -a "$src"/. "$PANEL_PLUG"/
+  else
+    mkdir -p "$PANEL_PLUG/payload" && cp -a "$src/payload"/. "$PANEL_PLUG/payload"/
+  fi
+  rm -rf "$tmp"
+  payload_sah "$PANEL_PLUG/payload"
+}
+
+cari_payload() {
+  local c
+  for c in "$PLUG_DIR/payload" "$PANEL_PLUG/payload" "$PWD/payload"; do
+    if payload_sah "$c"; then PAY="$c"; break; fi
+  done
+  if [ -z "$PAY" ]; then
+    if unduh_payload; then
+      PAY="$PANEL_PLUG/payload"
+      PLUG_DIR="$PANEL_PLUG"
+    fi
+  fi
+  if [ -z "$PAY" ]; then
+    err "folder payload tidak ditemukan. Dicek:"
+    err "  $PLUG_DIR/payload"
+    err "  $PANEL_PLUG/payload"
+    err "  $PWD/payload"
+    err "dan unduhan paket resmi dari github.com/$REPO_GH juga gagal."
+    err "Ekstrak sentinel.zip ke /www/server/panel/plugin/ lalu ulangi:"
+    err "  cd $PANEL_PLUG && bash install.sh install"
+    exit 1
+  fi
+  export SENTINEL_PAYLOAD="$PAY"
+}
+
 pulihkan_izin_staging() {
-  local plug_dir
-  plug_dir="$(cd "$(dirname "$0")" && pwd)"
+  local plug_dir="$PLUG_DIR"
   chmod -R u+rwX,go+rX "$plug_dir" 2>/dev/null || true
   chmod 755 "$plug_dir/install.sh" 2>/dev/null || true
   if [ -d "$plug_dir/payload" ]; then
@@ -30,58 +140,449 @@ pulihkan_izin_staging() {
   fi
 }
 
-cek_depe() {
-  # Pastikan python3 tersedia dalam PATH
-  if ! command -v python3 >/dev/null 2>&1 && [ -x /www/server/panel/pyenv/bin/python3 ]; then
-    ln -sf /www/server/panel/pyenv/bin/python3 /usr/bin/python3 2>/dev/null || true
+# ============================================================
+# Prasyarat: cek dulu, lalu pasang yang kurang.
+#
+# Urutan sumber untuk setiap kebutuhan:
+#   1. sudah ada di sistem            -> dipakai apa adanya
+#   2. tersedia di katalog aaPanel    -> pasang lewat mekanisme resmi
+#      panel (pyenv panel, antrean tugas install_soft.sh)
+#   3. selain itu                     -> repo resmi OS (apt / dnf / yum,
+#      ditambah EPEL di keluarga RHEL untuk paket yang hanya ada di sana)
+#
+# Tingkat kebutuhan:
+#   wajib  -> tanpa ini guardd / firewall tidak bisa jalan; instalasi
+#             dinyatakan gagal (kode keluar 2) bila tetap kurang.
+#   fitur  -> satu modul nonaktif bila kurang (Antivirus, Upload Scan,
+#             WAF); instalasi tetap lanjut dan dilaporkan.
+#   opsi   -> hanya kenyamanan (jq, zip); tidak memengaruhi status.
+# ============================================================
+OS_FAM=""
+OS_PM=""
+APT_SEGAR=0
+EPEL_SIAP=0
+DEPS_GAGAL_WAJIB=0
+DEPS_RINGKAS=""
+
+deps_log() { mkdir -p "$BASE/log" 2>/dev/null; echo "[$(date '+%F %T')] $*" >>"$LOG_DEPS"; }
+
+catat_dep() {
+  # nama|tingkat|status|sumber
+  DEPS_RINGKAS="${DEPS_RINGKAS}$1|$2|$3|$4"$'\n'
+  deps_log "dep $1 ($2): $3 [$4]"
+  [ "$2" = "wajib" ] && [ "$3" = "GAGAL" ] && DEPS_GAGAL_WAJIB=$((DEPS_GAGAL_WAJIB + 1))
+  return 0
+}
+
+deteksi_os() {
+  if command -v apt-get >/dev/null 2>&1; then
+    OS_FAM=deb; OS_PM=apt-get
+  elif command -v dnf >/dev/null 2>&1; then
+    OS_FAM=rpm; OS_PM=dnf
+  elif command -v yum >/dev/null 2>&1; then
+    OS_FAM=rpm; OS_PM=yum
+  elif command -v microdnf >/dev/null 2>&1; then
+    OS_FAM=rpm; OS_PM=microdnf
+  else
+    OS_FAM=""; OS_PM=""
   fi
+}
 
-  local pay
-  pay="$(dirname "$0")/payload"
-  [ -d "$pay" ] || pay="/www/server/panel/plugin/sentinel/payload"
+pm_pasang() {
+  # Pasang paket SATU per SATU: di apt satu nama paket yang tidak
+  # dikenal menggagalkan seluruh transaksi, sehingga paket lain yang
+  # sebenarnya tersedia ikut tidak terpasang.
+  local p ok=0
+  for p in "$@"; do
+    case "$OS_FAM" in
+      deb)
+        if [ "$APT_SEGAR" -eq 0 ]; then
+          deps_log "apt-get update"
+          DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=180 update -q >>"$LOG_DEPS" 2>&1 || true
+          APT_SEGAR=1
+        fi
+        deps_log "apt-get install $p"
+        DEBIAN_FRONTEND=noninteractive apt-get -o DPkg::Lock::Timeout=180 install -y -q \
+          --no-install-recommends -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \
+          "$p" >>"$LOG_DEPS" 2>&1 && ok=1
+        ;;
+      rpm)
+        deps_log "$OS_PM install $p"
+        "$OS_PM" install -y "$p" >>"$LOG_DEPS" 2>&1 && ok=1
+        ;;
+    esac
+  done
+  [ "$ok" -eq 1 ]
+}
 
-  # Salin cjson.so mandiri bila tersedia di paket payload ke folder library Lua
-  mkdir -p /usr/local/lib/lua/5.1 /usr/lib/x86_64-linux-gnu/lua/5.1 /usr/lib64/lua/5.1 2>/dev/null || true
-  if [ -f "$pay/waf/lua_waf/cjson.so" ]; then
-    cp -p "$pay/waf/lua_waf/cjson.so" /usr/local/lib/lua/5.1/cjson.so 2>/dev/null || true
-    cp -p "$pay/waf/lua_waf/cjson.so" /usr/lib/x86_64-linux-gnu/lua/5.1/cjson.so 2>/dev/null || true
-    cp -p "$pay/waf/lua_waf/cjson.so" /usr/lib64/lua/5.1/cjson.so 2>/dev/null || true
-  elif [ -f "$pay/lua_waf/cjson.so" ]; then
-    cp -p "$pay/lua_waf/cjson.so" /usr/local/lib/lua/5.1/cjson.so 2>/dev/null || true
-    cp -p "$pay/lua_waf/cjson.so" /usr/lib/x86_64-linux-gnu/lua/5.1/cjson.so 2>/dev/null || true
-    cp -p "$pay/lua_waf/cjson.so" /usr/lib64/lua/5.1/cjson.so 2>/dev/null || true
+pastikan_epel() {
+  # clamav, rkhunter, inotify-tools, lua-cjson di RHEL/Alma/Rocky hanya
+  # ada di EPEL. Alma/Rocky punya epel-release di repo extras; RHEL
+  # murni memakai rpm resmi dari Fedora Project.
+  [ "$OS_FAM" = "rpm" ] || return 0
+  [ "$EPEL_SIAP" -eq 1 ] && return 0
+  if ! rpm -q epel-release >/dev/null 2>&1; then
+    say "mengaktifkan repo EPEL (sumber resmi paket tambahan RHEL)"
+    pm_pasang epel-release || {
+      local rel; rel="$(rpm -E '%{rhel}' 2>/dev/null)"
+      [ -n "$rel" ] && "$OS_PM" install -y \
+        "https://dl.fedoraproject.org/pub/epel/epel-release-latest-${rel}.noarch.rpm" >>"$LOG_DEPS" 2>&1 || true
+    }
   fi
+  rpm -q epel-release >/dev/null 2>&1 && EPEL_SIAP=1
+  return 0
+}
 
-  # Identifikasi paket sistem yang perlu dipasang
-  local butuh_pkg=""
-  command -v ipset >/dev/null 2>&1 || butuh_pkg="$butuh_pkg ipset"
-  command -v iptables >/dev/null 2>&1 || butuh_pkg="$butuh_pkg iptables"
-  if [ ! -f /usr/local/lib/lua/5.1/cjson.so ] && [ ! -f /usr/lib/x86_64-linux-gnu/lua/5.1/cjson.so ] && [ ! -f /usr/lib64/lua/5.1/cjson.so ]; then
-    butuh_pkg="$butuh_pkg lua-cjson"
-  fi
-
-  # Pasang paket otomatis tanpa memblokir jika sudah ada atau offline
-  if [ -n "$butuh_pkg" ] || ! command -v gcc >/dev/null 2>&1; then
-    say "memeriksa & memasang dependensi paket sistem:$butuh_pkg"
-    export DEBIAN_FRONTEND=noninteractive
-    if command -v apt-get >/dev/null 2>&1; then
-      apt-get update -qq 2>&1 | tail -1 || true
-      apt-get install -y --no-install-recommends gcc libsqlite3-dev ipset iptables lua-cjson python3 $butuh_pkg >/dev/null 2>&1 || true
-    elif command -v dnf >/dev/null 2>&1; then
-      dnf install -y gcc sqlite-devel ipset iptables lua-cjson python3 $butuh_pkg 2>&1 | tail -1 || true
-    elif command -v yum >/dev/null 2>&1; then
-      yum install -y gcc sqlite-devel ipset iptables lua-cjson python3 $butuh_pkg 2>&1 | tail -1 || true
+# pasang_os <cek-fungsi> <paket-deb...> -- <paket-rpm...> [-- epel]
+pasang_os() {
+  local cek="$1"; shift
+  local deb=() rpm=() epel=0 bag=deb a
+  for a in "$@"; do
+    if [ "$a" = "--" ]; then
+      [ "$bag" = "deb" ] && bag=rpm || bag=opsi
+      continue
     fi
+    case "$bag" in
+      deb) deb+=("$a") ;;
+      rpm) rpm+=("$a") ;;
+      opsi) [ "$a" = "epel" ] && epel=1 ;;
+    esac
+  done
+  [ -n "$OS_FAM" ] || return 1
+  if [ "$OS_FAM" = "deb" ]; then
+    pm_pasang "${deb[@]}" || true
+  else
+    [ "$epel" -eq 1 ] && pastikan_epel
+    pm_pasang "${rpm[@]}" || true
+  fi
+  "$cek"
+}
+
+# --- fungsi cek, masing-masing mengembalikan 0 bila terpenuhi ---
+ada() { command -v "$1" >/dev/null 2>&1; }
+cek_ipset()    { ada ipset; }
+cek_iptables() { ada iptables; }
+cek_curl()     { ada curl; }
+cek_sqlite()   { ada sqlite3 && { ldconfig -p 2>/dev/null | grep -q 'libsqlite3\.so\.0'; }; }
+cek_inotify()  { ada inotifywait; }
+cek_clamav()   { ada clamscan; }
+cek_rkhunter() { ada rkhunter; }
+cek_jq()       { ada jq; }
+cek_zip()      { ada zip && ada unzip; }
+cek_python()   { [ -x "$PYENV" ] || ada python3; }
+cek_kompiler() { ada gcc && [ -f /usr/include/sqlite3.h ]; }
+cek_cjson() {
+  [ -f "$PAY/waf/lua_waf/cjson.so" ] || [ -f "$PAY/lua_waf/cjson.so" ] \
+    || [ -f /usr/local/lib/lua/5.1/cjson.so ] || [ -f /usr/lib/x86_64-linux-gnu/lua/5.1/cjson.so ] \
+    || [ -f /usr/lib64/lua/5.1/cjson.so ]
+}
+cek_guardd_jalan() {
+  # Biner precompiled ditautkan ke glibc build-nya; di distro dengan
+  # glibc lebih tua (Debian 12, Alma 9, Ubuntu 22) ia gagal dimuat.
+  local b
+  for b in "$BIN/guardd" "$PAY/guardd"; do
+    [ -f "$b" ] && chmod 755 "$b" 2>/dev/null
+    [ -x "$b" ] && "$b" -V >/dev/null 2>&1 && return 0
+  done
+  return 1
+}
+cek_maxminddb() { [ -x "$PYENV" ] && "$PYENV" -c 'import maxminddb' >/dev/null 2>&1; }
+
+aapanel_ada() { [ -d /www/server/panel/class ] && [ -x "$PYENV" ]; }
+
+AAPANEL_KATALOG=""
+
+aapanel_muat_katalog() {
+  # Katalog resmi = daftar App Store cloud aaPanel (public.load_soft_list,
+  # cache data/plugin_bin.pl), sama dengan yang tampil di menu App Store.
+  # Keluaran per baris: nama|versi_terbaru(m_version.version)|tipe
+  AAPANEL_KATALOG=""
+  aapanel_ada || return 1
+  AAPANEL_KATALOG="$(cd /www/server/panel && timeout 90 "$PYENV" - <<'PY' 2>>"$LOG_DEPS"
+import sys, os
+sys.path.insert(0, '/www/server/panel/class')
+os.chdir('/www/server/panel')
+import public
+try:
+    d = public.load_soft_list(False)
+except Exception:
+    d = public.load_soft_list(True)
+def kunci(v):
+    try:
+        return tuple(int(x) for x in str(v.get('full_version') or '0').split('.'))
+    except Exception:
+        return (0,)
+for p in (d.get('list') if isinstance(d, dict) else []) or []:
+    vs = [v for v in (p.get('versions') or []) if isinstance(v, dict) and v.get('m_version')]
+    if not vs or str(p.get('price', '0')) not in ('0', '0.00', '0.0'):
+        continue
+    v = max(vs, key=kunci)
+    print('%s|%s.%s|%s' % (str(p.get('name', '')).lower(), v['m_version'], v.get('version', '0'), p.get('type')))
+PY
+)"
+  deps_log "katalog aaPanel dimuat: $(printf '%s\n' "$AAPANEL_KATALOG" | grep -c '|') entri gratis"
+  [ -n "$AAPANEL_KATALOG" ]
+}
+
+aapanel_katalog_versi() {
+  # Versi terbaru dari katalog aaPanel untuk sebuah nama, kosong bila tidak ada.
+  printf '%s\n' "$AAPANEL_KATALOG" | awk -F'|' -v n="$1" '$1==n {print $2; exit}'
+}
+
+aapanel_pasang() {
+  # Pasang lewat penginstal resmi panel (panelPlugin.install_plugin), persis
+  # seperti tombol Install di App Store:
+  #   - plugin biasa (mis. clamav): diunduh dari server aaPanel, MD5
+  #     diverifikasi, install.sh plugin dijalankan sinkron;
+  #   - perangkat lunak tipe 5 (mis. nginx): dimasukkan ke antrean tugas
+  #     panel lalu dikompilasi oleh task runner aaPanel.
+  local nama="$1" ver="$2"
+  (cd /www/server/panel && timeout 900 "$PYENV" - "$nama" "$ver" <<'PY' >>"$LOG_DEPS" 2>&1)
+import sys, os, json
+# panelPlugin mengimpor BTPanel dan membaca session Flask, jadi butuh akar
+# panel di sys.path dan request context, persis seperti saat dipanggil UI.
+sys.path.insert(0, '/www/server/panel')
+sys.path.insert(0, '/www/server/panel/class')
+os.chdir('/www/server/panel')
+from BTPanel import app
+import public, panelPlugin
+nama, ver = sys.argv[1], sys.argv[2]
+m, _, mi = ver.partition('.')
+if nama == 'nginx':
+    # m_version nginx sudah "1.31"; minor-nya ada di kolom version
+    m, mi = '.'.join(ver.split('.')[:2]), ver.split('.')[2] if ver.count('.') > 1 else '0'
+get = public.dict_obj()
+get.sName = nama
+get.version = m
+get.min_version = mi
+get.type = '0'
+with app.test_request_context():
+    pp = panelPlugin.panelPlugin()
+    r = pp.install_plugin(get)
+    # Plugin biasa: install_plugin hanya mengunduh + membongkar ke tmp_path
+    # (MD5 diverifikasi); UI App Store lalu memanggil input_zip untuk
+    # menyalin dan menjalankan install.sh plugin. Lakukan hal yang sama.
+    if isinstance(r, dict) and r.get('tmp_path') and r.get('name'):
+        g2 = public.dict_obj()
+        g2.tmp_path = r['tmp_path']
+        g2.plugin_name = r['name']
+        g2.install_opt = r.get('install_opt', 'i')
+        r = pp.input_zip(g2)
+print('aapanel install_plugin %s %s -> %s' % (nama, ver, json.dumps(r, ensure_ascii=False, default=str)[:400]))
+sys.exit(0 if isinstance(r, dict) and r.get('status') else 1)
+PY
+}
+
+aapanel_nginx_antre() {
+  # Ada tugas pemasangan nginx yang belum selesai (status 0 = antre,
+  # -1 = berjalan) atau proses install_soft nginx yang sedang jalan?
+  pgrep -f "[i]nstall_soft.sh .*install nginx" >/dev/null 2>&1 && return 0
+  local db=/www/server/panel/data/default.db
+  [ -f /www/server/panel/data/db/default.db ] && db=/www/server/panel/data/db/default.db
+  [ -f "$db" ] || return 1
+  "$PYENV" - "$db" <<'PY' 2>/dev/null
+import sqlite3, sys
+c = sqlite3.connect(sys.argv[1])
+n = c.execute("select count(*) from tasks where name like 'Install%nginx%' and status != '1'").fetchone()[0]
+sys.exit(0 if n else 1)
+PY
+}
+
+aapanel_tunggu_nginx_lalu_repair() {
+  # Kompilasi nginx oleh antrean panel makan 10-30 menit. Pengawas latar
+  # (satu saja, lewat berkas PID) menunggu nginx + lua siap dan antrean
+  # nginx kosong, lalu menjalankan self-heal agar WAF terkait.
+  # Pola "[i]nstall_soft" dipakai agar pgrep tidak mencocokkan dirinya.
+  local skrip="$PANEL_PLUG/install.sh" pidf="$BASE/run/nginx-watch.pid"
+  [ -f "$skrip" ] || skrip="$SKRIP"
+  mkdir -p "$BASE/run"
+  if [ -f "$pidf" ] && kill -0 "$(cat "$pidf" 2>/dev/null)" 2>/dev/null; then
+    return 0
+  fi
+  nohup setsid bash -c '
+    echo $$ > "$1"
+    for i in $(seq 1 480); do
+      if /www/server/nginx/sbin/nginx -V 2>&1 | grep -q lua_nginx_module \
+         && ! pgrep -f "[i]nstall_soft.sh .*install nginx" >/dev/null 2>&1; then
+        sleep 10
+        echo "[$(date "+%F %T")] nginx + lua siap, menjalankan repair" >>/www/server/sentinel/log/install-deps.log
+        bash "$0" repair >>/www/server/sentinel/log/install-deps.log 2>&1
+        break
+      fi
+      sleep 15
+    done
+    rm -f "$1"' "$skrip" "$pidf" >/dev/null 2>&1 &
+}
+
+prasyarat_python() {
+  if [ -x "$PYENV" ]; then
+    catat_dep "python3" wajib "OK" "aaPanel pyenv"
+  elif ada python3; then
+    catat_dep "python3" wajib "OK" "sistem"
+  elif pasang_os cek_python python3 -- python3; then
+    catat_dep "python3" wajib "DIPASANG" "repo OS"
+  else
+    catat_dep "python3" wajib "GAGAL" "repo OS"
+  fi
+}
+
+prasyarat_os() {
+  # $1 nama  $2 tingkat  $3 fungsi cek  $4 nama katalog aaPanel ("-" bila
+  # tidak relevan)  sisanya argumen pasang_os
+  local nama="$1" tingkat="$2" cek="$3" kat="$4" ver=""; shift 4
+  if "$cek"; then
+    catat_dep "$nama" "$tingkat" "OK" "sistem"
+    return 0
+  fi
+  [ "$kat" != "-" ] && ver="$(aapanel_katalog_versi "$kat")"
+  if [ -n "$ver" ]; then
+    say "  - $nama belum ada, tersedia di katalog aaPanel ($kat $ver), memasang lewat App Store..."
+    if aapanel_pasang "$kat" "$ver" && "$cek"; then
+      catat_dep "$nama" "$tingkat" "DIPASANG" "aaPanel App Store $kat $ver"
+      return 0
+    fi
+    say "  - pemasangan $kat dari aaPanel belum memenuhi, lanjut repo resmi OS..."
+  else
+    say "  - $nama belum ada, tidak ada di katalog aaPanel, memasang dari repo resmi OS..."
+  fi
+  if pasang_os "$cek" "$@"; then
+    catat_dep "$nama" "$tingkat" "DIPASANG" "repo OS"
+  else
+    catat_dep "$nama" "$tingkat" "GAGAL" "repo OS"
+  fi
+}
+
+prasyarat_guardd() {
+  if cek_guardd_jalan; then
+    catat_dep "guardd" wajib "OK" "biner payload"
+    return 0
+  fi
+  # Biner bawaan tidak bisa dimuat di sistem ini: siapkan compiler
+  # agar pasang_daemon menyusunnya dari guardd.c.
+  say "  - biner guardd bawaan tidak cocok dengan glibc sistem, menyiapkan compiler"
+  if cek_kompiler || pasang_os cek_kompiler gcc libc6-dev libsqlite3-dev -- gcc glibc-devel sqlite-devel; then
+    catat_dep "guardd" wajib "DISUSUN" "gcc + repo OS"
+  else
+    catat_dep "guardd" wajib "GAGAL" "gcc tidak tersedia"
+  fi
+}
+
+prasyarat_maxminddb() {
+  if cek_maxminddb; then
+    catat_dep "maxminddb (GeoIP)" opsi "OK" "aaPanel pyenv"
+  elif [ -x "$PYENV" ] && "$PYENV" -m pip install -q maxminddb >>"$LOG_DEPS" 2>&1 && cek_maxminddb; then
+    catat_dep "maxminddb (GeoIP)" opsi "DIPASANG" "pip aaPanel pyenv"
+  else
+    catat_dep "maxminddb (GeoIP)" opsi "LEWAT" "tanpa pyenv aaPanel"
+  fi
+}
+
+prasyarat_webserver() {
+  local ngx=/www/server/nginx/sbin/nginx
+  if [ -x "$ngx" ]; then
+    if "$ngx" -V 2>&1 | grep -q 'lua_nginx_module'; then
+      catat_dep "nginx + lua (WAF)" fitur "OK" "aaPanel"
+    else
+      # Membangun ulang nginx produksi otomatis akan memutus situs
+      # pelanggan saat kompilasi; diserahkan ke admin.
+      catat_dep "nginx + lua (WAF)" fitur "PERLU-TINDAKAN" "nginx tanpa lua: App Store > Nginx > Update"
+    fi
+    return 0
+  fi
+  if [ -x /www/server/apache/bin/httpd ] || [ -x /usr/local/lsws/bin/litespeed ] || [ -x /usr/local/lsws/bin/openlitespeed ]; then
+    catat_dep "nginx + lua (WAF)" fitur "LEWAT" "apache/OLS: jalur snippet"
+    return 0
+  fi
+  if [ "${ZYS_SKIP_NGINX:-0}" = "1" ]; then
+    catat_dep "nginx + lua (WAF)" fitur "LEWAT" "ZYS_SKIP_NGINX=1"
+    return 0
+  fi
+  if aapanel_ada && aapanel_nginx_antre; then
+    say "  - Nginx sudah ada di antrean / sedang dikompilasi aaPanel, tidak diantrekan ulang"
+    aapanel_tunggu_nginx_lalu_repair
+    catat_dep "nginx + lua (WAF)" fitur "DIANTREKAN" "aaPanel (tugas sudah berjalan)"
+    return 0
+  fi
+  if aapanel_ada; then
+    local ver="${ZYS_NGINX_VERSION:-$(aapanel_katalog_versi nginx)}"
+    if [ -n "$ver" ] && aapanel_pasang nginx "$ver"; then
+      say "  - webserver belum ada: Nginx $ver (terbaru di katalog aaPanel) diantrekan di panel"
+      aapanel_tunggu_nginx_lalu_repair
+      catat_dep "nginx + lua (WAF)" fitur "DIANTREKAN" "aaPanel App Store nginx $ver"
+    else
+      catat_dep "nginx + lua (WAF)" fitur "GAGAL" "antrean aaPanel"
+    fi
+  else
+    catat_dep "nginx + lua (WAF)" fitur "LEWAT" "bukan server aaPanel"
+  fi
+}
+
+cetak_ringkas_deps() {
+  mkdir -p "$BASE/log" 2>/dev/null
+  {
+    printf '%-22s %-6s %-15s %s\n' "KEBUTUHAN" "TINGKAT" "STATUS" "SUMBER"
+    printf '%s' "$DEPS_RINGKAS" | while IFS='|' read -r n t s src; do
+      [ -n "$n" ] && printf '%-22s %-6s %-15s %s\n' "$n" "$t" "$s" "$src"
+    done
+  } | tee "$STATUS_DEPS" | sed 's/^/[zysentinel]   /'
+}
+
+cek_prasyarat() {
+  say "memeriksa prasyarat paket & library (log: $LOG_DEPS)"
+  deps_log "==== cek_prasyarat mulai, aksi=${AKSI:-?} ===="
+  deteksi_os
+  DEPS_RINGKAS=""
+  DEPS_GAGAL_WAJIB=0
+  if [ -z "$OS_FAM" ]; then
+    say "package manager tidak dikenal; hanya pemeriksaan, tanpa pemasangan"
+  fi
+  if aapanel_muat_katalog; then
+    say "katalog App Store aaPanel dimuat: $(printf '%s\n' "$AAPANEL_KATALOG" | grep -c '|') paket gratis dicocokkan lebih dulu"
+  else
+    say "katalog aaPanel tidak tersedia; kebutuhan dipasang dari repo resmi OS"
   fi
 
-  # Biner precompiled guardd di payload menjamin plugin tetap dapat berjalan tanpa gcc
-  if [ -f "$pay/guardd" ] && [ -x "$pay/guardd" ]; then
-    say "biner guardd precompiled siap pakai tersedia"
-  elif ! command -v gcc >/dev/null 2>&1; then
-    say "catatan: compiler gcc belum terpasang, mengandalkan biner precompiled"
+  prasyarat_python
+  prasyarat_os "sqlite3 + libsqlite3" wajib cek_sqlite sqlite sqlite3 libsqlite3-0 -- sqlite sqlite-libs
+  prasyarat_os "ipset"                wajib cek_ipset ipset ipset -- ipset
+  prasyarat_os "iptables"             wajib cek_iptables iptables iptables -- iptables-nft iptables
+  prasyarat_os "curl"                 wajib cek_curl curl curl -- curl
+  prasyarat_guardd
+  prasyarat_os "inotify-tools"        fitur cek_inotify inotify-tools inotify-tools -- inotify-tools -- epel
+  prasyarat_os "clamav"               fitur cek_clamav clamav clamav clamav-daemon clamav-freshclam -- clamav clamd clamav-update -- epel
+  prasyarat_os "rkhunter"             fitur cek_rkhunter rkhunter rkhunter -- rkhunter -- epel
+  if cek_cjson; then
+    catat_dep "lua-cjson" fitur "OK" "cjson.so payload"
+  else
+    prasyarat_os "lua-cjson"          fitur cek_cjson lua-cjson lua-cjson -- lua-cjson -- epel
+  fi
+  prasyarat_webserver
+  prasyarat_maxminddb
+  prasyarat_os "jq"                   opsi cek_jq jq jq -- jq
+  prasyarat_os "zip/unzip"            opsi cek_zip zip zip unzip -- zip unzip
+
+  # Modul kernel set & conntrack; tanpa ini ipset create / -m set gagal.
+  modprobe -q ip_set 2>/dev/null || true
+  modprobe -q xt_set 2>/dev/null || true
+  modprobe -q xt_conntrack 2>/dev/null || true
+
+  # cjson.so juga disediakan untuk Lua global (dipakai WAF bila
+  # package.cpath tidak menunjuk ke folder lua_waf).
+  local cj=""
+  [ -f "$PAY/waf/lua_waf/cjson.so" ] && cj="$PAY/waf/lua_waf/cjson.so"
+  [ -z "$cj" ] && [ -f "$PAY/lua_waf/cjson.so" ] && cj="$PAY/lua_waf/cjson.so"
+  if [ -n "$cj" ]; then
+    mkdir -p /usr/local/lib/lua/5.1 2>/dev/null || true
+    [ -f /usr/local/lib/lua/5.1/cjson.so ] || cp -p "$cj" /usr/local/lib/lua/5.1/cjson.so 2>/dev/null || true
   fi
 
-  say "dependensi sistem & library OK"
+  say "hasil pemeriksaan prasyarat:"
+  cetak_ringkas_deps
+  if [ "$DEPS_GAGAL_WAJIB" -gt 0 ]; then
+    err "$DEPS_GAGAL_WAJIB prasyarat WAJIB gagal dipasang. Lihat $LOG_DEPS"
+    return 1
+  fi
+  say "prasyarat wajib terpenuhi"
   return 0
 }
 
@@ -89,8 +590,7 @@ pasang_daemon() {
   mkdir -p "$ETC" "$BASE/run" "$BASE/data" "$BASE/log" "$BASE/src" "$BIN" \
            "$BASE/av/baseline" "$BASE/av/last" "$BASE/av/quarantine/files" "$BASE/av/quarantine/meta"
   local pay
-  pay="$(dirname "$0")/payload"
-  [ -d "$pay" ] || pay="/www/server/panel/plugin/sentinel/payload"
+  pay="$PAY"
 
   # Salin BERKAS yang dibutuhkan dari payload ke tempat kerjanya.
   if [ -d "$pay" ]; then
@@ -193,7 +693,7 @@ pasang_notif() {
   # token yang setara kata sandi, dan menimpanya saat update plugin
   # akan membuat semua notifikasi diam-diam berhenti terkirim.
   local pay
-  pay="$(dirname "$0")/payload"
+  pay="$PAY"
 
   if [ -f "$pay/sentinel-notify.sh" ] && [ ! -f "$BIN/sentinel-notify.sh" ]; then
     cp -p "$pay/sentinel-notify.sh" "$BIN/sentinel-notify.sh"
@@ -226,8 +726,7 @@ konsolidasi_waf() {
   # Pastikan aset WAF mandiri berada langsung di bawah sentinel/waf/lua_waf
   mkdir -p "$BASE/waf/lua_waf/rule" "$BASE/waf/lua_waf/html" "$BASE/waf/lua_waf/resty" "$BASE/waf/lua_waf/ngx" || return 1
   local pay
-  pay="$(dirname "$0")/payload"
-  [ -d "$pay" ] || pay="/www/server/panel/plugin/sentinel/payload"
+  pay="$PAY"
 
   local src_waf="$pay/waf/lua_waf"
   [ -d "$src_waf" ] || src_waf="$pay/lua_waf"
@@ -293,33 +792,30 @@ pasang_waf() {
 
 pasang_antivirus() {
   # Pasang modul Antivirus (ClamAV & Rkhunter) dan jadwalkan pemindaian berkala.
-  # Idempoten: bila sudah ada, langsung siapkan unit dan folder.
-  # Bila belum ada, pasang otomatis lewat package manager OS.
-  local kurang_clamav=0 kurang_rkhunter=0
-  command -v clamscan >/dev/null 2>&1 || kurang_clamav=1
-  command -v rkhunter >/dev/null 2>&1 || kurang_rkhunter=1
-
-  if [ "$kurang_clamav" -eq 1 ] || [ "$kurang_rkhunter" -eq 1 ]; then
-    say "memeriksa & memasang komponen keamanan sistem (clamav / rkhunter)..."
-    export DEBIAN_FRONTEND=noninteractive
-    if command -v apt-get >/dev/null 2>&1; then
-      apt-get update -qq 2>&1 | tail -1 || true
-      [ "$kurang_clamav" -eq 1 ] && apt-get install -y --no-install-recommends clamav clamav-daemon clamav-freshclam >/dev/null 2>&1 || true
-      [ "$kurang_rkhunter" -eq 1 ] && apt-get install -y --no-install-recommends rkhunter >/dev/null 2>&1 || true
-    elif command -v dnf >/dev/null 2>&1; then
-      [ "$kurang_clamav" -eq 1 ] && dnf install -y clamav clamd clamav-update >/dev/null 2>&1 || true
-      [ "$kurang_rkhunter" -eq 1 ] && dnf install -y rkhunter >/dev/null 2>&1 || true
-    elif command -v yum >/dev/null 2>&1; then
-      [ "$kurang_clamav" -eq 1 ] && yum install -y clamav clamd clamav-update >/dev/null 2>&1 || true
-      [ "$kurang_rkhunter" -eq 1 ] && yum install -y rkhunter >/dev/null 2>&1 || true
-    fi
-  fi
-
+  # Idempoten. Paketnya sendiri sudah dipasang oleh cek_prasyarat
+  # (repo OS, EPEL di RHEL); di sini hanya layanan dan foldernya.
   if command -v clamscan >/dev/null 2>&1; then
     say "antivirus ClamAV siap"
-    if command -v systemctl >/dev/null 2>&1; then
-      systemctl enable --now clamav-daemon 2>/dev/null || systemctl enable --now clamd 2>/dev/null || true
+    if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
+      # Nama unit berbeda per distro: Debian/Ubuntu clamav-*,
+      # RHEL clamd@scan + clamav-freshclam.
       systemctl enable --now clamav-freshclam 2>/dev/null || true
+      if ls /var/lib/clamav/main.c[vl]d >/dev/null 2>&1; then
+        systemctl enable --now clamav-daemon 2>/dev/null || systemctl enable --now clamd@scan 2>/dev/null || true
+      else
+        # Tanpa basis data tanda tangan clamd menolak start. Unduhan
+        # pertama (~200 MB) ditunggu di latar agar instalasi tidak macet.
+        say "basis data ClamAV belum ada; freshclam mengunduh di latar, clamd menyusul otomatis"
+        systemctl enable clamav-daemon 2>/dev/null || systemctl enable clamd@scan 2>/dev/null || true
+        nohup setsid bash -c '
+          for i in $(seq 1 180); do
+            ls /var/lib/clamav/main.c[vl]d >/dev/null 2>&1 && break
+            [ "$i" -eq 3 ] && ! systemctl is-active --quiet clamav-freshclam && freshclam >/dev/null 2>&1
+            sleep 5
+          done
+          systemctl start clamav-daemon 2>/dev/null || systemctl start clamd@scan 2>/dev/null
+        ' >/dev/null 2>&1 &
+      fi
     fi
   else
     say "ClamAV tidak tersedia di sistem ini; fitur Antivirus nonaktif"
@@ -342,7 +838,7 @@ pasang_antivirus() {
   fi
 
   # Salin skrip dari payload
-  local pay; pay="$(dirname "$0")/payload"
+  local pay="$PAY"
   if [ -f "$pay/sentinel-av.sh" ]; then
     cp -p "$pay/sentinel-av.sh" "$BIN/sentinel-av.sh"
     chmod 755 "$BIN/sentinel-av.sh"
@@ -393,8 +889,7 @@ pasang_defender_elit() {
 
 pasang_unit_dari_payload() {
   local pay
-  pay="$(dirname "$0")/payload/systemd"
-  [ -d "$pay" ] || pay="/www/server/panel/plugin/sentinel/payload/systemd"
+  pay="$PAY/systemd"
   [ -d "$pay" ] || { say "payload systemd tidak ada, unit tidak dipasang"; return 0; }
   if [ ! -d /run/systemd/system ] || ! command -v systemctl >/dev/null 2>&1; then
     say "systemd tidak aktif sebagai init, unit dilewati"
@@ -406,20 +901,28 @@ pasang_unit_dari_payload() {
     b="$(basename "$f")"
     cp -f "$f" "/etc/systemd/system/$b"
     chmod 644 "/etc/systemd/system/$b"
-    say "unit $b dipasang dari payload"
+    # Di luar aaPanel pyenv tidak ada; arahkan unit ke python3 sistem
+    # supaya sentinel-proc & upload-scan tidak gagal start diam-diam.
+    if [ ! -x "$PYENV" ] && command -v python3 >/dev/null 2>&1; then
+      sed -i "s|$PYENV|$(command -v python3)|g" "/etc/systemd/system/$b"
+    fi
   done
+  say "unit systemd dipasang dari payload"
   systemctl daemon-reload 2>/dev/null || true
   return 0
 }
 
 pasang_layanan() {
   # Pasang SysV init script untuk kendali standar aaPanel dan CLI
-  local init_src; init_src="$(dirname "$0")/payload/init.d/sentinel"
-  [ -f "$init_src" ] || init_src="/www/server/panel/plugin/sentinel/payload/init.d/sentinel"
+  local init_src="$PAY/init.d/sentinel"
   if [ -f "$init_src" ]; then
-    cp -p "$init_src" /etc/init.d/sentinel
-    chmod 755 /etc/init.d/sentinel
-    say "skrip layanan /etc/init.d/sentinel terpasang"
+    # RHEL 9 / Alma minimal tanpa paket initscripts tidak punya folder ini.
+    mkdir -p /etc/init.d 2>/dev/null || true
+    if cp -p "$init_src" /etc/init.d/sentinel && chmod 755 /etc/init.d/sentinel; then
+      say "skrip layanan /etc/init.d/sentinel terpasang"
+    else
+      err "skrip layanan /etc/init.d/sentinel gagal dipasang"
+    fi
   fi
 
   if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
@@ -429,7 +932,12 @@ pasang_layanan() {
     systemctl start sentinel-fw.service 2>/dev/null || true
     systemctl start sentinel-fw.timer 2>/dev/null || true
     systemctl restart sentinel.service 2>/dev/null || true
-    say "layanan sentinel dijalankan via systemd"
+    sleep 1
+    if systemctl is-active --quiet sentinel.service; then
+      say "layanan sentinel.service aktif"
+    else
+      err "sentinel.service gagal start: journalctl -u sentinel.service -n 30"
+    fi
   else
     say "systemd tidak aktif sebagai init (PID 1), menjalankan guardctl start..."
     "$BIN/guardctl" start 2>/dev/null || true
@@ -532,10 +1040,8 @@ pasang_fresh() {
   else
     [ -x "$BIN/guardctl" ] && "$BIN/guardctl" stop 2>/dev/null || true
   fi
-  # Bersihkan data lama untuk fresh slate
-  cek_depe
+  cek_prasyarat || true
   pasang_daemon
-  pasang_unit_dari_payload
   pasang_layanan
   konsolidasi_waf
   pasang_waf || true
@@ -549,21 +1055,25 @@ pasang_fresh() {
 
 perbaiki_mandiri() {
   say "memulai diagnostik dan perbaikan mandiri (Self-Heal) ZySentinel..."
-  local pay; pay="$(dirname "$0")/payload"
+  local pay="$PAY"
   local dipulihkan=0
 
   # 1. Periksa direktori dasar
   mkdir -p "$BASE" "$BIN" "$ETC" "$BASE/run" "$BASE/data" "$BASE/log" "$BASE/src" "$BASE/av/baseline" "$BASE/av/last" "$BASE/av/quarantine/files" "$BASE/av/quarantine/meta"
 
+  # 1b. Prasyarat paket & library: yang hilang (mis. terhapus oleh
+  #     apt autoremove) dipasang ulang dari aaPanel / repo OS.
+  cek_prasyarat || true
+
   # 2. Periksa skrip biner di BIN
-  for f in guardctl sentinel-fw.sh sentinel-waf.sh sentinel-av.sh sentinel-proc.py sentinel-intel.sh sentinel-notify.sh sentinel-ports.py sentinel-upload-scan.py; do
-    if [ ! -f "$BIN/$f" ] || [ ! -s "$BIN/$f" ]; then
-      if [ -f "$pay/$f" ]; then
-        cp -p "$pay/$f" "$BIN/$f"
-        chmod 750 "$BIN/$f"
-        say "skrip $f dipulihkan dari payload"
-        dipulihkan=$((dipulihkan + 1))
-      fi
+  for f in guardctl sentinel-fw.sh sentinel-waf.sh sentinel-av.sh sentinel-proc.py sentinel-intel.sh sentinel-notify.sh sentinel-ports.py sentinel-upload-scan.py sentinel-sage.py; do
+    # Hilang, kosong, ATAU isinya berbeda dari payload (rusak, termodifikasi,
+    # atau versi lama setelah pembaruan plugin): payload adalah sumber kebenaran.
+    if [ -f "$pay/$f" ] && ! cmp -s "$pay/$f" "$BIN/$f"; then
+      cp -p "$pay/$f" "$BIN/$f"
+      chmod 750 "$BIN/$f"
+      say "skrip $f dipulihkan dari payload"
+      dipulihkan=$((dipulihkan + 1))
     fi
   done
 
@@ -572,14 +1082,22 @@ perbaiki_mandiri() {
     if [ -f "$pay/guardd" ]; then
       cp -p --remove-destination "$pay/guardd" "$BIN/guardd"
       chmod 750 "$BIN/guardd"
-      say "biner guardd dipulihkan dari payload"
-      dipulihkan=$((dipulihkan + 1))
-    elif [ -f "$BASE/src/guardd.c" ] && command -v gcc >/dev/null 2>&1; then
-      gcc -O2 -Wall -Wextra -o "$BIN/guardd.tmp" "$BASE/src/guardd.c" -lsqlite3 -lm 2>/dev/null && mv -f "$BIN/guardd.tmp" "$BIN/guardd" || true
-      chmod 750 "$BIN/guardd"
-      say "biner guardd dikompilasi ulang dari sumber C"
-      dipulihkan=$((dipulihkan + 1))
     fi
+    # Biner payload bisa tidak cocok dengan glibc sistem: susun ulang.
+    if ! "$BIN/guardd" -V >/dev/null 2>&1; then
+      [ -f "$BASE/src/guardd.c" ] || cp -p "$pay/guardd.c" "$BASE/src/guardd.c" 2>/dev/null
+      if [ -f "$BASE/src/guardd.c" ] && command -v gcc >/dev/null 2>&1 \
+         && gcc -O2 -Wall -Wextra -o "$BIN/guardd.tmp" "$BASE/src/guardd.c" -lsqlite3 -lm >>"$LOG_DEPS" 2>&1; then
+        mv -f "$BIN/guardd.tmp" "$BIN/guardd"
+        chmod 750 "$BIN/guardd"
+        say "biner guardd dikompilasi ulang dari sumber C"
+      else
+        err "guardd tidak bisa dipulihkan (biner tidak cocok, gcc/sumber tidak ada)"
+      fi
+    else
+      say "biner guardd dipulihkan dari payload"
+    fi
+    dipulihkan=$((dipulihkan + 1))
   fi
 
   # 4. Periksa berkas konfigurasi default
@@ -630,7 +1148,16 @@ perbaiki_mandiri() {
 
   # 8. Periksa hook WAF & validasi Nginx (Zero Downtime)
   if [ -x "$BIN/sentinel-waf.sh" ]; then
-    bash "$BIN/sentinel-waf.sh" freewaf-status >/dev/null 2>&1 || true
+    local waf_st
+    waf_st="$(bash "$BIN/sentinel-waf.sh" freewaf-status 2>/dev/null)"
+    # nginx + lua baru tersedia (mis. selesai dipasang dari antrean
+    # aaPanel) tetapi engine belum terkait: pasang sekarang.
+    if printf '%s' "$waf_st" | grep -q '^lua=ada' && ! printf '%s' "$waf_st" | grep -q '^loaded=ya'; then
+      say "nginx + lua tersedia tetapi WAF belum aktif, memasang engine Lua WAF"
+      konsolidasi_waf || true
+      pasang_waf || true
+      dipulihkan=$((dipulihkan + 1))
+    fi
   fi
   if [ -x /www/server/nginx/sbin/nginx ]; then
     if /www/server/nginx/sbin/nginx -t >/dev/null 2>&1; then
@@ -638,16 +1165,53 @@ perbaiki_mandiri() {
     fi
   fi
 
-  # 9. Terapkan pengerasan benteng
+  # 9. Layanan modul pendukung (ClamAV, EDR, upload scan, intel)
+  pasang_antivirus >/dev/null 2>&1 || true
+  pasang_defender_elit >/dev/null 2>&1 || true
+
+  # 10. Terapkan pengerasan benteng
   kunci_keamanan_benteng
 
   say "diagnostik self-heal selesai. Total anomali dipulihkan: $dipulihkan"
+  verifikasi_akhir
+}
+
+verifikasi_akhir() {
+  # Bukti nyata, bukan klaim: status setiap layanan setelah pemasangan.
+  # Kode keluar: 0 semua inti aktif, 2 ada prasyarat/layanan inti gagal.
+  local gagal=0 s st
+  say "verifikasi akhir layanan:"
+  if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
+    for s in sentinel.service sentinel-fw.timer sentinel-proc.service sentinel-upload-scan.service \
+             sentinel-intel.timer sentinel-av.timer sentinel-notify.timer; do
+      [ -f "/etc/systemd/system/$s" ] || continue
+      st="$(systemctl is-active "$s" 2>/dev/null)"
+      say "  $(printf '%-30s' "$s") ${st:-tidak-diketahui}"
+      [ "$s" = "sentinel.service" ] && [ "$st" != "active" ] && gagal=1
+    done
+  else
+    if [ -S "$BASE/run/guardd.sock" ] || pgrep -f "$BIN/guardd" >/dev/null 2>&1; then
+      say "  guardd                         active"
+    else
+      say "  guardd                         tidak aktif"; gagal=1
+    fi
+  fi
+  if command -v iptables >/dev/null 2>&1 && iptables -S 2>/dev/null | grep -q -- '-N SENTINEL'; then
+    say "  $(printf '%-30s' 'rantai iptables SENTINEL') ada"
+  else
+    say "  $(printf '%-30s' 'rantai iptables SENTINEL') TIDAK ADA"
+  fi
+  if [ "$gagal" -ne 0 ] || [ "$DEPS_GAGAL_WAJIB" -gt 0 ]; then
+    err "instalasi BELUM utuh. Prasyarat: $STATUS_DEPS, log: $LOG_DEPS"
+    return 2
+  fi
+  say "semua komponen inti aktif"
   return 0
 }
 
 kunci_keamanan_benteng() {
   say "menerapkan pengerasan keamanan berkas & hak akses benteng ZySentinel"
-  local plug_dir; plug_dir="$(cd "$(dirname "$0")" && pwd)"
+  local plug_dir="$PLUG_DIR"
 
   # Amankan aturan direktif agen AI & integritas kode
   for r in AGENTS.md CLAUDE.md .cursorrules .windsurfrules; do
@@ -721,7 +1285,7 @@ kunci_keamanan_benteng() {
 pasang_icon() {
   local plug_dir="/www/server/panel/plugin/sentinel"
   local icon_src="$plug_dir/icon.png"
-  [ -f "$icon_src" ] || icon_src="$(dirname "$0")/icon.png"
+  [ -f "$icon_src" ] || icon_src="$PLUG_DIR/icon.png"
   if [ -f "$icon_src" ]; then
     mkdir -p /www/server/panel/BTPanel/static/img/soft_ico /www/server/panel/BTPanel/static/vite/images/soft-ico
     cp -p "$icon_src" /www/server/panel/BTPanel/static/img/soft_ico/ico-sentinel.png 2>/dev/null || true
@@ -734,44 +1298,50 @@ butuh_root
 AKSI="${1:-install}"
 ARG2="${2:-}"
 case "$AKSI" in
+  install|pasang|fresh|fresh-install|update|upgrade|repair|self-heal|perbaiki)
+    cari_payload
+    ;;
+esac
+
+pasang_lengkap() {
+  pulihkan_izin_staging
+  cek_prasyarat || true
+  pasang_daemon || err "pemasangan daemon gagal"
+  pasang_layanan
+  konsolidasi_waf
+  pasang_waf || true
+  pasang_firewall || true
+  pasang_notif || true
+  pasang_antivirus || true
+  pasang_defender_elit || true
+  kunci_keamanan_benteng || true
+  pasang_icon || true
+}
+
+case "$AKSI" in
   install|pasang)
-    pulihkan_izin_staging
-    cek_depe
-    pasang_daemon
-    pasang_unit_dari_payload
-    pasang_layanan
-    konsolidasi_waf
-    pasang_waf || true
-    pasang_firewall || true
-    pasang_notif || true
-    pasang_antivirus || true
-    pasang_defender_elit || true
-    kunci_keamanan_benteng || true
-    pasang_icon || true
+    pasang_lengkap
+    verifikasi_akhir; rc=$?
     say "selesai. Status: systemctl status sentinel.service"
+    exit $rc
     ;;
   fresh|fresh-install)
     pulihkan_izin_staging
     pasang_fresh && pasang_icon
+    verifikasi_akhir; exit $?
     ;;
   update|upgrade)
-    pulihkan_izin_staging
-    cek_depe
-    pasang_daemon
-    pasang_unit_dari_payload
-    pasang_layanan
-    konsolidasi_waf
-    pasang_waf || true
-    pasang_firewall || true
-    pasang_notif || true
-    pasang_antivirus || true
-    pasang_defender_elit || true
-    kunci_keamanan_benteng || true
-    pasang_icon || true
-    say "pembaruan selesai. Versi terbaru aktif."
+    pasang_lengkap
+    verifikasi_akhir; rc=$?
+    say "pembaruan selesai. Versi $(versi_plugin) aktif."
+    exit $rc
     ;;
   repair|self-heal|perbaiki)
-    perbaiki_mandiri
+    perbaiki_mandiri; exit $?
+    ;;
+  deps|prasyarat)
+    cari_payload
+    cek_prasyarat; exit $?
     ;;
   uninstall|cabut)
     uninstall_clean "$ARG2"
@@ -780,6 +1350,6 @@ case "$AKSI" in
     kunci_keamanan_benteng
     ;;
   *)
-    echo "Usage: $0 {install|fresh|update|repair|uninstall|lock}"; exit 1
+    echo "Usage: $0 {install|fresh|update|repair|deps|uninstall|lock}"; exit 1
     ;;
 esac

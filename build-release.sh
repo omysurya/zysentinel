@@ -8,7 +8,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VERSION="${1:-$(grep -o '"versions": "[^"]*"' "$SCRIPT_DIR/info.json" | cut -d'"' -f4 || echo "1.6.1")}"
+VERSION="${1:-$(grep -o '"versions": "[^"]*"' "$SCRIPT_DIR/info.json" | cut -d'"' -f4 || echo "1.6.2")}"
 OUT_DIR="${2:-/www/backup}"
 STAGE_DIR="/tmp/sentinel_build_staging"
 
@@ -21,6 +21,14 @@ if [ -f "/www/server/sentinel/bin/guardd" ] && [ ! -f "$SCRIPT_DIR/payload/guard
     echo "[*] Menyinkronkan biner guardd ke payload/..."
     cp -p "/www/server/sentinel/bin/guardd" "$SCRIPT_DIR/payload/guardd"
     chmod 755 "$SCRIPT_DIR/payload/guardd"
+fi
+
+# 1b. Penjaga: update_zip aaPanel memilih folder TERAKHIR (urutan os.walk)
+#     yang berisi info.json + install.sh. Bila payload/ juga punya keduanya,
+#     panel memasang payload/ sebagai plugin dan installer kehilangan payload.
+if [ -f "$SCRIPT_DIR/payload/info.json" ]; then
+    echo "[!] payload/info.json tidak boleh ada (aaPanel akan salah memilih folder plugin)" >&2
+    exit 1
 fi
 
 # 2. Siapkan direktori staging

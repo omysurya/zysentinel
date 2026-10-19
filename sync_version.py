@@ -13,14 +13,14 @@ REPO = "omysurya/zysentinel"
 URL = f"https://api.github.com/repos/{REPO}/releases/latest"
 
 def sync_version():
-    tag = "v1.6.1"
-    ver = "1.6.1"
-    name = "ZySentinel v1.6.1"
+    tag = "v1.6.2"
+    ver = "1.6.2"
+    name = "ZySentinel v1.6.2"
     published_at = ""
     html_url = f"https://github.com/{REPO}/releases/latest"
-    zip_name = "zysentinel-v1.6.1.zip"
-    zip_url = f"https://github.com/{REPO}/releases/download/v1.6.1/{zip_name}"
-    tarball_url = f"https://api.github.com/repos/{REPO}/tarball/v1.6.1"
+    zip_name = "zysentinel-v1.6.2.zip"
+    zip_url = f"https://github.com/{REPO}/releases/download/v1.6.2/{zip_name}"
+    tarball_url = f"https://api.github.com/repos/{REPO}/tarball/v1.6.2"
 
     headers = {
         "User-Agent": "ZySentinel-Web-Sync/1.0",
@@ -58,7 +58,7 @@ def sync_version():
             try:
                 with open(info_path, "r", encoding="utf-8") as f:
                     local_info = json.load(f)
-                    ver = local_info.get("versions", "1.6.1")
+                    ver = local_info.get("versions", "1.6.2")
                     tag = f"v{ver}" if not ver.startswith("v") else ver
                     name = f"ZySentinel {tag}"
                     zip_name = f"zysentinel-{tag}.zip"

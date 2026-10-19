@@ -4690,22 +4690,85 @@ class sentinel_main(object):
                 return public.returnMsg(False, 'Uninstall gagal: %s' % (e or o))
             return public.returnMsg(True, 'ZySentinel berhasil di-uninstall bersih tanpa sisa.')
 
-        elif action == 'fresh':
-            rc, o, e = self._sh("bash %s fresh" % install_script, 90)
-            self._send_telemetry('install_fresh', {'status': 'success' if rc == 0 else 'failed'})
-            if rc != 0:
-                return public.returnMsg(False, 'Fresh install gagal: %s' % (e or o))
-            return public.returnMsg(True, 'Fresh install berhasil diselesaikan dengan konfigurasi bawaan bersih.')
-
-        elif action == 'repair':
-            rc, o, e = self._sh("bash %s repair" % install_script, 60)
-            self._send_telemetry('install_repair', {'status': 'success' if rc == 0 else 'failed'})
-            if rc != 0:
-                return public.returnMsg(False, 'Self-heal / perbaikan mandiri gagal: %s' % (e or o))
-            return public.returnMsg(True, 'Perbaikan mandiri (Self-Heal) selesai: seluruh komponen normal.')
+        elif action in ['fresh', 'repair']:
+            # Pemasangan prasyarat (apt/dnf, ClamAV, kompilasi guardd) bisa
+            # memakan beberapa menit, melewati batas AJAX panel 60 detik.
+            # Jalankan di latar dan biarkan UI memantau lewat
+            # get_lifecycle_status.
+            return self._mulai_lifecycle(action, install_script)
 
         elif action == 'update':
             return self.perform_github_update(get)
+
+    LIFECYCLE_DIR = '/www/server/panel/logs/zysentinel'
+
+    def _lifecycle_berjalan(self):
+        pid_f = os.path.join(self.LIFECYCLE_DIR, 'lifecycle.pid')
+        try:
+            with open(pid_f) as f:
+                pid = int(f.read().strip())
+            with open('/proc/%d/stat' % pid) as f:
+                if f.read().rsplit(')', 1)[1].split()[0] == 'Z':
+                    return 0
+            with open('/proc/%d/cmdline' % pid, 'rb') as f:
+                if b'install.sh' not in f.read():
+                    return 0
+            return pid
+        except Exception:
+            return 0
+
+    def _mulai_lifecycle(self, action, install_script):
+        if self._lifecycle_berjalan():
+            return public.returnMsg(False, 'Proses siklus hidup lain masih berjalan, tunggu hingga selesai.')
+        os.makedirs(self.LIFECYCLE_DIR, exist_ok=True)
+        log_f = os.path.join(self.LIFECYCLE_DIR, 'lifecycle.log')
+        rc_f = os.path.join(self.LIFECYCLE_DIR, 'lifecycle.rc')
+        act_f = os.path.join(self.LIFECYCLE_DIR, 'lifecycle.action')
+        for f in (rc_f, os.path.join(self.LIFECYCLE_DIR, 'lifecycle.sent')):
+            if os.path.exists(f):
+                os.remove(f)
+        with open(act_f, 'w') as f:
+            f.write(action)
+        pid_f = os.path.join(self.LIFECYCLE_DIR, 'lifecycle.pid')
+        # setsid -f: proses dilepas ke init, jadi tidak menjadi zombie di
+        # bawah worker panel dan tidak ikut mati bila panel direstart.
+        # PID ditulis oleh proses itu sendiri ($$), bukan oleh Popen.
+        cmd = "echo $$ > %s; bash %s %s > %s 2>&1; echo $? > %s" % (
+            pid_f, install_script, action, log_f, rc_f)
+        subprocess.Popen(['setsid', '-f', 'bash', '-c', cmd], stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True).wait()
+        for _ in range(20):
+            if self._lifecycle_berjalan() or os.path.exists(rc_f):
+                break
+            time.sleep(0.1)
+        return public.returnMsg(True, {'started': True, 'action': action})
+
+    def get_lifecycle_status(self, get):
+        """Status proses fresh/repair/update yang berjalan di latar."""
+        log_f = os.path.join(self.LIFECYCLE_DIR, 'lifecycle.log')
+        rc_f = os.path.join(self.LIFECYCLE_DIR, 'lifecycle.rc')
+        act_f = os.path.join(self.LIFECYCLE_DIR, 'lifecycle.action')
+        running = bool(self._lifecycle_berjalan())
+        rc = None
+        if not running and os.path.exists(rc_f):
+            try:
+                with open(rc_f) as f:
+                    rc = int(f.read().strip() or 1)
+            except Exception:
+                rc = 1
+        action = ''
+        if os.path.exists(act_f):
+            with open(act_f) as f:
+                action = f.read().strip()
+        tail = ''
+        if os.path.exists(log_f):
+            with open(log_f, 'r', encoding='utf-8', errors='replace') as f:
+                tail = ''.join(f.readlines()[-40:])
+        sent_f = os.path.join(self.LIFECYCLE_DIR, 'lifecycle.sent')
+        if rc is not None and not running and not os.path.exists(sent_f):
+            open(sent_f, 'w').close()
+            self._send_telemetry('install_' + (action or 'unknown'), {'status': 'success' if rc == 0 else 'failed'})
+        return public.returnMsg(True, {'running': running, 'rc': rc, 'action': action, 'log': tail})
 
     def check_github_update(self, get):
         """Periksa versi rilis terbaru di repository GitHub omysurya/zysentinel.
@@ -4776,7 +4839,7 @@ class sentinel_main(object):
             except Exception:
                 pass
 
-        # 3. Cek GitHub Branches (sinkronisasi dengan branch rilis seperti v1.6.1)
+        # 3. Cek GitHub Branches (sinkronisasi dengan branch rilis seperti v1.6.2)
         if not found_target:
             try:
                 req = urllib.request.Request(url_branches, headers=headers)
@@ -4849,13 +4912,10 @@ class sentinel_main(object):
             plug_dir = os.path.dirname(__file__)
             self._sh("cp -af %s/* %s/" % (src_plugin, plug_dir), 15)
 
-            rc, o, e = self._sh("bash %s/install.sh update" % plug_dir, 60)
             self._sh("rm -rf %s %s" % (staging_zip, staging_dir), 5)
-
-            self._send_telemetry('install_update', {'status': 'success' if rc == 0 else 'failed', 'new_version': latest_ver})
-            if rc != 0:
-                return public.returnMsg(False, 'Pembaruan gagal dijalankan: %s' % (e or o))
-            return public.returnMsg(True, 'Pembaruan ke versi %s berhasil diterapkan!' % latest_ver)
+            # install.sh update memeriksa & memasang prasyarat; jalankan di
+            # latar seperti fresh/repair agar tidak terputus timeout AJAX.
+            return self._mulai_lifecycle('update', os.path.join(plug_dir, 'install.sh'))
         except Exception as ex:
             self._send_telemetry('error_event', {'error': str(ex)[:50], 'context': 'update'})
             return public.returnMsg(False, 'Gagal mengunduh dan menerapkan update: %s' % str(ex))

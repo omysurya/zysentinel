@@ -362,7 +362,7 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 			<h2>
 				<div class="sn-brand">
 					<div class="sn-brand-icon" data-i18n-title="tip_brand_logo" title="ZySentinel CyberMatrix Defense Logo">
-						<img src="/static/img/soft_ico/ico-sentinel.png?v=1.6.1" alt="ZySentinel" width="34" height="34" onerror="this.style.display='none';this.nextElementSibling.style.display='block';">
+						<img src="/static/img/soft_ico/ico-sentinel.png?v=1.6.2" alt="ZySentinel" width="34" height="34" onerror="this.style.display='none';this.nextElementSibling.style.display='block';">
 						<svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none">
 							<path d="M12 2L3 7v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-9-5z"/>
 							<path d="M12 8v8"/>
@@ -371,12 +371,12 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 					</div>
 					<div class="sn-brand-text">
 						<div class="sn-brand-title">ZYSENS<span class="sn-accent">_</span></div>
-						<div class="sn-brand-sub">ZYSENTINEL v1.6.1</div>
+						<div class="sn-brand-sub">ZYSENTINEL v1.6.2</div>
 					</div>
 				</div>
 			</h2>
 			<span style="flex:1"></span>
-			<span id="snVerBadge" class="sn-badge" style="background:rgba(0,240,255,0.08);color:var(--accent-cyan);border:1px solid var(--border-cyan);cursor:pointer" onclick="snBukaMaintenance('update')" data-i18n-title="tip_ver_info" title="Version Information & Updates">v1.6.1</span>
+			<span id="snVerBadge" class="sn-badge" style="background:rgba(0,240,255,0.08);color:var(--accent-cyan);border:1px solid var(--border-cyan);cursor:pointer" onclick="snBukaMaintenance('update')" data-i18n-title="tip_ver_info" title="Version Information & Updates">v1.6.2</span>
 			<button id="btnHeaderMaint" class="sn-btn sn-sm" onclick="snBukaMaintenance()" style="background:rgba(16,185,129,0.1);color:var(--accent-green);border:1px solid var(--border-accent);font-weight:600" data-i18n="btn_maintenance" data-i18n-title="tip_maintenance" title="Open Maintenance, Updates & Diagnostics">⚙️ Maintenance</button>
 			<span class="sn-mclose" onclick="snTutup()" data-i18n-title="tip_close" title="Close ZySentinel Dashboard">✕</span>
 		</div>
@@ -1530,7 +1530,7 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 									Memeriksa rilis terbaru dari repository resmi GitHub (<span class="sn-mono">omysurya/zysentinel</span>). Melakukan patch versi dan pembaruan biner tanpa menghapus data atau konfigurasi Anda.
 								</p>
 								<div style="display:flex;align-items:center;justify-content:space-between;margin-top:auto">
-									<span id="snUpdStatusTxt" style="font-size:11.5px;color:var(--ink-3)">Versi: v1.6.1</span>
+									<span id="snUpdStatusTxt" style="font-size:11.5px;color:var(--ink-3)">Versi: v1.6.2</span>
 									<button class="sn-btn pri" onclick="snCheckUpdate()" data-i18n="btn_check_update" data-i18n-title="tip_check_update" title="Periksa dan Pasang Pembaruan dari Repository GitHub Resmi">Cek & Update</button>
 								</div>
 							</div>
@@ -1869,7 +1869,7 @@ var SN_I18N = {
 		tip_refresh_packet_counters: "Refresh Packet Counters",
 		tip_mode_monitor_only: "Switch Mode to Monitor: Log Without Blocking",
 		tip_mode_enable_blocking: "Switch Mode to Enforce: Block Violators in Kernel",
-		brand_sub: "ZYSENTINEL v1.6.1",
+		brand_sub: "ZYSENTINEL v1.6.2",
 		btn_maintenance: "⚙️ Maintenance",
 		btn_feedback: "💬 Feedback",
 		tab_dashboard: "Dashboard",
@@ -2471,7 +2471,7 @@ var SN_I18N = {
 		tip_refresh_packet_counters: "Segarkan Penghitung Paket",
 		tip_mode_monitor_only: "Alihkan Mode ke Monitor: Mencatat Tanpa Memblokir",
 		tip_mode_enable_blocking: "Alihkan Mode ke Enforce: Blokir Pelanggar di Kernel",
-		brand_sub: "ZYSENTINEL v1.6.1",
+		brand_sub: "ZYSENTINEL v1.6.2",
 		btn_maintenance: "⚙️ Pemeliharaan",
 		btn_feedback: "💬 Feedback",
 		tab_dashboard: "Dashboard",
@@ -2998,7 +2998,9 @@ function snUpdateBadgesAndNotes(m){
 
 	var lWaf = $('#bWaf');
 	var wEng = m.waf_engine || 'off';
-	if(wEng === 'modsecurity'){
+	if(wEng === 'lua_waf' || wEng === 'free_waf'){
+		lWaf.text('🌐 WAF: Lua').attr('class', 'sn-badge sn-ok').attr('title', isEn ? 'Nginx WAF: Embedded Lua WAF active & filtering HTTP traffic' : 'WAF Nginx: Lua WAF mandiri aktif menyaring lalu lintas HTTP');
+	} else if(wEng === 'modsecurity'){
 		lWaf.text('🌐 WAF: ModSec').attr('class', 'sn-badge sn-ok').attr('title', isEn ? 'Nginx WAF: ModSecurity inspecting HTTP traffic' : 'WAF Nginx: ModSecurity aktif memeriksa request HTTP');
 	} else if(wEng === 'coraza'){
 		lWaf.text('🌐 WAF: Coraza').attr('class', 'sn-badge sn-ok').attr('title', isEn ? 'Nginx WAF: Coraza inspecting HTTP traffic' : 'WAF Nginx: Coraza WAF aktif memeriksa request HTTP');
@@ -3136,7 +3138,7 @@ function snInjectGtm(){
 		}
 		try {
 			window.gtag('event', 'sentinel_active', {
-				'app_version': '1.6.1',
+				'app_version': '1.6.2',
 				'server_host': window.location.hostname || 'unknown-ip'
 			});
 		} catch(e){}
@@ -3154,11 +3156,11 @@ function snEsc(s){
 		.replace(/'/g, '&#39;');
 }
 
-/* Format versi ZySentinel agar konsisten dengan standar branch/tag 'v1.6.1' */
+/* Format versi ZySentinel agar konsisten dengan standar branch/tag 'v1.6.2' */
 function snFmtVer(v){
-	if(!v || v === '-' || v === 'undefined') return 'v1.6.1';
+	if(!v || v === '-' || v === 'undefined') return 'v1.6.2';
 	var s = String(v).trim();
-	if(s === '1.0.0' || s === '1.6' || s === '1.6.0' || s === '1.6.1') return 'v1.6.1';
+	if(s === '1.0.0' || s === '1.6' || s === '1.6.0') return 'v1.6.2';
 	return (s.charAt(0).toLowerCase() === 'v') ? s : ('v' + s);
 }
 
@@ -5829,7 +5831,10 @@ function snWafLencana(){
 		var isEn = (SN_LANG !== 'id');
 		var l = $('#bWaf');
 		var e = (m.engine && m.engine.nginx) || '?';
-		if(e === 'modsecurity'){
+		if(e === 'lua_waf' || e === 'free_waf'){
+			l.text('🌐 WAF: Lua'); l.attr('class', 'sn-badge sn-ok');
+			l.attr('title', isEn ? 'Nginx WAF: Embedded Lua WAF actively inspecting HTTP requests' : 'WAF Nginx: Lua WAF mandiri aktif memeriksa request HTTP');
+		} else if(e === 'modsecurity'){
 			l.text('🌐 WAF: ModSec'); l.attr('class', 'sn-badge sn-ok');
 			l.attr('title', isEn ? 'Nginx WAF: ModSecurity actively inspecting HTTP requests' : 'WAF Nginx: ModSecurity aktif memeriksa request HTTP');
 		} else if(e === 'coraza'){
@@ -7864,17 +7869,49 @@ function snDoFreshInstall(){
 			layer.close(idx);
 			var loadIdx = layer.msg(isEn ? 'Running ZySentinel Fresh Install, please wait...' : 'Menjalankan Fresh Install ZySentinel, mohon tunggu...', {time:0, shade:[0.4,'#000']});
 			if(typeof gtag === 'function'){
-				gtag('event', 'install_fresh', {'event_category': 'lifecycle', 'app_version': '1.6.1'});
+				gtag('event', 'install_fresh', {'event_category': 'lifecycle', 'app_version': '1.6.2'});
 			}
 			snAjax('run_lifecycle_action', {action: 'fresh'}, function(res){
 				layer.close(loadIdx);
 				if(res){
-					layer.alert(res, {title: isEn ? 'Fresh Install Completed' : 'Fresh Install Berhasil', icon: 1});
-					snMuatSemua();
+					snLifecyclePantau(isEn ? 'Fresh Install in progress' : 'Fresh Install berjalan',
+						isEn ? 'Fresh Install Completed' : 'Fresh Install Berhasil',
+						isEn ? 'Fresh Install Incomplete' : 'Fresh Install Belum Utuh');
 				}
 			});
 		}
 	});
+}
+
+function snLifecyclePantau(judulJalan, judulOk, judulGagal){
+	// Fresh/Repair/Update berjalan di latar (prasyarat paket bisa makan
+	// beberapa menit); pantau status dan tampilkan ekor log installer.
+	var isEn = (SN_LANG !== 'id');
+	var html = '<div style="padding:14px 18px"><div id="snLcStat" style="margin-bottom:8px;font-size:13px">'
+		+ (isEn ? 'Running, checking dependencies and services...' : 'Berjalan, memeriksa prasyarat dan layanan...')
+		+ '</div><pre id="snLcLog" class="sn-mono" style="height:300px;overflow:auto;background:#020611;color:#38bdf8;padding:10px;border-radius:6px;font-size:11.5px;white-space:pre-wrap;margin:0"></pre></div>';
+	var idx = layer.open({type:1, title: judulJalan, area:['680px','auto'], content: html, closeBtn: 0});
+	var t0 = Date.now();
+	var tick = function(){
+		snAjax('get_lifecycle_status', {}, function(st){
+			if(!st){ setTimeout(tick, 5000); return; }
+			var $log = $('#snLcLog');
+			$log.text(st.log || '');
+			if($log.length){ $log.scrollTop($log[0].scrollHeight); }
+			var dtk = Math.round((Date.now() - t0) / 1000);
+			if(st.running || st.rc === null){
+				$('#snLcStat').text((isEn ? 'Running... ' : 'Berjalan... ') + dtk + (isEn ? 's elapsed' : ' detik'));
+				setTimeout(tick, 3000);
+				return;
+			}
+			layer.close(idx);
+			var ok = (st.rc === 0);
+			var isi = '<pre class="sn-mono" style="max-height:360px;overflow:auto;white-space:pre-wrap;font-size:11.5px;margin:0">' + $('<div>').text(st.log || '').html() + '</pre>';
+			layer.open({type:1, title: ok ? judulOk : judulGagal, area:['680px','auto'], content: '<div style="padding:14px 18px">' + isi + '</div>', btn: ['OK']});
+			snMuatSemua();
+		}, null, null, true);
+	};
+	setTimeout(tick, 2000);
 }
 
 function snCheckUpdate(){
@@ -7883,7 +7920,7 @@ function snCheckUpdate(){
 	snAjax('check_github_update', {}, function(data){
 		layer.close(loadIdx);
 		if(!data) return;
-		var vCur = snFmtVer(data.current_version || 'v1.6.1');
+		var vCur = snFmtVer(data.current_version || 'v1.6.2');
 		var vLat = snFmtVer(data.latest_version || vCur);
 		var hasUpd = data.has_update;
 		var notes = data.release_notes || (isEn ? 'No release notes.' : 'Tidak ada catatan rilis.');
@@ -7921,13 +7958,14 @@ function snDoUpdate(){
 	var isEn = (SN_LANG !== 'id');
 	var loadIdx = layer.msg(isEn ? 'Downloading and applying ZySentinel update...' : 'Mengunduh dan menerapkan pembaruan ZySentinel...', {time:0, shade:[0.4,'#000']});
 	if(typeof gtag === 'function'){
-		gtag('event', 'install_update', {'event_category': 'lifecycle', 'app_version': '1.6.1'});
+		gtag('event', 'install_update', {'event_category': 'lifecycle', 'app_version': '1.6.2'});
 	}
 	snAjax('run_lifecycle_action', {action: 'update'}, function(res){
 		layer.close(loadIdx);
 		if(res){
-			layer.alert(res, {title: isEn ? 'Update Successful' : 'Pembaruan Sukses', icon: 1});
-			snMuatSemua();
+			snLifecyclePantau(isEn ? 'Update in progress' : 'Pembaruan berjalan',
+				isEn ? 'Update Successful' : 'Pembaruan Sukses',
+				isEn ? 'Update Incomplete' : 'Pembaruan Belum Utuh');
 		}
 	});
 }
@@ -7940,12 +7978,13 @@ function snDoSelfHeal(){
 			layer.close(idx);
 			var pIdx = snProgress(isEn ? 'Running diagnostics and self-heal...' : 'Menjalankan diagnostik dan perbaikan mandiri...');
 			if(typeof gtag === 'function'){
-				gtag('event', 'install_repair', {'event_category': 'lifecycle', 'app_version': '1.6.1'});
+				gtag('event', 'install_repair', {'event_category': 'lifecycle', 'app_version': '1.6.2'});
 			}
 			snAjax('run_lifecycle_action', {action: 'repair'}, function(res){
 				if(res){
-					layer.alert(res, {title: isEn ? 'Self-Heal Completed' : 'Self-Heal Selesai', icon: 1});
-					snMuatSemua();
+					snLifecyclePantau(isEn ? 'Self-Heal in progress' : 'Self-Heal berjalan',
+						isEn ? 'Self-Heal Completed' : 'Self-Heal Selesai',
+						isEn ? 'Self-Heal Incomplete' : 'Self-Heal Belum Utuh');
 				}
 			}, pIdx);
 		}
@@ -7978,7 +8017,7 @@ function snDoUninstall(){
 			layer.close(idx);
 			var pIdx = snProgress(isEn ? 'Uninstalling ZySentinel and cleaning files completely...' : 'Mencabut dan meng-uninstall ZySentinel secara total...');
 			if(typeof gtag === 'function'){
-				gtag('event', 'uninstall_clean', {'event_category': 'lifecycle', 'app_version': '1.6.1'});
+				gtag('event', 'uninstall_clean', {'event_category': 'lifecycle', 'app_version': '1.6.2'});
 			}
 			snAjax('run_lifecycle_action', {action: 'uninstall', confirm: txt}, function(res){
 				if(res){

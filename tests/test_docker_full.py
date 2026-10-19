@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Suite Pengujian Unit Komprehensif ZySentinel v1.6.1 untuk Docker Container (Debian & AlmaLinux).
+Suite Pengujian Unit Komprehensif ZySentinel v1.6.2 untuk Docker Container (Debian & AlmaLinux).
 Menguji secara jujur tanpa halu seluruh:
 - Fitur Keamanan (IP ban, allowlist, EDR whitelist, port firewall, WAF, GeoIP, GeoBan, SAGE AI)
 - Kontrol Layanan (guardctl start/stop/restart/reload/ping/brief/status, install.sh options)
