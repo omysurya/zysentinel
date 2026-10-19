@@ -41,8 +41,37 @@ BLOCKED_SHELLS = frozenset([
 BLOCKED_TOOLS = frozenset([
     "nc", "netcat", "ncat", "socat", "telnet", "rsh",
     "nmap", "masscan", "sqlmap", "nikto", "gobuster", "hydra",
-    "gdb", "strace", "ltrace"
+    "gdb", "strace", "ltrace",
+    # Perkakas manipulasi/tamper sistem yang dilarang keras untuk pekerja web
+    "systemctl", "service", "iptables", "ip6tables", "nft", "ipset",
+    "chattr", "chmod", "chown", "pkill", "killall", "crontab", "pkexec", "sudo"
 ])
+
+# Kategori biner penambang kripto (Crypto Miners / Botnet Miners)
+BLOCKED_MINERS = frozenset([
+    "xmrig", "minerd", "cpuminer", "xmr-stak", "nanominer", "ccminer",
+    "ethminer", "nbminer", "t-rex", "gminer", "phoenixminer", "srbminer",
+    "bminer", "hellminer", "wildrig", "lolminer", "claymore", "teamredminer"
+])
+
+# Perkakas & perilaku ransomware (enkripsi paksa massal)
+BLOCKED_RANSOM_TOOLS = frozenset([
+    "vssadmin", "wbadmin", "bcdedit", "cipher"
+])
+
+# Argumen & protokol pertambangan kripto (Stratum, pool monero, dll)
+CRYPTO_MINING_PATTERNS = (
+    "stratum+tcp://", "stratum+ssl://", "stratum2+tcp://", "stratum+udp://",
+    "stratum+tls://", "--donate-level", "--algo=rx/0", "--algo=cryptonight",
+    "moneroocean", "supportxmr", "minexmr", "c3pool", "pool.hashvault",
+    "nanopool.org", "nicehash.com", "f2pool.com", "antpool.com", "cryptonight"
+)
+
+# Pola perintah ransomware (enkripsi paksa massal)
+RANSOMWARE_CMD_PATTERNS = (
+    "openssl enc -aes", "gpg --batch --passphrase",
+    "7z a -p", "rar a -hp", "zip -e -P"
+)
 
 SUSPICIOUS_DIRS = (
     "/tmp/",
@@ -51,7 +80,7 @@ SUSPICIOUS_DIRS = (
     "/run/lock/"
 )
 
-# Binary yang diizinkan untuk pekerja web (proses normal web server & backup)
+# Binary yang diizinkan untuk pekerja web (proses normal web server, backup, dan git)
 WHITELISTED_BASENAMES = frozenset([
     "nginx",
     "php-fpm",
@@ -60,7 +89,15 @@ WHITELISTED_BASENAMES = frozenset([
     "gzip",
     "bzip2",
     "zip",
-    "unzip"
+    "unzip",
+    "git",
+    "git-remote-https",
+    "git-remote-http",
+    "git-remote-ftp",
+    "git-remote-ftps",
+    "git-upload-pack",
+    "git-receive-pack",
+    "ssh"
 ])
 
 # Setup logger
@@ -210,6 +247,20 @@ def check_process_whitelist(pid, ppid, uid, exe_path, cmdline, cwd, basename):
         except Exception:
             pass
 
+    # 1b. Cek apakah diinisiasi oleh proses Git (git pull, git clone, git fetch, submodule, webhook)
+    if ppid and ppid > 1:
+        try:
+            pexe = ""
+            try:
+                pexe = os.readlink(f"/proc/{ppid}/exe")
+            except Exception:
+                pass
+            pbase = os.path.basename(pexe)
+            if pbase in ("git", "git-remote-https", "git-remote-http", "git-remote-ftp", "git-remote-ftps", "git-upload-pack", "git-receive-pack"):
+                return True, f"Git Subprocess ({pbase})"
+        except Exception:
+            pass
+
     # 2. Cek berkas proc_whitelist.json
     rules = load_proc_whitelist()
     cmd_lower = cmdline.lower() if cmdline else ""
@@ -260,8 +311,11 @@ def scan_once(target_uid=DEFAULT_WEB_UID, mode="enforce"):
         
         try:
             st = os.stat(proc_dir)
-            if st.st_uid != target_uid:
+            st_uid = st.st_uid
+            # Lewati proses root (UID 0) - root memiliki kendali penuh
+            if st_uid == 0:
                 continue
+            is_web_user = (st_uid == target_uid or st_uid == DEFAULT_WEB_UID or st_uid >= 1000)
         except (FileNotFoundError, ProcessLookupError, PermissionError):
             continue
 
@@ -303,26 +357,53 @@ def scan_once(target_uid=DEFAULT_WEB_UID, mode="enforce"):
 
         # Evaluasi aturan deteksi pelanggaran
         rule_violation = None
-        
-        # Aturan 1: Shell interaktif
-        if basename in BLOCKED_SHELLS:
-            rule_violation = f"ILLEGAL_SHELL({basename})"
-        
-        # Aturan 2: Alat tunnel / scanner
-        elif basename in BLOCKED_TOOLS:
-            rule_violation = f"BLOCKED_TOOL({basename})"
+        # Deteksi apakah perintah adalah operasi Git resmi (git pull, clone, fetch, checkout)
+        is_git_cmd = (basename in ("git", "git-remote-https", "git-remote-http", "git-upload-pack", "git-receive-pack", "ssh")) or \
+                     (cmdline and any(cmdline.strip().startswith(prefix) for prefix in ("git ", "/usr/bin/git ", "git-", "/usr/bin/git-")))
+
+        # Aturan Proteksi Benteng Anti-Tamper:
+        # Berlaku untuk SEMUA user non-root (UID != 0)!
+        # Melarang keras modifikasi, uninstall, penghapusan, atau penghentian Sentinel & plugin panel.
+        if not is_git_cmd and cmdline and any(p in cmdline for p in (
+            "/www/server/sentinel", "/www/server/panel/plugin",
+            "/etc/systemd/system/sentinel", "sentinel.service", "sentinel-",
+            "guardd", "guardctl", "uninstall.lock"
+        )):
+            rule_violation = f"TAMPER_ATTEMPT({cmdline[:50]})"
+
+        # Aturan Khusus Web Worker (UID 1002 / www):
+        elif is_web_user:
+            # Aturan 1: Shell interaktif
+            if basename in BLOCKED_SHELLS:
+                rule_violation = f"ILLEGAL_SHELL({basename})"
             
-        # Aturan 3: Eksekusi binary dari folder temporer
-        elif exe_path and any(exe_path.startswith(d) for d in SUSPICIOUS_DIRS):
-            rule_violation = f"TEMP_DIR_EXEC({exe_path})"
-            
-        # Aturan 4: Binary ELF yang berjalan langsung di direktori webroot
-        elif exe_path and exe_path.startswith("/www/wwwroot/") and is_elf(exe_path):
-            rule_violation = f"WEBROOT_ELF_EXEC({exe_path})"
+            # Aturan 2: Penambang Kripto (Crypto Miner Binary)
+            elif basename in BLOCKED_MINERS:
+                rule_violation = f"CRYPTO_MINER({basename})"
+
+            # Aturan 3: Argumen & Pool Mining Kripto pada cmdline
+            elif cmdline and any(mp in cmdline.lower() for mp in CRYPTO_MINING_PATTERNS):
+                rule_violation = f"CRYPTO_POOL_MINING({cmdline[:50]})"
+
+            # Aturan 4: Alat tunnel / scanner / sistem tamper
+            elif basename in BLOCKED_TOOLS:
+                rule_violation = f"BLOCKED_TOOL({basename})"
+
+            # Aturan 5: Perilaku Ransomware / Enkripsi Paksa
+            elif basename in BLOCKED_RANSOM_TOOLS or (cmdline and any(rp in cmdline.lower() for rp in RANSOMWARE_CMD_PATTERNS)):
+                rule_violation = f"RANSOMWARE_BEHAVIOR({cmdline[:50] if cmdline else basename})"
+
+            # Aturan 6: Eksekusi binary dari folder temporer
+            elif exe_path and any(exe_path.startswith(d) for d in SUSPICIOUS_DIRS):
+                rule_violation = f"TEMP_DIR_EXEC({exe_path})"
+                
+            # Aturan 7: Binary ELF yang berjalan langsung di direktori webroot
+            elif exe_path and exe_path.startswith("/www/wwwroot/") and is_elf(exe_path):
+                rule_violation = f"WEBROOT_ELF_EXEC({exe_path})"
 
         if rule_violation:
             # Periksa apakah proses ini cocok dengan whitelist EDR
-            is_wl, wl_info = check_process_whitelist(pid, ppid, target_uid, exe_path, cmdline, cwd, basename)
+            is_wl, wl_info = check_process_whitelist(pid, ppid, st_uid, exe_path, cmdline, cwd, basename)
             if is_wl:
                 action = "WHITELISTED"
                 whitelisted_count += 1
@@ -330,11 +411,11 @@ def scan_once(target_uid=DEFAULT_WEB_UID, mode="enforce"):
                 if pid not in seen_whitelisted_pids:
                     seen_whitelisted_pids.add(pid)
                     alerts_count += 1
-                    record_alert(pid, ppid, target_uid, exe_path, cmdline, cwd, rule_display, action)
+                    record_alert(pid, ppid, st_uid, exe_path, cmdline, cwd, rule_display, action)
                 found.append({
                     "pid": pid,
                     "ppid": ppid,
-                    "uid": target_uid,
+                    "uid": st_uid,
                     "exe": exe_path,
                     "cmdline": cmdline,
                     "cwd": cwd,
@@ -354,11 +435,11 @@ def scan_once(target_uid=DEFAULT_WEB_UID, mode="enforce"):
                     action = f"KILL_FAILED({e})"
             
             alerts_count += 1
-            record_alert(pid, ppid, target_uid, exe_path, cmdline, cwd, rule_violation, action)
+            record_alert(pid, ppid, st_uid, exe_path, cmdline, cwd, rule_violation, action)
             found.append({
                 "pid": pid,
                 "ppid": ppid,
-                "uid": target_uid,
+                "uid": st_uid,
                 "exe": exe_path,
                 "cmdline": cmdline,
                 "cwd": cwd,

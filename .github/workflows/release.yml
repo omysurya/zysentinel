@@ -1,0 +1,94 @@
+name: Build & Publish ZySentinel aaPanel Plugin Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. v1.6.0)'
+        required: false
+        default: 'v1.6.0'
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    name: Build aaPanel Plugin Zip
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set Release Version
+        id: vars
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            TAG="${{ github.event.inputs.version }}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "Building ZySentinel Plugin Release: ${TAG}"
+
+      - name: Prepare Clean aaPanel Plugin Package
+        run: |
+          TAG="${{ steps.vars.outputs.tag }}"
+          STAGE_DIR="/tmp/sentinel_build/sentinel"
+          rm -rf /tmp/sentinel_build
+          mkdir -p "$STAGE_DIR"
+
+          # Salin seluruh berkas proyek ke staging folder sentinel
+          rsync -av --exclude='.git' \
+                    --exclude='.github' \
+                    --exclude='*.bak.*' \
+                    --exclude='*.bak' \
+                    --exclude='__pycache__' \
+                    --exclude='*.pyc' \
+                    --exclude='build-release.sh' \
+                    ./ "$STAGE_DIR/"
+
+          # Pastikan hak akses berkas biner & skrip dapat dieksekusi
+          chmod 755 "$STAGE_DIR/install.sh"
+          chmod 755 "$STAGE_DIR/payload"/*.sh "$STAGE_DIR/payload"/*.py "$STAGE_DIR/payload"/guardctl 2>/dev/null || true
+          [ -f "$STAGE_DIR/payload/guardd" ] && chmod 755 "$STAGE_DIR/payload/guardd" || true
+
+          # Buat arsip ZIP resmi siap upload ke aaPanel
+          cd /tmp/sentinel_build
+          zip -r -9 "${GITHUB_WORKSPACE}/sentinel.zip" sentinel/
+          cp "${GITHUB_WORKSPACE}/sentinel.zip" "${GITHUB_WORKSPACE}/zysentinel-${TAG}.zip"
+
+          cd "${GITHUB_WORKSPACE}"
+          sha256sum sentinel.zip zysentinel-${TAG}.zip > SHA256SUMS.txt
+
+      - name: Upload Release Assets
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        with:
+          tag_name: ${{ steps.vars.outputs.tag }}
+          name: "ZySentinel ${{ steps.vars.outputs.tag }}"
+          body: |
+            ### ZySentinel ${{ steps.vars.outputs.tag }} — AI-Powered aaPanel Security Plugin
+
+            Paket rilis resmi ZySentinel siap impor untuk aaPanel (Linux).
+
+            #### 📦 Aset Siap Pakai:
+            - **`sentinel.zip`** : Paket utama plugin untuk diunggah langsung ke **aaPanel App Store** (`Import Third-party Plugin`).
+            - **`zysentinel-${{ steps.vars.outputs.tag }}.zip`** : Arsip rilis berlabel versi.
+            - **`SHA256SUMS.txt`** : Checksum verifikasi integritas berkas.
+
+            #### 🚀 Cara Pemasangan di aaPanel:
+            1. Unduh berkas **`sentinel.zip`** dari daftar aset di bawah.
+            2. Masuk ke dasbor **aaPanel** Anda.
+            3. Buka menu **App Store** → klik tab **Third-party plugin** (atau **Plugin Import**).
+            4. Klik **Import Plugin / Upload Plugin** dan pilih berkas `sentinel.zip`.
+            5. aaPanel akan otomatis mengekstrak dan menjalankan setup mandiri (`install.sh`).
+            6. Seluruh modul (Firewall, WAF, EDR Runtime, Antivirus, dan Dasbor) langsung aktif dan siap digunakan!
+          draft: false
+          prerelease: false
+          files: |
+            sentinel.zip
+            zysentinel-${{ steps.vars.outputs.tag }}.zip
+            SHA256SUMS.txt
