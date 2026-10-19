@@ -242,8 +242,8 @@ def check_process_whitelist(pid, ppid, uid, exe_path, cmdline, cwd, basename):
                 except Exception:
                     pass
                 pbase = os.path.basename(pexe)
-                if pbase in ("sudo", "cron", "crond", "systemd", "bash", "sh"):
-                    return True, "Root / Systemd Parent"
+                if pbase in ("sudo", "cron", "crond", "systemd", "bash", "sh", "sshd"):
+                    return True, "Root / Systemd / SSH Parent"
         except Exception:
             pass
 
@@ -315,7 +315,7 @@ def scan_once(target_uid=DEFAULT_WEB_UID, mode="enforce"):
             # Lewati proses root (UID 0) - root memiliki kendali penuh
             if st_uid == 0:
                 continue
-            is_web_user = (st_uid == target_uid or st_uid == DEFAULT_WEB_UID or st_uid >= 1000)
+            is_web_user = (st_uid == target_uid or st_uid == DEFAULT_WEB_UID or st_uid == 33)
         except (FileNotFoundError, ProcessLookupError, PermissionError):
             continue
 

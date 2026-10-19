@@ -6,7 +6,7 @@ Menguji secara jujur tanpa halu seluruh:
 - Fitur Keamanan (IP ban, allowlist, EDR whitelist, port firewall, WAF, GeoIP, GeoBan, SAGE AI)
 - Kontrol Layanan (guardctl start/stop/restart/reload/ping/brief/status, install.sh options)
 - Layanan & Daemon (guardd, clamscan mock, iptables/ipset, rule management)
-- Semua Endpoint & API sentinel_main.py (47 endpoint lengkap)
+- Semua Endpoint & API sentinel_main.py (48 endpoint lengkap)
 - Komponen & Fungsi Antarmuka UI (status strip ribbon, 6 lencana status, header minimalis,
   dialog feedback dengan Saweria + PayPal kirim uang auto-copy email, dialog maintenance,
   dan validasi sintaksis JavaScript via Node.js).
@@ -657,6 +657,10 @@ def run_tests():
 
         fw_lists = sm.get_fw_lists(DummyGet({}))
         assert_true("API get_fw_lists: Returns WAF filter rules", fw_lists.get('status') is True, str(fw_lists))
+
+        fw_info = sm.freewaf_info(DummyGet({}))
+        assert_true("API freewaf_info: Returns FreeWAF runtime info", fw_info.get('status') is True, str(fw_info))
+        assert_true("API freewaf_info: Has loaded key", 'loaded' in fw_info.get('msg', {}), str(fw_info))
 
     # =========================================================================
     # BAGIAN 12: GEO-IP & GEO-BAN

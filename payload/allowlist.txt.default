@@ -19,3 +19,8 @@
 # ini backend sah akan ikut ter-ban. Sudah juga ada di
 # aapanel.ipv4.whitelist, jadi terlindungi dua lapis.
 103.129.148.157
+
+# Jaringan WireGuard privat & Gateway MSSQL 10.11.13.1
+10.11.13.0/24
+103.127.134.23
+192.168.1.0/24

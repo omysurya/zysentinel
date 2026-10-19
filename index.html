@@ -67,15 +67,14 @@
 
 /* ---- kerangka dialog ---- */
 .sn-modal{position:fixed;inset:0;z-index:9000;display:none;background:var(--bg)}
-.sn-modal.on{display:block;animation:sn-fade .18s ease}
-@keyframes sn-fade{from{opacity:.4}to{opacity:1}}
-.sn-mback{position:absolute;inset:0;background:rgba(3,7,18,.82);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px)}
+.sn-modal.on{display:block}
+.sn-mback{position:absolute;inset:0;background:rgba(3,7,18,0.92)}
 .sn-mbox{position:relative;margin:20px auto;border-radius:14px;border:1px solid var(--border-accent);
   background:linear-gradient(180deg, #080f21 0%, #030712 100%);
   box-shadow:var(--shadow-hi);overflow:hidden;max-width:calc(100% - 44px);
   width:min(1780px,100%);max-height:calc(100vh - 50px);display:flex;flex-direction:column}
-.sn-mhead{display:flex;align-items:center;gap:12px;padding:14px 22px;background:rgba(8,15,33,0.95);
-  backdrop-filter:blur(14px);border-bottom:1px solid var(--border-subtle);box-shadow:0 4px 20px rgba(0,0,0,0.5)}
+.sn-mhead{display:flex;align-items:center;gap:12px;padding:14px 22px;background:#080f21;
+  border-bottom:1px solid var(--border-subtle);box-shadow:0 4px 20px rgba(0,0,0,0.5)}
 .sn-status-strip{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;
   padding:10px 14px;margin-bottom:14px;background:rgba(8,15,33,0.7);border:1px solid var(--border-subtle);
   border-radius:8px;box-shadow:0 2px 10px rgba(0,0,0,0.3)}
@@ -341,6 +340,16 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 .layui-layer-btn .layui-layer-btn1{background:rgba(11,20,38,0.85) !important;color:#f1f5f9 !important;border:1px solid rgba(255,255,255,0.15) !important}
 .layui-layer-btn .layui-layer-btn1:hover{background:rgba(16,28,54,0.95) !important;color:#00f0ff !important;border-color:rgba(0,240,255,0.3) !important}
 .layui-layer-setwin .layui-layer-close1{filter:invert(1) !important}
+
+/* ---- Cyber Top Progress Bar & Button Action Loading Animation ---- */
+.sn-progress-bar{position:absolute;top:0;left:0;width:0%;height:3px;background:linear-gradient(90deg,#10b981 0%,#00f0ff 50%,#38bdf8 100%);box-shadow:0 0 12px #00f0ff,0 0 6px #10b981;z-index:99999;opacity:0;pointer-events:none;transition:width .22s cubic-bezier(.4,0,.2,1),opacity .3s ease}
+.sn-progress-bar.active{opacity:1}
+.sn-btn-loading, button.sn-btn-loading, span.sn-btn-loading, a.sn-btn-loading{pointer-events:none !important;opacity:0.75 !important;cursor:wait !important;position:relative}
+.sn-btn-loading i.layui-icon-loading{display:inline-block;animation:sn-spin .8s linear infinite;margin-right:5px;vertical-align:middle}
+.sn-tab-loading{position:relative;box-shadow:0 0 10px rgba(0,240,255,0.4) !important}
+.sn-tab-loading::after{content:'';display:inline-block;width:6px;height:6px;border-radius:50%;background:#00f0ff;margin-left:6px;vertical-align:middle;animation:snPulse 0.8s infinite}
+.spinning, i.spinning, .layui-icon.spinning{display:inline-block;animation:sn-spin .8s linear infinite !important}
+@keyframes sn-spin{0%{transform:rotate(0deg)}100%{transform:rotate(360deg)}}
 </style>
 
 <div class="sn-wrap">
@@ -348,6 +357,7 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 <div class="sn-modal" id="snModal">
 	<div class="sn-mback" id="snBack"></div>
 	<div class="sn-mbox">
+		<div id="snProgressBar" class="sn-progress-bar"></div>
 		<div class="sn-mhead">
 			<h2>
 				<div class="sn-brand">
@@ -391,7 +401,18 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 					<span id="bWaf" class="sn-badge sn-off" style="cursor:pointer" onclick="snTop('waf',$('.sn-mtabs span[onclick*=\'waf\']')[0])" data-i18n-title="tip_b_waf" title="Web Application Firewall: Filter L7 inspeksi HTTP pencegah SQLi, XSS, dan exploit web">🌐 WAF: Off</span>
 					<span id="bPanic" class="sn-badge sn-ok" style="cursor:pointer" onclick="snTop('conf',$('.sn-mtabs span[onclick*=\'conf\']')[0])" data-i18n-title="tip_b_panic_off" title="Tombol Panik: Matikan darurat seluruh akses web bila server diserang masif">🚨 Panic: Off</span>
 				</div>
-				<div class="sn-status-actions">
+				<div class="sn-status-actions" style="display:flex;align-items:center;gap:8px">
+					<div class="sn-auto-refresh-ctrl" style="display:inline-flex;align-items:center;gap:6px;font-size:11px;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.12);padding:2px 8px;border-radius:4px" data-i18n-title="tip_auto_refresh" title="Pilihan interval penyegaran otomatis tabel dan data status">
+						<i class="layui-icon layui-icon-refresh" id="icoAutoRefresh" style="color:var(--accent-cyan);font-size:12px"></i>
+						<span style="color:var(--text-muted);font-weight:600" data-i18n="lbl_auto_refresh">Auto-Refresh:</span>
+						<select id="selAutoRefresh" class="sn-sel" style="height:22px;padding:0 4px;font-size:11px;background:var(--bg-card);color:var(--text-main);border:1px solid rgba(255,255,255,0.15);border-radius:3px;cursor:pointer" onchange="snSetAutoRefresh(this.value)">
+							<option value="0" data-i18n="opt_refresh_off">Off (Manual)</option>
+							<option value="30">30s</option>
+							<option value="60">60s (Santai)</option>
+							<option value="120">2m</option>
+							<option value="300">5m</option>
+						</select>
+					</div>
 					<button id="btnHeaderFeedback" class="sn-btn sn-sm" onclick="snBukaFeedback()" style="background:rgba(245,158,11,0.12);color:var(--accent-amber);border:1px solid rgba(245,158,11,0.35);font-weight:600" data-i18n="btn_feedback" data-i18n-title="tip_feedback" title="Send Feedback or Bug Report to Developers">💬 Feedback</button>
 				</div>
 			</div>
@@ -411,7 +432,7 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 						</div>
 					</div>
 					<div style="text-align:right;flex:0 0 auto">
-						<span id="btnDefconRefresh" class="sn-btn" onclick="snEliteLoad()" style="background:rgba(255,255,255,.2);color:#fff;border:1px solid rgba(255,255,255,.3)" data-i18n="btn_refresh" data-i18n-title="tip_refresh" title="Refresh Security Posture & Defense Indicators">Refresh</span>
+						<span id="btnDefconRefresh" class="sn-btn" onclick="snDefconRefreshManual(this)" style="background:rgba(255,255,255,.2);color:#fff;border:1px solid rgba(255,255,255,.3)" data-i18n-title="tip_refresh" title="Refresh Security Posture & Defense Indicators"><i class="layui-icon layui-icon-refresh"></i> <span data-i18n="btn_refresh">Refresh</span></span>
 					</div>
 				</div>
 
@@ -515,7 +536,8 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 						<div class="sn-fl" style="margin-bottom:11px">
 							<input id="banIP" class="sn-inp" data-i18n-placeholder="ph_ban_ip" placeholder="IP address, e.g. 1.2.3.4" style="width:200px">
 							<input id="banDetik" class="sn-inp" data-i18n-placeholder="ph_ban_sec" placeholder="Duration in seconds (optional)" style="width:220px">
-							<span class="sn-btn dgr" onclick="snBan()" data-i18n="btn_block_now" data-i18n-title="tip_block_now" title="Block this IP address in kernel firewall">Block Now</span>
+							<span class="sn-btn dgr" onclick="snBan(this)" data-i18n="btn_block_now" data-i18n-title="tip_block_now" title="Block this IP address in kernel firewall">Block Now</span>
+							<span class="sn-btn" onclick="snBans(this)" data-i18n="btn_refresh" data-i18n-title="tip_refresh_bans" title="Refresh Blocked IPs Table"><i class="layui-icon layui-icon-refresh"></i> Refresh</span>
 							<span class="sn-refresh" data-i18n="hint_whitelist_refuse">Whitelisted IPs will not be banned.</span>
 						</div>
 						<table class="sn-tb">
@@ -528,6 +550,10 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 					</div>
 
 					<div class="sn-subpage" id="sub-situs">
+						<div class="sn-fl" style="margin-bottom:11px">
+							<span class="sn-btn" onclick="snSitus(this)" data-i18n="btn_refresh" data-i18n-title="tip_refresh_sites" title="Refresh Monitored Sites"><i class="layui-icon layui-icon-refresh"></i> Refresh</span>
+							<span class="sn-refresh" data-i18n="hint_sites_rescan">Sites and access logs monitored by ZySentinel Guardd</span>
+						</div>
 						<table class="sn-tb">
 							<thead><tr>
 								<th data-i18n="th_site">Site</th><th data-i18n="th_docroot">Document Root</th><th data-i18n="th_status">Status</th>
@@ -947,6 +973,7 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 								<span class="o" data-m="block" onclick="snModeSet('block')" data-i18n="waf_mode_block" data-i18n-title="tip_mode_block" title="Block Mode: Actively Block Requests Violating WAF Rules">Block</span>
 								<span class="o" data-m="disable" onclick="snModeSet('disable')" data-i18n="waf_mode_disable" data-i18n-title="tip_mode_disable" title="Disable WAF Engine Completely">Disable</span>
 							</div>
+							<span class="sn-btn" onclick="snWafMuat(this)" data-i18n="btn_refresh" data-i18n-title="tip_refresh_waf" title="Refresh WAF Engine Status & Rules"><i class="layui-icon layui-icon-refresh"></i> <span data-i18n="btn_refresh">Refresh</span></span>
 						</span>
 					</h3>
 					<div class="sn-note" data-i18n="waf_note">
@@ -1014,6 +1041,7 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 							<span class="sn-btn dgr" onclick="snNwRemove()" data-i18n="btn_remove_engine" data-i18n-title="tip_remove_lua_waf" title="Remove Lua WAF Module from Nginx">Remove Engine</span>
 							<span class="sn-btn" onclick="snNwMuat()" data-i18n="btn_check_status" data-i18n-title="tip_check_lua_waf" title="Check Lua WAF Engine Readiness">Check Status</span>
 							<span style="font-weight:600;margin-left:12px" data-i18n="waf_eng_detail">Engine Detail</span>
+							<span id="nwBadge" class="sn-badge" style="margin-left:8px"></span>
 						</div>
 						<pre class="sn-pre" id="nwDetail" style="margin-bottom:14px">loading</pre>
 
@@ -1227,7 +1255,7 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 								</div>
 								<div style="display:flex;align-items:center;gap:6px">
 									<span id="fwHitTime" class="sn-mono" style="font-size:11px;color:var(--muted)"></span>
-									<span class="sn-btn sn-sm" onclick="snFwMuat()" data-i18n="btn_refresh" data-i18n-title="tip_refresh_packet_counters" title="Refresh Packet Counters" style="padding:1px 7px;font-size:11px">Refresh</span>
+									<span class="sn-btn sn-sm" onclick="snFwMuat(this)" data-i18n="btn_refresh" data-i18n-title="tip_refresh_packet_counters" title="Refresh Packet Counters" style="padding:1px 7px;font-size:11px"><i class="layui-icon layui-icon-refresh"></i> Refresh</span>
 								</div>
 							</div>
 							<div id="fwHitBox">
@@ -1238,7 +1266,10 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 
 					<div style="font-weight:600;margin:16px 0 8px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
 						<span style="font-size:14px;color:var(--ink)" data-i18n="fw_inspection_rules">Inspection Rules</span>
-						<span class="sn-refresh" data-i18n="fw_top_priority">Top-to-Bottom Priority</span>
+						<div style="display:flex;align-items:center;gap:8px">
+							<span class="sn-btn sn-sm" onclick="snFwMuat(this)" data-i18n="btn_refresh" data-i18n-title="tip_refresh_chain" title="Refresh Kernel Inspection Rules" style="padding:1px 7px;font-size:11px"><i class="layui-icon layui-icon-refresh"></i> Refresh</span>
+							<span class="sn-refresh" data-i18n="fw_top_priority">Top-to-Bottom Priority</span>
+						</div>
 					</div>
 
 					<table class="sn-tb" style="margin-top:6px">
@@ -1268,6 +1299,7 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 							<span class="sn-btn dgr" onclick="snFwrBan()" data-i18n="btn_ban" data-i18n-title="tip_ban_ip" title="Temporarily Block IP Address or Subnet">Ban</span>
 							<span class="sn-btn pri" onclick="snFwrAllow()" data-i18n="btn_allow" data-i18n-title="tip_allow_ip" title="Permanently Allow IP Address or Subnet">Allow</span>
 							<span class="sn-btn" onclick="snFwrGeoForm()" data-i18n="btn_block_country" data-i18n-title="tip_block_country" title="Block IP Addresses by Country">Block Country</span>
+							<span class="sn-btn" onclick="snFwrMuat(this)" data-i18n="btn_refresh" data-i18n-title="tip_refresh_fwr" title="Refresh Managed Rules Table"><i class="layui-icon layui-icon-refresh"></i> Refresh</span>
 						</span>
 					</h3>
 					<div class="sn-note" data-i18n="note_fwr_rules">
@@ -1289,6 +1321,7 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 						<span class="sn-fl">
 							<input id="allowIP" class="sn-inp" data-i18n-placeholder="ph_allow_ip" placeholder="IP address or CIDR" style="width:220px">
 							<span class="sn-btn pri" onclick="snAllow()" data-i18n="btn_add" data-i18n-title="tip_add_allow" title="Add IP address or CIDR to permanent allow list">Add</span>
+							<span class="sn-btn" onclick="snAllowMuat(this)" data-i18n="btn_refresh" data-i18n-title="tip_refresh_allow" title="Refresh Allow List Table"><i class="layui-icon layui-icon-refresh"></i> Refresh</span>
 						</span>
 					</h3>
 					<div class="sn-grid2">
@@ -1564,8 +1597,37 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 
 </div>
 
-<script src="/static/js/echarts.min.js"></script>
 <script>
+/* Sanitasi otomatis untuk menghapus event handler usang atau tidak valid pada document */
+function snSanitizeEvents(){
+	try {
+		if(typeof document === 'undefined') return;
+		if(window.jQuery){
+			try {
+				jQuery(document).off('.snSentinel').off('click.snSentinel');
+			} catch(e){}
+		}
+		for(var k in document){
+			try {
+				if(document[k] && typeof document[k] === 'object' && document[k].events){
+					var evs = document[k].events;
+					for(var etype in evs){
+						if(Array.isArray(evs[etype])){
+							for(var i = evs[etype].length - 1; i >= 0; i--){
+								var h = evs[etype][i];
+								if(!h || typeof h.handler !== 'function'){
+									evs[etype].splice(i, 1);
+								}
+							}
+						}
+					}
+				}
+			} catch(e){}
+		}
+	} catch(e){}
+}
+snSanitizeEvents();
+
 var SN_GRAF = null;
 var SN_TIMER = null;
 /* Indeks layer.open dialog konfirmasi panic. null berarti tidak ada
@@ -2178,6 +2240,19 @@ var SN_I18N = {
 		btn_stop: "Stop",
 		btn_restart: "Restart",
 		btn_reload: "Reload",
+		lbl_auto_refresh: "Auto-Refresh:",
+		opt_refresh_off: "Off (Manual)",
+		opt_refresh_30s: "30s",
+		opt_refresh_60s: "60s (Relaxed)",
+		opt_refresh_2m: "2m",
+		opt_refresh_5m: "5m",
+		tip_auto_refresh: "Choose auto-refresh interval for tables and status",
+		tip_refresh_bans: "Refresh Blocked IPs Table",
+		tip_refresh_sites: "Refresh Monitored Sites",
+		tip_refresh_chain: "Refresh Kernel Inspection Rules",
+		tip_refresh_fwr: "Refresh Managed Rules Table",
+		tip_refresh_allow: "Refresh Allow List Table",
+		tip_refresh_waf: "Refresh WAF Engine Status & Rules",
 		tip_tab_conf: "Open Settings & System Controls Tab"
 	},
 	id: {
@@ -2767,6 +2842,19 @@ var SN_I18N = {
 		btn_stop: "Hentikan",
 		btn_restart: "Mulai Ulang",
 		btn_reload: "Muat Ulang",
+		lbl_auto_refresh: "Auto-Refresh:",
+		opt_refresh_off: "Mati (Manual)",
+		opt_refresh_30s: "30d",
+		opt_refresh_60s: "60d (Santai)",
+		opt_refresh_2m: "2m",
+		opt_refresh_5m: "5m",
+		tip_auto_refresh: "Pilihan interval penyegaran otomatis tabel dan data status",
+		tip_refresh_bans: "Segarkan Tabel IP yang Diblokir",
+		tip_refresh_sites: "Segarkan Daftar Situs Dipantau",
+		tip_refresh_chain: "Segarkan Aturan Inspeksi Kernel",
+		tip_refresh_fwr: "Segarkan Tabel Aturan Terkelola",
+		tip_refresh_allow: "Segarkan Tabel Daftar Putih",
+		tip_refresh_waf: "Segarkan Status & Aturan WAF",
 		tip_tab_conf: "Buka Tab Pengaturan Ambang & Sistem"
 	}
 };
@@ -2789,11 +2877,11 @@ function snSetLang(lang){
 		localStorage.setItem('sn_lang', lang);
 	} catch(e){}
 	snAjax('set_lang_setting', {lang: lang}, function(){});
-	snApplyLang();
+	snApplyLang(true);
 	layer.msg(snT('lang_switched'), {time: 2000, icon: 1});
 }
 
-function snApplyLang(){
+function snApplyLang(refreshData){
 	var isEn = (SN_LANG !== 'id');
 	$('[data-i18n]').each(function(){
 		var k = $(this).attr('data-i18n');
@@ -2830,30 +2918,40 @@ function snApplyLang(){
 	if(window.SN_STATUS_DATA && window.SN_STATUS_DATA.status){
 		snStats(window.SN_STATUS_DATA.status, window.SN_STATUS_DATA);
 	}
-	snSysMuat();
-	if($('#tbBans').is(':visible') || $('#tbBans').children().length > 0) snBans();
-	if($('#tbSitus').is(':visible') || $('#tbSitus').children().length > 0) snSitus();
-	if($('#tbEdr').is(':visible') || $('#tbEdr').children().length > 0) snEdrMuat();
-	if($('#tbVhost').is(':visible') || $('#tbVhost').children().length > 0) snVhostMuat();
-	if($('#tbGeo').is(':visible') || $('#tbGeo').children().length > 0) snGeoMuat();
-	if($('#tbFeed').is(':visible') || $('#tbFeed').children().length > 0) snFeed();
-	if($('#tbAksi').is(':visible') || $('#tbAksi').children().length > 0) snAksiMuat();
-	if($('#tbFwr').is(':visible') || $('#tbFwr').children().length > 0) snFwrMuat();
-	if($('#tbAllow').is(':visible') || $('#tbAllow').children().length > 0) snAllowMuat();
-	if($('#tbAmbang').is(':visible') || $('#tbAmbang').children().length > 0) snConf();
-	if($('#tbLaju').is(':visible') || $('#tbLaju').children().length > 0) snLaju();
-	if($('#tbRiwayat').is(':visible') || $('#tbRiwayat').children().length > 0) snRiwayat();
-	if($('#tbRev').is(':visible') || $('#tbRev').children().length > 0) snRevMuat(SN_REV_STATUS);
-	if($('#tbNotif').is(':visible') || $('#tbNotif').children().length > 0) snNotifLog();
-	if($('#tbPortRules').is(':visible') || $('#tbPortRules').children().length > 0) snPortRender(SN_PORT_CUR_TAB);
-	if($('#tbChainRules').is(':visible') || $('#tbChainRules').children().length > 0) snFwMuat();
-	if($('#tbAvSites').is(':visible') || $('#tbAvSites').children().length > 0) snAvSitesMuat();
-	if($('#tbAvInteg').is(':visible') || $('#tbAvInteg').children().length > 0) snAvIntegMuat();
-	if($('#tbAvQuar').is(':visible') || $('#tbAvQuar').children().length > 0) snAvQuarMuat();
-	if($('#tbFwSites').is(':visible') || $('#tbFwSites').children().length > 0) snFwSitesMuat();
-	if($('#tbFwList').is(':visible') || $('#tbFwList').children().length > 0) snFwListMuat();
-	if($('#top-conf').is(':visible')) snPanicMuat();
-	if($('#tbFeedbackHistory').is(':visible')) snLoadFeedbackHistory();
+
+	// Hanya segarkan data tabel jika pengguna secara eksplisit menukar bahasa
+	if(refreshData){
+		snSysMuat();
+		if($('#sub-bans').is(':visible')) snBans();
+		else if($('#sub-situs').is(':visible')) snSitus();
+		else if($('#sub-edr').is(':visible')) snEdrMuat();
+		else if($('#sub-vhost').is(':visible')) snVhostMuat();
+		else if($('#sub-geo').is(':visible')) snGeoMuat();
+		else if($('#sub-feed').is(':visible')) snFeed();
+		else if($('#sub-aksi').is(':visible')) snAksiMuat();
+		else if($('#sub-riwayat').is(':visible')) snRiwayat();
+		else if($('#sub-review').is(':visible')) snRevMuat(SN_REV_STATUS);
+		else if($('#sub-notif').is(':visible')) snNotifLog();
+		else if($('#top-firewall').is(':visible')){
+			if($('#p-port').is(':visible')) snPortRender(SN_PORT_CUR_TAB);
+			else if($('#p-chain').is(':visible')) snFwMuat();
+			else if($('#p-fwr').is(':visible')) snFwrMuat();
+			else if($('#p-allow').is(':visible')) snAllowMuat();
+		}
+		else if($('#top-antivirus').is(':visible')){
+			if($('#av-vhost').is(':visible')) snAvSitesMuat();
+			else if($('#av-integ').is(':visible')) snAvIntegMuat();
+			else if($('#av-quar').is(':visible')) snAvQuarMuat();
+		}
+		else if($('#top-waf').is(':visible')){
+			if($('#w-lua').is(':visible')) snFwSitesMuat();
+		}
+		else if($('#top-conf').is(':visible')){
+			if($('#c-atur').is(':visible')) snConf();
+			else if($('#c-laju').is(':visible')) snLaju();
+			else if($('#c-panic').is(':visible')) snPanicMuat();
+		}
+	}
 }
 
 function snUpdateBadgesAndNotes(m){
@@ -2885,9 +2983,46 @@ function snUpdateBadgesAndNotes(m){
 		nota.hide();
 	}
 
-	snBackendLencana();
-	snWafLencana();
-	snAvLencana();
+	// Render lencana status ribbon secara instan langsung dari data get_status (Zero Extra AJAX)
+	var lBack = $('#bBackend');
+	var bNama = m.fw_backend || 'iptables-nft';
+	if(bNama === 'iptables-nft'){
+		lBack.text('⚙️ NFT').attr('class', 'sn-badge sn-info').attr('title', isEn ? 'Firewall Backend: Linux kernel iptables-nft active' : 'Backend Firewall: Subsistem kernel Linux iptables-nft aktif');
+	} else if(bNama === 'iptables-legacy'){
+		lBack.text('⚙️ Legacy').attr('class', 'sn-badge sn-info').attr('title', isEn ? 'Firewall Backend: Linux kernel iptables-legacy active' : 'Backend Firewall: Subsistem kernel Linux iptables-legacy aktif');
+	} else if(bNama === 'ufw-active' || bNama === 'firewalld-active'){
+		lBack.text('⚙️ ' + (bNama === 'ufw-active' ? 'UFW' : 'Firewalld')).attr('class', 'sn-badge sn-warn');
+	} else {
+		lBack.text('⚙️ ' + bNama).attr('class', 'sn-badge sn-bad');
+	}
+
+	var lWaf = $('#bWaf');
+	var wEng = m.waf_engine || 'off';
+	if(wEng === 'modsecurity'){
+		lWaf.text('🌐 WAF: ModSec').attr('class', 'sn-badge sn-ok').attr('title', isEn ? 'Nginx WAF: ModSecurity inspecting HTTP traffic' : 'WAF Nginx: ModSecurity aktif memeriksa request HTTP');
+	} else if(wEng === 'coraza'){
+		lWaf.text('🌐 WAF: Coraza').attr('class', 'sn-badge sn-ok').attr('title', isEn ? 'Nginx WAF: Coraza inspecting HTTP traffic' : 'WAF Nginx: Coraza WAF aktif memeriksa request HTTP');
+	} else {
+		lWaf.text('🌐 WAF: Off').attr('class', 'sn-badge sn-off').attr('title', isEn ? 'WAF inactive. Nginx runs without WAF filter.' : 'WAF nonaktif. Nginx berjalan tanpa filter WAF.');
+	}
+
+	var lAv = $('#bAv');
+	var avSt = m.av_status || 'off';
+	if(avSt === 'active'){
+		lAv.text('🦠 ClamAV: Active').attr('class', 'sn-badge sn-ok').attr('title', isEn ? 'ClamAV daemon active' : 'Daemon ClamAV aktif');
+	} else if(avSt === 'ready'){
+		lAv.text('🦠 ClamAV: ' + (isEn ? 'Ready' : 'Siap')).attr('class', 'sn-badge sn-ok').attr('title', isEn ? 'ClamAV scanner ready' : 'Pemindai ClamAV siap');
+	} else {
+		lAv.text(isEn ? '🦠 ClamAV: Off' : '🦠 ClamAV: Nonaktif').attr('class', 'sn-badge sn-off').attr('title', isEn ? 'ClamAV is not active' : 'ClamAV tidak aktif');
+	}
+
+	var lPan = $('#bPanic');
+	var panSt = Number(m.panic_status) === 1;
+	if(panSt){
+		lPan.text('🚨 Panic: ON').attr('class', 'sn-badge sn-bad').attr('title', isEn ? 'PANIC MODE ACTIVE: Web access locked down' : 'MODE PANIK AKTIF: Seluruh akses web dikunci darurat');
+	} else {
+		lPan.text('🚨 Panic: Off').attr('class', 'sn-badge sn-ok').attr('title', isEn ? 'Panic button is off. Normal web traffic allowed.' : 'Tombol panik nonaktif. Lalu lintas web berjalan normal.');
+	}
 }
 
 function snInitLang(){
@@ -2901,16 +3036,18 @@ function snInitLang(){
 	} catch(e){
 		SN_LANG = 'en';
 	}
-	snApplyLang();
+	snApplyLang(false);
 
-	snAjax('get_lang_setting', {}, function(data){
-		if(data && data.lang && (data.lang === 'id' || data.lang === 'en')){
-			if(data.lang !== SN_LANG && !localStorage.getItem('sn_lang')){
-				SN_LANG = data.lang;
-				snApplyLang();
+	if(!localStorage.getItem('sn_lang')){
+		snAjax('get_lang_setting', {}, function(data){
+			if(data && data.lang && (data.lang === 'id' || data.lang === 'en')){
+				if(data.lang !== SN_LANG){
+					SN_LANG = data.lang;
+					snApplyLang(false);
+				}
 			}
-		}
-	});
+		});
+	}
 }
 
 /* =========================================================================
@@ -2973,32 +3110,37 @@ function snToggleTelemetry(){
 
 function snInjectGtm(){
 	if(!SN_TELEMETRY_ENABLED) return;
-	window.dataLayer = window.dataLayer || [];
-	if(typeof window.gtag !== 'function'){
-		window.gtag = function(){
-			if(window.SN_TELEMETRY_ENABLED !== false){
-				window.dataLayer.push(arguments);
-			}
-		};
-		window.gtag('js', new Date());
-		window.gtag('config', 'G-8DBL8LPYQZ', {
-			'cookie_domain': 'auto',
-			'cookie_flags': 'SameSite=Lax',
-			'send_page_view': true,
-			'page_title': 'ZySentinel Dashboard'
-		});
-	}
-	if(!document.getElementById('gtag-sentinel')){
-		var gs = document.createElement('script');
-		gs.id = 'gtag-sentinel';
-		gs.async = true;
-		gs.src = 'https://www.googletagmanager.com/gtag/js?id=G-8DBL8LPYQZ';
-		document.head.appendChild(gs);
-	}
-	window.gtag('event', 'sentinel_active', {
-		'app_version': '1.6.1',
-		'server_host': window.location.hostname || 'unknown-ip'
-	});
+	setTimeout(function(){
+		if(!SN_TELEMETRY_ENABLED) return;
+		window.dataLayer = window.dataLayer || [];
+		if(typeof window.gtag !== 'function'){
+			window.gtag = function(){
+				if(window.SN_TELEMETRY_ENABLED !== false){
+					window.dataLayer.push(arguments);
+				}
+			};
+			window.gtag('js', new Date());
+			window.gtag('config', 'G-8DBL8LPYQZ', {
+				'cookie_domain': 'auto',
+				'cookie_flags': 'SameSite=Lax',
+				'send_page_view': true,
+				'page_title': 'ZySentinel Dashboard'
+			});
+		}
+		if(!document.getElementById('gtag-sentinel')){
+			var gs = document.createElement('script');
+			gs.id = 'gtag-sentinel';
+			gs.async = true;
+			gs.src = 'https://www.googletagmanager.com/gtag/js?id=G-8DBL8LPYQZ';
+			document.head.appendChild(gs);
+		}
+		try {
+			window.gtag('event', 'sentinel_active', {
+				'app_version': '1.6.1',
+				'server_host': window.location.hostname || 'unknown-ip'
+			});
+		} catch(e){}
+	}, 3500);
 }
 
 /* Sanitizer HTML entity untuk mencegah XSS & pencurian cookie dari log dinamis */
@@ -3020,13 +3162,165 @@ function snFmtVer(v){
 	return (s.charAt(0).toLowerCase() === 'v') ? s : ('v' + s);
 }
 
-/* Endpoint caller dengan pengamanan CSRF token, proteksi intercept, dan deteksi kadaluwarsa sesi */
-function snAjax(method, data, cb){
+/* Indikator progress sistem dengan visual cyber elegan, non-blocking backdrop, dan dukungan dwibahasa */
+function snProgress(msg){
+	var isEn = (typeof SN_LANG !== 'undefined' && SN_LANG !== 'id');
+	var text = msg || (isEn ? 'Processing system request...' : 'Sedang memproses permintaan sistem...');
+	if(!window.layer || !layer.msg) return 0;
+	return layer.msg('<i class="layui-icon layui-icon-loading layui-anim layui-anim-rotate layui-anim-loop" style="font-size:18px;margin-right:8px;vertical-align:middle;display:inline-block"></i> ' + text, {
+		time: 0,
+		shade: [0.35, '#000'],
+		anim: -1,
+		success: function(layero){
+			layero.find('.layui-layer-content').css({
+				'padding': '14px 22px',
+				'font-size': '13px',
+				'font-weight': '500',
+				'background': 'rgba(15, 23, 42, 0.95)',
+				'color': '#f8fafc',
+				'border': '1px solid rgba(59, 130, 246, 0.4)',
+				'border-radius': '8px',
+				'box-shadow': '0 12px 30px -4px rgba(0, 0, 0, 0.6)'
+			});
+		}
+	});
+}
+
+function snSpinBtn(btn){
+	if(!btn) return function(){};
+	var $btn = $(btn);
+	var $ico = $btn.find('.layui-icon-refresh, .layui-icon');
+	if($ico.length){
+		$ico.addClass('spinning');
+		return function(){ $ico.removeClass('spinning'); };
+	}
+	$btn.addClass('spinning');
+	return function(){ $btn.removeClass('spinning'); };
+}
+
+/* Animasi progress dan proteksi double-click pada setiap tombol/link aksi */
+function snBtnLoading(el, customText){
+	if(!el) return null;
+	var $el = $(el);
+	if(!$el.length || $el.hasClass('sn-btn-loading')) return null;
+
+	var isTab = $el.is('.sn-tabs span, .sn-mtabs span');
+	if(isTab){
+		$el.addClass('sn-tab-loading');
+		return function(){ $el.removeClass('sn-tab-loading'); };
+	}
+
+	if($el.find('.layui-icon-refresh').length || $el.hasClass('layui-icon-refresh')){
+		var stop = snSpinBtn(el);
+		return stop;
+	}
+
+	var origHtml = $el.html();
+	var origW = $el.outerWidth();
+	$el.data('sn-orig-html', origHtml);
+	$el.addClass('sn-btn-loading');
+
+	if(origW > 35){
+		$el.css('min-width', origW + 'px');
+	}
+	$el.css({
+		'pointer-events': 'none',
+		'opacity': '0.75',
+		'cursor': 'wait'
+	});
+
+	var spHtml = '<i class="layui-icon layui-icon-loading layui-anim layui-anim-rotate layui-anim-loop" style="display:inline-block;margin-right:6px;font-size:inherit;vertical-align:middle"></i>';
+
+	if(customText){
+		$el.html(spHtml + '<span style="font-size:inherit;vertical-align:middle">' + customText + '</span>');
+	} else {
+		var curText = $el.text().trim();
+		if(curText){
+			$el.html(spHtml + '<span style="font-size:inherit;vertical-align:middle">' + curText + '</span>');
+		} else {
+			$el.html(spHtml);
+		}
+	}
+
+	return function(){ snBtnReset(el); };
+}
+
+function snBtnReset(el){
+	if(!el) return;
+	var $el = $(el);
+	if(!$el.length) return;
+	if($el.hasClass('sn-tab-loading')) $el.removeClass('sn-tab-loading');
+	$el.find('.layui-icon-refresh, .layui-icon').removeClass('spinning');
+	$el.removeClass('spinning');
+	if(!$el.hasClass('sn-btn-loading')) return;
+	var origHtml = $el.data('sn-orig-html');
+	if(origHtml !== undefined && origHtml !== null){
+		$el.html(origHtml);
+		$el.removeData('sn-orig-html');
+	}
+	$el.removeClass('sn-btn-loading');
+	$el.css({
+		'pointer-events': '',
+		'opacity': '',
+		'cursor': '',
+		'min-width': ''
+	});
+}
+
+/* Bilah progress neon cyber di puncak dialog */
+var SN_REQ_COUNT = 0;
+var SN_PROG_TIMER = null;
+function snStartProgBar(){
+	SN_REQ_COUNT++;
+	var bar = $('#snProgressBar');
+	if(!bar.length) return;
+	bar.addClass('active');
+	if(SN_REQ_COUNT === 1){
+		bar.css('width', '28%');
+		if(SN_PROG_TIMER) clearInterval(SN_PROG_TIMER);
+		SN_PROG_TIMER = setInterval(function(){
+			var curr = parseFloat(bar[0].style.width) || 28;
+			if(curr < 88){
+				bar.css('width', (curr + (88 - curr) * 0.22) + '%');
+			}
+		}, 160);
+	}
+}
+
+function snStopProgBar(){
+	SN_REQ_COUNT = Math.max(0, SN_REQ_COUNT - 1);
+	if(SN_REQ_COUNT === 0){
+		if(SN_PROG_TIMER){ clearInterval(SN_PROG_TIMER); SN_PROG_TIMER = null; }
+		var bar = $('#snProgressBar');
+		if(!bar.length) return;
+		bar.css('width', '100%');
+		setTimeout(function(){
+			if(SN_REQ_COUNT === 0){
+				bar.removeClass('active');
+				setTimeout(function(){ if(SN_REQ_COUNT === 0) bar.css('width', '0%'); }, 300);
+			}
+		}, 200);
+	}
+}
+
+/* Endpoint caller dengan pengamanan CSRF token, auto-progress bar cyber, animasi progress tombol, proteksi intercept, auto-close progress layer, dan deteksi kadaluwarsa sesi */
+function snAjax(method, data, cb, pIdx, btnEl, isSilent){
 	var d = data || {};
 	d.method = method;
 	d.s = method;
 	if(typeof SN_LANG !== 'undefined' && !d.lang){
 		d.lang = SN_LANG;
+	}
+
+	// Proteksi konflik routing aaPanel:
+	// Parameter 'action' pada router panelPlugin wajib bernilai 'a'. Jika payload mengirimkan 'action',
+	// aliaskan ke rule_action, act, aksi, dan sub_action lalu hapus d.action agar tidak menimpa query ?action=a.
+	if(d.action !== undefined && d.action !== 'a'){
+		if(d.rule_action === undefined) d.rule_action = d.action;
+		if(d.act === undefined) d.act = d.action;
+		if(d.aksi === undefined) d.aksi = d.action;
+		if(d.sub_action === undefined) d.sub_action = d.action;
+		delete d.action;
 	}
 
 	var headers = {
@@ -3040,6 +3334,31 @@ function snAjax(method, data, cb){
 		headers['x-cookie-token'] = tok;
 	}
 
+	// Deteksi otomatis elemen pemicu jika dipicu aksi pengguna
+	var triggerEl = btnEl;
+	if(!isSilent && !triggerEl && window.SN_LAST_CLICK && (Date.now() - window.SN_LAST_CLICK.time < 1200)){
+		triggerEl = window.SN_LAST_CLICK.el;
+		window.SN_LAST_CLICK = null;
+	}
+
+	var isUserAction = !isSilent && (!!triggerEl || !!pIdx);
+	var resetBtn = null;
+	if(isUserAction){
+		snStartProgBar();
+		if(triggerEl){
+			resetBtn = snBtnLoading(triggerEl);
+		}
+	}
+
+	var doneCleanup = function(){
+		if(isUserAction){
+			snStopProgBar();
+			if(resetBtn){ try{ resetBtn(); }catch(e){} }
+			else if(triggerEl){ snBtnReset(triggerEl); }
+		}
+		if(pIdx){ try{ layer.close(pIdx); }catch(e){} }
+	};
+
 	$.ajax({
 		url: '/plugin?action=a&name=sentinel&s=' + method,
 		type: 'POST',
@@ -3047,6 +3366,7 @@ function snAjax(method, data, cb){
 		data: d,
 		timeout: 60000,
 		success: function(r){
+			doneCleanup();
 			if(r && r.status === true){ cb(r.msg); }
 			else {
 				var msg = (r && r.msg) || 'gagal';
@@ -3062,6 +3382,7 @@ function snAjax(method, data, cb){
 			}
 		},
 		error: function(xhr){
+			doneCleanup();
 			if(xhr && (xhr.status === 401 || xhr.status === 403)){
 				var isEn = (SN_LANG !== 'id');
 				layer && layer.msg ? layer.msg(isEn ? 'Access denied or session expired.' : 'Akses ditolak atau sesi kedaluwarsa.', {time:2500}) : alert(isEn ? 'Access denied' : 'Akses ditolak');
@@ -3070,6 +3391,87 @@ function snAjax(method, data, cb){
 			cb(null);
 		}
 	});
+}
+
+/* ---------- Sistem Auto-Refresh Fleksibel & Terkendali Pengguna ---------- */
+var SN_AUTO_REFRESH_SEC = 0;
+
+function snInitAutoRefresh(){
+	var saved = localStorage.getItem('sn_auto_refresh');
+	var sec = (saved !== null) ? parseInt(saved, 10) : 0;
+	if(isNaN(sec)) sec = 0;
+	SN_AUTO_REFRESH_SEC = sec;
+	$('#selAutoRefresh').val(String(sec));
+	if(sec > 0){
+		snStartAutoRefresh(sec);
+	} else {
+		if(SN_TIMER){ clearInterval(SN_TIMER); SN_TIMER = null; }
+	}
+}
+
+function snSetAutoRefresh(val){
+	var sec = parseInt(val, 10) || 0;
+	SN_AUTO_REFRESH_SEC = sec;
+	try{ localStorage.setItem('sn_auto_refresh', String(sec)); }catch(e){}
+	if(SN_TIMER){ clearInterval(SN_TIMER); SN_TIMER = null; }
+	var isEn = (SN_LANG !== 'id');
+	if(sec > 0){
+		snStartAutoRefresh(sec);
+		layer.msg(isEn ? ('Auto-refresh set to ' + sec + 's') : ('Penyegaran otomatis diatur ke ' + sec + ' detik'), {time: 1500, icon: 1});
+	} else {
+		layer.msg(isEn ? 'Auto-refresh turned off (Manual mode)' : 'Penyegaran otomatis dimatikan (Mode Manual)', {time: 1500, icon: 1});
+	}
+}
+
+function snStartAutoRefresh(sec){
+	if(SN_TIMER){ clearInterval(SN_TIMER); SN_TIMER = null; }
+	sec = sec || SN_AUTO_REFRESH_SEC;
+	if(!sec || sec <= 0) return;
+
+	SN_TIMER = setInterval(function(){
+		var m = document.getElementById('snModal');
+		if(!m || !document.body.contains(m)){
+			if(SN_TIMER){ clearInterval(SN_TIMER); SN_TIMER = null; }
+			return;
+		}
+		if(m.style.display === 'none' && !m.className.match(/\bon\b/)){
+			if(SN_TIMER){ clearInterval(SN_TIMER); SN_TIMER = null; }
+			return;
+		}
+
+		// Animasi halus pada ikon auto-refresh sebagai indikator visual
+		var ico = $('#icoAutoRefresh');
+		if(ico.length){
+			ico.addClass('spinning');
+			setTimeout(function(){ ico.removeClass('spinning'); }, 1200);
+		}
+
+		// Refresh SILENT HANYA untuk tab/subtab yang saat ini sedang aktif
+		if($('#top-dash').hasClass('on')){
+			snStatus(null, true);
+			snEliteLoad(null, true);
+			if(SN_SUB.aktif === 'bans') snBans(null, true);
+			else if(SN_SUB.aktif === 'situs') snSitus(null, true);
+			else if(SN_SUB.aktif === 'edr') snEdrMuat(null, true);
+			else if(SN_SUB.aktif === 'vhost') snVhostMuat(null, true);
+			else if(SN_SUB.aktif === 'geo') snGeoMuat(null, true);
+			else if(SN_SUB.aktif === 'feed') snFeed(null, true);
+			else if(SN_SUB.aktif === 'aksi') snAksiMuat(null, true);
+			else if(SN_SUB.aktif === 'riwayat') snRiwayat(null, true);
+			else if(SN_SUB.aktif === 'review') snRevMuat(SN_REV_STATUS, true);
+			else if(SN_SUB.aktif === 'notif') snNotifLog(null, true);
+		}
+		else if($('#top-firewall').hasClass('on')){
+			snFwMuat(null, true);
+			snPortLoad(null, true);
+		}
+		else if($('#top-antivirus').hasClass('on')){
+			if(SN_AV_TAB === 'vhost') snAvSitesMuat(null, true);
+		}
+		else if($('#top-waf').hasClass('on')){
+			snWafMuat(null, true);
+		}
+	}, sec * 1000);
 }
 
 /* ---------- kerangka dialog ---------- */
@@ -3081,64 +3483,24 @@ function snBuka(){
 	$('.sn-modal').not(m).remove();
 	m.addClass('on').show(0);
 	document.body.style.overflow = 'hidden';
-	/* interval dibuat ulang setiap buka. Tanpa ini timer lama tetap jalan
-	   setelah dialog ditutup: 6 request sia-sia per menit ke server
-	   selama halaman panel masih terbuka. */
-	if(SN_TIMER){ clearInterval(SN_TIMER); SN_TIMER = null; }
 	/* Pagar jeda snSysMuat() direset. Tanpa ini, dialog yang dibuka
 	   ulang dalam 4 detik akan menampilkan panel sistem kosong karena
 	   pemuatnya menolak bekerja demi hemat permintaan. */
 	SN_SYS_T = 0;
-	SN_TIMER = setInterval(function(){
-		/* PENJAGA. Kalau panel melepas fragmen plugin ini dari DOM,
-		   dialog sudah tidak ada tapi timer masih hidup, sehingga
-		   request tetap terkirim dan lencana tetap berubah untuk
-		   elemen yang sudah tidak terlihat. Keadaan itu persis yang
-		   terlihat sebagai "dialog sisa" padahal lencana di dalamnya
-		   terus berdenyut. Di sini dijaga supaya berhenti sendiri. */
-		var m = document.getElementById('snModal');
-		if(!m || !document.body.contains(m)){
-			clearInterval(SN_TIMER);
-			SN_TIMER = null;
-			return;
-		}
-		/* Kalau elemennya ada tapi disembunyikan paksa dari luar
-		   (misalnya disembunyikan panel), rapikan juga agar tidak
-		   menggantung di belakang layar. */
-		if(m.style.display === 'none' && !m.className.match(/\bon\b/)){
-			clearInterval(SN_TIMER);
-			SN_TIMER = null;
-			return;
-		}
-		snStatus();
-		snBans();
-		snPanikRefresh();
-		/* Aturan kernel disegarkan hanya saat tab Firewall terlihat.
-		   Di luar itu permintaannya tidak akan terlihat hasilnya
-		   karena elemennya tertutup, jadi tidak perlu dikirim. */
-		if($('#top-firewall').hasClass('on')){ snFwBackendMuat(); snFwMuat(); snFwrMuat(); }
-		if($('#top-antivirus').hasClass('on')){ snAvMuat(); }
-	}, 10000);
-	/* Pemuatan awal setelah jeda pendek. Jeda ini penting: saat dialog
-	   baru dibuka, tabel kernel masih di luar viewport pada layar kecil,
-	   dan mengisi elemen sebelum punya tinggi tidak menghasilkan
-	   scrollbar yang benar.
-
-	   Semua panel dimuat di sini, bukan hanya engine dan kernel. Kalau
-	   hanya sebagian, reopening dialog akan menampilkan header dengan
-	   area isi kosong sampai interval 10 detik kemudian menyentuhnya. */
+	/* Mulai timer auto-refresh sesuai preferensi pengguna (default: 0 = manual/off) */
+	snInitAutoRefresh();
+	/* Pemuatan awal instan dan bersih: HANYA muat data dashboard aktif */
 	setTimeout(function(){
-		snStatus();     /* statistik, lencana, grafik */
-		snSysMuat();    /* panel informasi sistem */
-		snBans();       /* tabel IP yang diblokir */
-		snPanicMuat();  /* kondisi panic */
-		snEngineMuat(); /* kartu engine + switch mode WAF */
-		snLuaMuat();    /* kartu LUA free_waf */
-		snFwMuat();     /* urutan aturan kernel */
-		snAvLencana();  /* lencana antivirus clamav */
-		snInitLang();      /* inisialisasi bahasa tampilan */
-		snInitTelemetry(); /* inisialisasi telemetri Google Tag Manager */
-	}, 500);
+		snStatus();        /* statistik utama & lencana status ribbon instan */
+		snSysMuat();       /* panel CPU, RAM & informasi sistem */
+		snBans();          /* tabel IP yang diblokir pada tab dashboard */
+		snPanicMuat();     /* kondisi tombol panik */
+		snEliteLoad();     /* postur pertahanan & kesiapan DEFCON instan */
+		setTimeout(function(){
+			snGrafik();        /* grafik tren lalu lintas & ancaman */
+			snInitTelemetry(); /* inisialisasi telemetri Google Tag Manager */
+		}, 250);
+	}, 30);
 }
 function snTutupLapis(){
 	/* Dialog ZySentinel berada DI DALAM lapisan layui-layer milik panel.
@@ -3202,6 +3564,7 @@ function snTutup(){
 	   ditutup dan hasilnya tidak pernah terlihat. */
 	if(SN_TIMER){ clearInterval(SN_TIMER); SN_TIMER = null; }
 	if(window.SN_FW_TIMER){ clearInterval(window.SN_FW_TIMER); window.SN_FW_TIMER = null; }
+	if(window.SN_AV_POLL){ clearInterval(window.SN_AV_POLL); window.SN_AV_POLL = null; }
 	/* Tutup dialog layer milik ZySentinel yang mungkin masih menggantung.
 	   Dialog konfirmasi biasa (layer.confirm) sudah tertutup oleh user,
 	   tapi dialog panic memakai shadeClose:false sehingga hanya bisa
@@ -3257,6 +3620,7 @@ function snTutup(){
 	$('#avsub-vhost').addClass('on');
 }
 function snTop(nama, el){
+	snSanitizeEvents();
 	$('.sn-mtabs span').removeClass('on');
 	$(el).addClass('on');
 	$('.sn-page').removeClass('on');
@@ -3273,18 +3637,9 @@ function snTop(nama, el){
 	}
 	else if(nama === 'firewall'){
 		snFwAllMuat();
-		snStartFwTimer();
 	}
 	else if(nama === 'waf'){
-		/* Satu pemuatan menutup dua sub-tab: Coraza memakai data
-		   get_waf_engine (+ switch mode), LUA memakai get_freewaf.
-		   Keduanya dipanggil supaya berpindah sub-tab tidak
-		   menampilkan isi kosong. */
-		snEngineMuat();   /* kartu engine + snModeMuat (badge switch) */
-		snLuaMuat();      /* kartu LUA free_waf */
-		snNwMuat();
-		snWafMuat();
-		snWafLencana();
+		snWafTab(SN_WAFTAB || 'coraza');
 	}
 	else {
 		var k = SN_SUB2.aktif;
@@ -3385,27 +3740,6 @@ function snUpdateDefconBanner(p){
 
 	var defconTitles = {
 		en: {
-		tip_sync: "Sync Latest Global Threat Intelligence Feed",
-		ph_notif_url: "https://... webhook URL",
-		ph_notif_max: "max retries",
-		ph_cc_limit: "request limit",
-		ph_cc_cycle: "cycle (s)",
-		ph_cc_end: "block duration (s)",
-		ph_waf_list_val: "IP address or URL pattern",
-		ph_fwr_val: "IP or CIDR",
-		ph_allow_ip: "IP address or CIDR",
-		tip_brand_logo: "ZySentinel CyberMatrix Defense Logo",
-		tip_tg_egress: "Web Worker Outbound Connection Restrictor (Prevent Reverse Shell)",
-		tip_tg_proc: "Unauthorized Process Execution Watchdog (EDR)",
-		tip_tg_intel: "Registered Global Threat Intelligence IP Blocks",
-		tip_tg_fim: "Startup Files & Critical Binaries Integrity Result",
-		tip_th_threats: "Total Threats & Attacks Detected",
-		tip_th_attackers: "Total Unique Attacker IPs Detected",
-		tip_th_viruses: "Total Viruses & Malware Detected",
-		tip_fw_hit_live: "Realtime packet telemetry active",
-		tip_refresh_packet_counters: "Refresh Packet Counters",
-		tip_mode_monitor_only: "Switch Mode to Monitor: Log Without Blocking",
-		tip_mode_enable_blocking: "Switch Mode to Enforce: Block Violators in Kernel",
 			1: "DEFCON 1 -- EMERGENCY (PANIC MODE)",
 			2: "DEFCON 2 -- THREAT DETECTED & NEUTRALIZED",
 			3: "DEFCON 3 -- FULL DEFENSE ACTIVE",
@@ -3413,27 +3747,6 @@ function snUpdateDefconBanner(p){
 			5: "DEFCON 5 -- DEFENSE INACTIVE"
 		},
 		id: {
-		tip_sync: "Sinkronkan Umpan Intelijen Ancaman Global Terkini",
-		ph_notif_url: "https://... URL webhook",
-		ph_notif_max: "maks coba",
-		ph_cc_limit: "batas request",
-		ph_cc_cycle: "siklus (detik)",
-		ph_cc_end: "durasi blokir (detik)",
-		ph_waf_list_val: "Alamat IP atau pola URL",
-		ph_fwr_val: "IP atau CIDR",
-		ph_allow_ip: "Alamat IP atau CIDR",
-		tip_brand_logo: "Logo Pertahanan Siber ZySentinel CyberMatrix",
-		tip_tg_egress: "Pembatas Koneksi Keluar Web Worker (Mencegah Reverse Shell)",
-		tip_tg_proc: "Pemantau Eksekusi Proses Ilegal (EDR)",
-		tip_tg_intel: "Daftar Blokir IP Intelijen Ancaman Global Terdaftar",
-		tip_tg_fim: "Hasil Pemeriksaan Integritas Berkas Startup & Biner Kritis",
-		tip_th_threats: "Total Ancaman & Serangan Terdeteksi",
-		tip_th_attackers: "Total IP Penyerang Unik Terdeteksi",
-		tip_th_viruses: "Total Virus & Malware Terdeteksi",
-		tip_fw_hit_live: "Telemetri paket realtime aktif",
-		tip_refresh_packet_counters: "Segarkan Penghitung Paket",
-		tip_mode_monitor_only: "Alihkan Mode ke Monitor: Mencatat Tanpa Memblokir",
-		tip_mode_enable_blocking: "Alihkan Mode ke Enforce: Blokir Pelanggar di Kernel",
 			1: "DEFCON 1 -- DARURAT (PANIC MODE)",
 			2: "DEFCON 2 -- ANCAMAN TERDETEKSI & DINETRALISIR",
 			3: "DEFCON 3 -- PERTAHANAN PENUH AKTIF",
@@ -3443,27 +3756,6 @@ function snUpdateDefconBanner(p){
 	};
 	var defconDescs = {
 		en: {
-		tip_sync: "Sync Latest Global Threat Intelligence Feed",
-		ph_notif_url: "https://... webhook URL",
-		ph_notif_max: "max retries",
-		ph_cc_limit: "request limit",
-		ph_cc_cycle: "cycle (s)",
-		ph_cc_end: "block duration (s)",
-		ph_waf_list_val: "IP address or URL pattern",
-		ph_fwr_val: "IP or CIDR",
-		ph_allow_ip: "IP address or CIDR",
-		tip_brand_logo: "ZySentinel CyberMatrix Defense Logo",
-		tip_tg_egress: "Web Worker Outbound Connection Restrictor (Prevent Reverse Shell)",
-		tip_tg_proc: "Unauthorized Process Execution Watchdog (EDR)",
-		tip_tg_intel: "Registered Global Threat Intelligence IP Blocks",
-		tip_tg_fim: "Startup Files & Critical Binaries Integrity Result",
-		tip_th_threats: "Total Threats & Attacks Detected",
-		tip_th_attackers: "Total Unique Attacker IPs Detected",
-		tip_th_viruses: "Total Viruses & Malware Detected",
-		tip_fw_hit_live: "Realtime packet telemetry active",
-		tip_refresh_packet_counters: "Refresh Packet Counters",
-		tip_mode_monitor_only: "Switch Mode to Monitor: Log Without Blocking",
-		tip_mode_enable_blocking: "Switch Mode to Enforce: Block Violators in Kernel",
 			1: "Server under complete quarantine: all public HTTP/HTTPS access is blocked at kernel level for incident investigation.",
 			2: "RCE attack attempts, unauthorized execution, or persistence anomalies were detected and neutralized within the last 15 minutes.",
 			3: "All defense layers (Kernel firewall, WAF, Egress Guard, Process Guard, Threat Intel) are running optimally with zero incidents.",
@@ -3471,27 +3763,6 @@ function snUpdateDefconBanner(p){
 			5: "Major security systems are disabled. The server is vulnerable to attacks."
 		},
 		id: {
-		tip_sync: "Sinkronkan Umpan Intelijen Ancaman Global Terkini",
-		ph_notif_url: "https://... URL webhook",
-		ph_notif_max: "maks coba",
-		ph_cc_limit: "batas request",
-		ph_cc_cycle: "siklus (detik)",
-		ph_cc_end: "durasi blokir (detik)",
-		ph_waf_list_val: "Alamat IP atau pola URL",
-		ph_fwr_val: "IP atau CIDR",
-		ph_allow_ip: "Alamat IP atau CIDR",
-		tip_brand_logo: "Logo Pertahanan Siber ZySentinel CyberMatrix",
-		tip_tg_egress: "Pembatas Koneksi Keluar Web Worker (Mencegah Reverse Shell)",
-		tip_tg_proc: "Pemantau Eksekusi Proses Ilegal (EDR)",
-		tip_tg_intel: "Daftar Blokir IP Intelijen Ancaman Global Terdaftar",
-		tip_tg_fim: "Hasil Pemeriksaan Integritas Berkas Startup & Biner Kritis",
-		tip_th_threats: "Total Ancaman & Serangan Terdeteksi",
-		tip_th_attackers: "Total IP Penyerang Unik Terdeteksi",
-		tip_th_viruses: "Total Virus & Malware Terdeteksi",
-		tip_fw_hit_live: "Telemetri paket realtime aktif",
-		tip_refresh_packet_counters: "Segarkan Penghitung Paket",
-		tip_mode_monitor_only: "Alihkan Mode ke Monitor: Mencatat Tanpa Memblokir",
-		tip_mode_enable_blocking: "Alihkan Mode ke Enforce: Blokir Pelanggar di Kernel",
 			1: "Server dalam karantina total: seluruh akses HTTP/HTTPS publik diblokir di tingkat kernel demi investigasi insiden.",
 			2: "Upaya serangan RCE/eksekusi ilegal atau anomali persistensi terdeteksi dan dinetralisir dalam 15 menit terakhir.",
 			3: "Seluruh layer pertahanan (Firewall kernel, WAF, Egress Guard, Process Guard, Threat Intel) berjalan optimal tanpa insiden.",
@@ -3543,15 +3814,214 @@ function snUpdateDefconBanner(p){
 	}
 }
 
-function snEliteLoad(){
+function snEliteLoad(btn, isSilent){
+	var stopSpin = snSpinBtn(btn);
 	snAjax('get_elite_posture', {}, function(res){
+		stopSpin();
 		if(!res) return;
 		var p = res;
 		SN_ELITE_DATA = p;
 		snUpdateDefconBanner(p);
 
 		if(SN_SUB.aktif === 'edr'){
-			snEdrMuat();
+			snEdrMuat(null, isSilent);
+		}
+	}, null, btn, isSilent);
+}
+
+function snDefconRefreshManual(btn){
+	var isEn = (typeof SN_LANG !== 'undefined' && SN_LANG !== 'id');
+	var title = isEn ? 'Audit Security Posture & Telemetry' : 'Audit Postur Keamanan & Telemetri';
+	var msg = isEn ?
+		('<div style="line-height:1.6;font-size:13px">'
+		+ '<p style="margin-bottom:8px;font-weight:600;color:var(--ink-1,#fff)">Run a comprehensive security audit on DEFCON posture and real-time defense telemetry now?</p>'
+		+ '<ul style="margin-left:18px;color:#94a3b8;font-size:12px;list-style-type:disc;display:flex;flex-direction:column;gap:3px">'
+		+ '<li>DEFCON readiness level recalculation</li>'
+		+ '<li>Egress Guard outbound network restriction verification</li>'
+		+ '<li>Process Guard (EDR) runtime execution status</li>'
+		+ '<li>Global Threat Intel feed IP blocks count</li>'
+		+ '<li>System Persistence & FIM integrity verification</li>'
+		+ '</ul></div>') :
+		('<div style="line-height:1.6;font-size:13px">'
+		+ '<p style="margin-bottom:8px;font-weight:600;color:var(--ink-1,#fff)">Jalankan audit komprehensif terhadap postur keamanan DEFCON dan telemetri pertahanan server sekarang?</p>'
+		+ '<ul style="margin-left:18px;color:#94a3b8;font-size:12px;list-style-type:disc;display:flex;flex-direction:column;gap:3px">'
+		+ '<li>Kalkulasi ulang tingkat kesiagaan DEFCON</li>'
+		+ '<li>Verifikasi proteksi Egress Guard (Anti-Reverse Shell)</li>'
+		+ '<li>Status pengawasan runtime Process Guard (EDR)</li>'
+		+ '<li>Validasi jumlah blokir IP Global Threat Intel</li>'
+		+ '<li>Pemeriksaan integritas FIM & berkas persistensi sistem</li>'
+		+ '</ul></div>');
+
+	layer.confirm(msg, {
+		title: title,
+		icon: 3,
+		btn: isEn ? ['Run Audit', 'Cancel'] : ['Jalankan Audit', 'Batal'],
+		area: ['480px', 'auto']
+	}, function(cIdx){
+		layer.close(cIdx);
+		var pIdx = snProgress(isEn ? 'Auditing defense posture & security telemetry...' : 'Mengaudit postur pertahanan & telemetri keamanan...');
+		var stopSpin = snSpinBtn(btn);
+		snAjax('get_elite_posture', {}, function(res){
+			stopSpin();
+			if(!res){
+				layer.msg(isEn ? 'Failed to fetch defense posture telemetry.' : 'Gagal memuat telemetri postur pertahanan.', {time: 3000});
+				return;
+			}
+			var p = res;
+			SN_ELITE_DATA = p;
+			snUpdateDefconBanner(p);
+			if(SN_SUB && SN_SUB.aktif === 'edr'){
+				snEdrMuat(null, true);
+			}
+			snShowDefconResultModal(p);
+		}, pIdx, null, true);
+	});
+}
+
+function snShowDefconResultModal(p){
+	if(!p) return;
+	var isEn = (typeof SN_LANG !== 'undefined' && SN_LANG !== 'id');
+	var defcon = Number(p.defcon) || 3;
+
+	var defconThemes = {
+		1: { color: '#ef4444', bg: 'rgba(239, 68, 68, 0.16)', border: 'rgba(239, 68, 68, 0.45)', glow: '0 0 15px rgba(239,68,68,0.3)' },
+		2: { color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.16)', border: 'rgba(245, 158, 11, 0.45)', glow: '0 0 15px rgba(245,158,11,0.3)' },
+		3: { color: '#10b981', bg: 'rgba(16, 185, 129, 0.16)', border: 'rgba(16, 185, 129, 0.45)', glow: '0 0 15px rgba(16,185,129,0.3)' },
+		4: { color: '#eab308', bg: 'rgba(234, 179, 8, 0.16)', border: 'rgba(234, 179, 8, 0.45)', glow: '0 0 15px rgba(234,179,8,0.3)' },
+		5: { color: '#94a3b8', bg: 'rgba(148, 163, 184, 0.16)', border: 'rgba(148, 163, 184, 0.45)', glow: '0 0 15px rgba(148,163,184,0.3)' }
+	};
+	var theme = defconThemes[defcon] || defconThemes[3];
+
+	var defconTitles = {
+		en: {
+			1: "DEFCON 1 -- EMERGENCY (PANIC MODE)",
+			2: "DEFCON 2 -- THREAT DETECTED & NEUTRALIZED",
+			3: "DEFCON 3 -- FULL DEFENSE ACTIVE",
+			4: "DEFCON 4 -- PARTIAL DEFENSE",
+			5: "DEFCON 5 -- DEFENSE INACTIVE"
+		},
+		id: {
+			1: "DEFCON 1 -- DARURAT (PANIC MODE)",
+			2: "DEFCON 2 -- ANCAMAN TERDETEKSI & DINETRALISIR",
+			3: "DEFCON 3 -- PERTAHANAN PENUH AKTIF",
+			4: "DEFCON 4 -- PERTAHANAN PARSIAL",
+			5: "DEFCON 5 -- PERTAHANAN NONAKTIF"
+		}
+	};
+	var defconDescs = {
+		en: {
+			1: "Server under complete quarantine: all public HTTP/HTTPS access is blocked at kernel level for incident investigation.",
+			2: "RCE attack attempts, unauthorized execution, or persistence anomalies were detected and neutralized within the last 15 minutes.",
+			3: "All defense layers (Kernel firewall, WAF, Egress Guard, Process Guard, Threat Intel) are running optimally with zero incidents.",
+			4: "Some elite defense modules (Egress, Process Guard, or Threat Intel) are currently inactive.",
+			5: "Major security systems are disabled. The server is vulnerable to attacks."
+		},
+		id: {
+			1: "Server dalam karantina total: seluruh akses HTTP/HTTPS publik diblokir di tingkat kernel demi investigasi insiden.",
+			2: "Upaya serangan RCE/eksekusi ilegal atau anomali persistensi terdeteksi dan dinetralisir dalam 15 menit terakhir.",
+			3: "Seluruh layer pertahanan (Firewall kernel, WAF, Egress Guard, Process Guard, Threat Intel) berjalan optimal tanpa insiden.",
+			4: "Beberapa modul pertahanan elit (Egress, Process Guard, atau Intel Feed) sedang dalam kondisi nonaktif.",
+			5: "Sistem pertahanan utama nonaktif. Server rentan terhadap serangan."
+		}
+	};
+
+	var langKey = isEn ? 'en' : 'id';
+	var title = (defconTitles[langKey] && defconTitles[langKey][defcon]) ? defconTitles[langKey][defcon] : p.defcon_title;
+	var desc = (defconDescs[langKey] && defconDescs[langKey][defcon]) ? defconDescs[langKey][defcon] : p.defcon_desc;
+
+	var eg = p.egress_guard || {};
+	var egActive = !!eg.active;
+	var egBadge = egActive ? '<span class="sn-badge sn-ok">' + (isEn ? 'ACTIVE' : 'AKTIF') + '</span>' : '<span class="sn-badge sn-bad">' + (isEn ? 'INACTIVE' : 'NONAKTIF') + '</span>';
+	var egDesc = egActive ? (isEn ? 'Port filter: ' + (eg.allowed_ports || '53, 80, 443') : 'Filter port: ' + (eg.allowed_ports || '53, 80, 443')) : (isEn ? 'Web outbound unrestricted' : 'Lalu lintas keluar tidak dibatasi');
+
+	var pr = p.proc_guard || {};
+	var prMode = (pr.mode || 'off').toLowerCase();
+	var prBadge = '<span class="sn-badge sn-bad">OFF</span>';
+	if(pr.active && prMode === 'enforce'){
+		prBadge = '<span class="sn-badge sn-ok">ENFORCE</span>';
+	} else if(prMode === 'audit'){
+		prBadge = '<span class="sn-badge sn-off">AUDIT</span>';
+	}
+	var prScans = (pr.scans || 0).toLocaleString();
+	var prAlerts = pr.alerts || 0;
+	var prWl = pr.whitelisted || 0;
+	var prDesc = isEn ? (prScans + ' scans | ' + prAlerts + ' alerts | ' + prWl + ' wl') : (prScans + ' scan | ' + prAlerts + ' insiden | ' + prWl + ' wl');
+
+	var ti = p.threat_intel || {};
+	var tiCount = Number(ti.count) || 0;
+	var tiBadge = (tiCount > 0) ? '<span class="sn-badge sn-ok">' + tiCount.toLocaleString() + ' CIDR</span>' : '<span class="sn-badge sn-bad">' + (isEn ? 'EMPTY' : 'KOSONG') + '</span>';
+	var tiDesc = ti.source || 'Spamhaus DROP & EDROP';
+
+	var fim = p.sys_persistence || {};
+	var fimClean = (fim.status === 'clean');
+	var fimBadge = fimClean ? '<span class="sn-badge sn-ok">' + (isEn ? '89 CLEAN' : '89 BERSIH') + '</span>' : '<span class="sn-badge sn-bad">' + (fim.changes || 1) + (isEn ? ' ANOMALIES' : ' ANOMALI') + '</span>';
+	var fimDesc = fimClean ? (isEn ? 'Critical files intact' : 'Berkas kritis utuh & terverifikasi') : (isEn ? 'Tampered persistence detected' : 'Perubahan berkas terdeteksi');
+
+	var nowTime = (new Date()).toLocaleTimeString();
+
+	var contentHtml = '<div style="padding:16px 20px;font-size:13px;color:var(--ink-1,#fff)">'
+		+ '<div style="padding:14px 16px;border-radius:8px;background:' + theme.bg + ';border:1px solid ' + theme.border + ';box-shadow:' + theme.glow + ';margin-bottom:16px">'
+			+ '<div style="display:flex;align-items:center;gap:12px;margin-bottom:6px">'
+				+ '<div style="font-family:var(--mono-font);font-size:13px;font-weight:800;padding:4px 10px;border-radius:4px;background:#030712;color:' + theme.color + ';border:1px solid ' + theme.color + '">'
+					+ 'DEFCON ' + defcon
+				+ '</div>'
+				+ '<div style="font-weight:700;font-size:14px;color:#fff;letter-spacing:-.2px">' + title + '</div>'
+			+ '</div>'
+			+ '<div style="font-size:12px;color:rgba(255,255,255,0.85);line-height:1.5">' + desc + '</div>'
+		+ '</div>'
+
+		+ '<div style="font-weight:600;font-size:12.5px;color:var(--ink-2,#94a3b8);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">'
+			+ (isEn ? 'Telemetric Defense Layers Status' : 'Status Telemetri Lapisan Pertahanan')
+		+ '</div>'
+
+		+ '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">'
+			+ '<div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle,rgba(255,255,255,0.08));border-radius:6px;padding:10px 12px">'
+				+ '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'
+					+ '<span style="font-weight:600;font-size:12px">Egress Guard</span>'
+					+ egBadge
+				+ '</div>'
+				+ '<div style="font-size:11.5px;color:var(--text-muted,#94a3b8);font-family:var(--mono-font)">' + egDesc + '</div>'
+			+ '</div>'
+
+			+ '<div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle,rgba(255,255,255,0.08));border-radius:6px;padding:10px 12px">'
+				+ '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'
+					+ '<span style="font-weight:600;font-size:12px">Process Guard (EDR)</span>'
+					+ prBadge
+				+ '</div>'
+				+ '<div style="font-size:11.5px;color:var(--text-muted,#94a3b8);font-family:var(--mono-font)">' + prDesc + '</div>'
+			+ '</div>'
+
+			+ '<div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle,rgba(255,255,255,0.08));border-radius:6px;padding:10px 12px">'
+				+ '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'
+					+ '<span style="font-weight:600;font-size:12px">Global Threat Intel</span>'
+					+ tiBadge
+				+ '</div>'
+				+ '<div style="font-size:11.5px;color:var(--text-muted,#94a3b8);font-family:var(--mono-font)">' + tiDesc + '</div>'
+			+ '</div>'
+
+			+ '<div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle,rgba(255,255,255,0.08));border-radius:6px;padding:10px 12px">'
+				+ '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'
+					+ '<span style="font-weight:600;font-size:12px">' + (isEn ? 'Persistence FIM' : 'FIM Persistensi') + '</span>'
+					+ fimBadge
+				+ '</div>'
+				+ '<div style="font-size:11.5px;color:var(--text-muted,#94a3b8);font-family:var(--mono-font)">' + fimDesc + '</div>'
+			+ '</div>'
+		+ '</div>'
+
+		+ '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:rgba(0,0,0,0.25);border-radius:6px;font-size:11.5px;color:var(--text-muted,#94a3b8)">'
+			+ '<div>WAF Engine: <b style="color:#fff">' + (p.waf_engine || 'free_waf') + '</b> | ' + (isEn ? 'Active IP Bans: ' : 'IP Terblokir: ') + '<b style="color:#fff">' + (p.bans_active || 0) + '</b></div>'
+			+ '<div>' + (isEn ? 'Audited at: ' : 'Waktu audit: ') + '<span style="font-family:var(--mono-font);color:#fff">' + nowTime + '</span></div>'
+		+ '</div>'
+		+ '</div>';
+
+	layer.open({
+		type: 1,
+		title: isEn ? 'Defense Posture Audit Result' : 'Hasil Audit Postur Pertahanan DEFCON',
+		area: ['600px', 'auto'],
+		content: contentHtml,
+		btn: [isEn ? 'Close' : 'Tutup'],
+		yes: function(idx){
+			layer.close(idx);
 		}
 	});
 }
@@ -3565,10 +4035,11 @@ function snToggleEgress(){
 		btn: isEn ? ['Confirm', 'Cancel'] : ['Konfirmasi', 'Batal']
 	}, function(idx){
 		layer.close(idx);
+		var pIdx = snProgress(isEn ? 'Updating Egress Guard...' : 'Memperbarui Egress Guard...');
 		snAjax('set_elite_defense', {type: 'egress', mode: next}, function(r){
 			layer.msg(r && r.msg ? r.msg : (isEn ? 'Egress Guard updated successfully' : 'Berhasil memperbarui Egress Guard'));
 			snInitElitePosture();
-		});
+		}, pIdx);
 	});
 }
 
@@ -3585,33 +4056,32 @@ function snToggleProc(){
 		btn: isEn ? ['Confirm', 'Cancel'] : ['Konfirmasi', 'Batal']
 	}, function(idx){
 		layer.close(idx);
+		var pIdx = snProgress(isEn ? 'Updating Process Watchdog...' : 'Memperbarui Process Watchdog...');
 		snAjax('set_elite_defense', {type: 'proc', mode: next}, function(r){
 			layer.msg(r && r.msg ? r.msg : (isEn ? 'Process Guard updated successfully' : 'Berhasil mengubah mode Process Guard'));
 			snInitElitePosture();
-		});
+		}, pIdx);
 	});
 }
 
 function snSyncIntel(){
 	var isEn = (SN_LANG !== 'id');
-	var load = layer.load(1);
+	var pIdx = snProgress(isEn ? 'Syncing global Threat Intel CIDR rules...' : 'Menyinkronkan basis intelijen ancaman global...');
 	snAjax('update_threat_intel', {}, function(r){
-		layer.close(load);
 		layer.msg(r && r.msg ? r.msg : (isEn ? 'Threat Intel updated successfully' : 'Threat Intel diperbarui'));
 		snEliteLoad();
-	});
+	}, pIdx);
 }
 
 function snCheckFim(){
 	var isEn = (SN_LANG !== 'id');
-	var load = layer.load(1);
+	var pIdx = snProgress(isEn ? 'Auditing system persistence & FIM integrity...' : 'Memeriksa integritas berkas persistensi sistem...');
 	snAjax('av_check_persistence', {}, function(r){
-		layer.close(load);
 		layer.alert(r && r.msg ? r.msg : (isEn ? 'Persistence integrity check completed.' : 'Pemeriksaan integritas selesai.'), {
 			title: isEn ? 'Persistence FIM Check Result' : 'Hasil FIM Persistensi Sistem'
 		});
 		snEliteLoad();
-	});
+	}, pIdx);
 }
 
 function snEdrMuat(){
@@ -3723,20 +4193,19 @@ function snQuickWhitelistModal(alertId, exeEnc, cmdEnc, ruleEnc){
 			}
 
 			layer.close(idx);
-			layer.msg(isEn ? 'Saving whitelist rule...' : 'Menyimpan aturan whitelist...', {time:0, shade:[0.3, '#000']});
+			var pIdx = snProgress(isEn ? 'Saving whitelist rule...' : 'Menyimpan aturan whitelist...');
 			snAjax('add_proc_whitelist', {
 				name: name,
 				type: type,
 				pattern: pattern,
 				remark: remark
 			}, function(res){
-				layer.closeAll('loading');
 				if(res){
 					layer.msg(res, {time: 3000});
 					snEdrMuat();
 					snProcWlUpdateCount();
 				}
-			});
+			}, pIdx);
 			return false;
 		}
 	});
@@ -3811,6 +4280,8 @@ function snProcWlManageModal(){
 }
 
 function snProcWlToggle(ruleId){
+	var isEn = (SN_LANG !== 'id');
+	var pIdx = snProgress(isEn ? 'Toggling whitelist rule status...' : 'Mengubah status aturan whitelist...');
 	snAjax('toggle_proc_whitelist', {id: ruleId}, function(res){
 		if(res){
 			layer.msg(res, {time: 2500});
@@ -3818,7 +4289,7 @@ function snProcWlToggle(ruleId){
 			snProcWlManageModal();
 			snProcWlUpdateCount();
 		}
-	});
+	}, pIdx);
 }
 
 function snProcWlDelete(ruleId, nameEnc){
@@ -3829,6 +4300,7 @@ function snProcWlDelete(ruleId, nameEnc){
 		btn: isEn ? ['Delete', 'Cancel'] : ['Hapus', 'Batal']
 	}, function(idx){
 		layer.close(idx);
+		var pIdx = snProgress(isEn ? 'Deleting whitelist rule...' : 'Menghapus aturan whitelist...');
 		snAjax('del_proc_whitelist', {id: ruleId}, function(res){
 			if(res){
 				layer.msg(res, {time: 2500});
@@ -3836,7 +4308,7 @@ function snProcWlDelete(ruleId, nameEnc){
 				snProcWlManageModal();
 				snProcWlUpdateCount();
 			}
-		});
+		}, pIdx);
 	});
 }
 
@@ -3907,11 +4379,14 @@ function snStats(s, m){
 }
 
 /* ---------- panel sistem ---------- */
-function snSysMuat(){
+function snSysMuat(btn, isSilent){
+	if(btn) SN_SYS_T = 0;
+	var stopSpin = snSpinBtn(btn);
 	snAjax('get_sysinfo', {}, function(m){
+		stopSpin();
 		if(!m) return;
 		var now = Date.now();
-		if(now - SN_SYS_T < 4000){ return; }
+		if(!btn && now - SN_SYS_T < 4000){ return; }
 		SN_SYS_T = now;
 		var isEn = (SN_LANG !== 'id');
 		var mem = '<div style="flex:1 1 100%"><div style="display:flex;justify-content:space-between">'
@@ -3933,14 +4408,15 @@ function snSysMuat(){
 		for(var i = 0; i < baris.length; i++){
 			h += '<div><span>' + baris[i][0] + '</span><span>' + baris[i][1] + '</span></div>';
 		}
-	$('#snSys').html(h + mem);
-	});
+		$('#snSys').html(h + mem);
+	}, null, btn, isSilent);
 }
 
 /* ---------- status ---------- */
-function snStatus(){
-	snEliteLoad();
+function snStatus(btn, isSilent){
+	var stopSpin = snSpinBtn(btn);
 	snAjax('get_status', {}, function(m){
+		stopSpin();
 		if(!m) return;
 		window.SN_STATUS_DATA = m;
 		var s = m.status;
@@ -3960,20 +4436,51 @@ function snStatus(){
 		}
 
 		snUpdateBadgesAndNotes(m);
-		snGrafik();
-	});
+	}, null, btn, isSilent);
 }
 
-/* ---------- grafik ---------- */
-function snGrafik(){
-	if(typeof echarts === 'undefined'){
-		/* <script src> eksternal dimuat tidak sinkron oleh jQuery (domManip/_evalUrl),
-		   jadi inline script bisa jalan lebih dulu. Tunggu echarts siap. */
-		if((window.SN_E_TUNGGU = (window.SN_E_TUNGGU || 0) + 1) <= 40){ setTimeout(snGrafik, 250); return; }
-		$('#grafikKosong').text('pustaka grafik tidak termuat').show();
+/* ---------- pemuatan pustaka grafik non-blocking ---------- */
+function snLoadEcharts(cb){
+	if(typeof window.echarts !== 'undefined'){
+		if(cb) cb();
 		return;
 	}
-	var jam = $('#selJam').val();
+	if(window.SN_ECH_LOADING){
+		if(cb){ window.SN_ECH_CBS = window.SN_ECH_CBS || []; window.SN_ECH_CBS.push(cb); }
+		return;
+	}
+	window.SN_ECH_LOADING = true;
+	window.SN_ECH_CBS = cb ? [cb] : [];
+	var s = document.createElement('script');
+	s.src = '/static/js/echarts.min.js';
+	s.async = true;
+	s.onload = function(){
+		window.SN_ECH_LOADING = false;
+		var cbs = window.SN_ECH_CBS || [];
+		window.SN_ECH_CBS = [];
+		for(var i = 0; i < cbs.length; i++){
+			try { cbs[i](); } catch(e){}
+		}
+	};
+	s.onerror = function(){
+		window.SN_ECH_LOADING = false;
+		$('#grafikKosong').text('pustaka grafik tidak termuat').show();
+	};
+	document.head.appendChild(s);
+}
+
+/* ---------- grafik (hanya dimuat saat tab Dashboard aktif) ---------- */
+var SN_LAST_CHART_T = 0;
+function snGrafik(force){
+	if(!$('#top-dash').hasClass('on') || !$('#grafik').length) return;
+	var now = Date.now();
+	if(!force && (now - SN_LAST_CHART_T < 8000)){ return; }
+	if(typeof echarts === 'undefined'){
+		snLoadEcharts(function(){ snGrafik(force); });
+		return;
+	}
+	SN_LAST_CHART_T = now;
+	var jam = $('#selJam').val() || 24;
 	snAjax('get_chart', {hours: jam}, function(m){
 		if(!m) return;
 		var el = document.getElementById('grafik');
@@ -4027,9 +4534,11 @@ function snGrafik(){
 }
 
 /* ---------- blocked IPs ---------- */
-function snBans(){
+function snBans(btn, isSilent){
 	var isEn = (SN_LANG !== 'id');
+	var stopSpin = snSpinBtn(btn);
 	snAjax('get_bans', {}, function(m){
+		stopSpin();
 		if(!m) return;
 		var isi = m.aktif || [];
 		var gabung = {};
@@ -4056,15 +4565,16 @@ function snBans(){
 		}
 		if(baris){ $('#tbBans').html(baris); }
 		else { kosong('#tbBans', 7, isEn ? 'No IP is currently blocked.' : 'Tidak ada IP yang sedang diblokir.'); }
-	});
+	}, null, btn, isSilent);
 }
-function snBan(){
+function snBan(btn){
 	var isEn = (SN_LANG !== 'id');
 	var ip = $('#banIP').val().trim();
 	if(!ip){ layer.msg(isEn ? 'IP address cannot be empty' : 'Alamat IP belum diisi', {time:2000}); return; }
+	var pIdx = snProgress(isEn ? ('Adding ' + ip + ' to kernel ban list...') : ('Menambahkan ' + ip + ' ke daftar blokir kernel...'));
 	snAjax('ban_ip', {ip: ip, secs: $('#banDetik').val().trim()}, function(m){
-		if(m){ layer.msg(m, {time:2500}); $('#banIP').val(''); $('#banDetik').val(''); snBans(); }
-	});
+		if(m){ layer.msg(m, {time:2500, icon: 1}); $('#banIP').val(''); $('#banDetik').val(''); snBans(); }
+	}, pIdx, btn);
 }
 function snUnban(ip){
 	var isEn = (SN_LANG !== 'id');
@@ -4073,14 +4583,19 @@ function snUnban(ip){
 		btn: isEn ? ['Unblock', 'Cancel'] : ['Buka Blokir', 'Batal']
 	}, function(idx){
 		layer.close(idx);
-		snAjax('unban_ip', {ip: ip}, function(m){ if(m){ layer.msg(m, {time:2500}); snBans(); } });
+		var pIdx = snProgress(isEn ? ('Unblocking ' + ip + ' in kernel firewall...') : ('Membuka blokir IP ' + ip + ' di firewall kernel...'));
+		snAjax('unban_ip', {ip: ip}, function(m){
+			if(m){ layer.msg(m, {time:2500, icon: 1}); snBans(); }
+		}, pIdx);
 	});
 }
 
 /* ---------- monitored sites ---------- */
-function snSitus(){
+function snSitus(btn, isSilent){
 	var isEn = (SN_LANG !== 'id');
+	var stopSpin = snSpinBtn(btn);
 	snAjax('get_sites', {}, function(m){
+		stopSpin();
 		if(!m) return;
 		var b = '';
 		for(var i = 0; i < m.situs.length; i++){
@@ -4097,13 +4612,15 @@ function snSitus(){
 		$('#situsLain').text(lain.length
 			? (isEn ? ('Tailed logs not registered as panel sites: ' + lain.join(', ') + '.') : ('Log yang ditail tapi tidak terdaftar sebagai situs: ' + lain.join(', ') + '.'))
 			: (isEn ? 'All tailed logs belong to registered sites.' : 'Semua log yang ditail berasal dari situs terdaftar.'));
-	});
+	}, null, btn, isSilent);
 }
 
 /* ---------- allow list ---------- */
-function snAllowMuat(){
+function snAllowMuat(btn, isSilent){
 	var isEn = (SN_LANG !== 'id');
+	var stopSpin = snSpinBtn(btn);
 	snAjax('get_allow', {}, function(m){
+		stopSpin();
 		if(!m) return;
 		var b = '';
 		for(var i = 0; i < m.daftar.length; i++){
@@ -4116,15 +4633,16 @@ function snAllowMuat(){
 			p += '<tr><td class="sn-mono">' + m.panel[j] + '</td><td>aapanel.ipv4.whitelist</td></tr>';
 		}
 		if(p){ $('#tbPanel').html(p); } else { kosong('#tbPanel', 2, isEn ? 'Panel allow list is empty.' : 'Daftar putih panel kosong.'); }
-	});
+	}, null, btn, isSilent);
 }
 function snAllow(){
 	var isEn = (SN_LANG !== 'id');
 	var ip = $('#allowIP').val().trim();
 	if(!ip){ layer.msg(isEn ? 'IP address cannot be empty' : 'Alamat IP belum diisi', {time:2000}); return; }
+	var pIdx = snProgress(isEn ? 'Adding IP to allow list...' : 'Menambahkan IP ke daftar putih...');
 	snAjax('allow_ip', {ip: ip}, function(m){
-		if(m){ layer.msg(m, {time:2500}); $('#allowIP').val(''); snAllowMuat(); }
-	});
+		if(m){ layer.msg(m, {time:2500, icon: 1}); $('#allowIP').val(''); snAllowMuat(); }
+	}, pIdx);
 }
 function snDelAllow(ip){
 	var isEn = (SN_LANG !== 'id');
@@ -4133,7 +4651,10 @@ function snDelAllow(ip){
 		btn: isEn ? ['Remove', 'Cancel'] : ['Hapus', 'Batal']
 	}, function(idx){
 		layer.close(idx);
-		snAjax('del_allow_ip', {ip: ip}, function(m){ if(m){ layer.msg(m, {time:2500}); snAllowMuat(); } });
+		var pIdx = snProgress(isEn ? ('Removing ' + ip + ' from allow list...') : ('Menghapus ' + ip + ' dari daftar putih...'));
+		snAjax('del_allow_ip', {ip: ip}, function(m){
+			if(m){ layer.msg(m, {time:2500, icon: 1}); snAllowMuat(); }
+		}, pIdx);
 	});
 }
 
@@ -4267,26 +4788,28 @@ function snConf(){
 }
 function snSimpan(k){ snSetConf(k, $('#c_' + k).val(), $('#c_' + k)); }
 function snSetConf(k, v, el){
+	var isEn = (SN_LANG !== 'id');
+	var pIdx = snProgress(isEn ? ('Saving configuration ' + k + '...') : ('Menyimpan pengaturan ' + k + '...'));
 	snAjax('set_conf', {key: k, value: v}, function(m){
 		if(m){ layer.msg(m, {time:3000}); snConf(); snStatus(); }
-	});
+	}, pIdx);
 }
-function snSvc(aksi){
+function snSvc(aksi, btn){
 	var labels = {
 		'start': (SN_LANG === 'id' ? 'Menjalankan daemon ZySentinel...' : 'Starting ZySentinel daemon...'),
 		'stop': (SN_LANG === 'id' ? 'Menghentikan daemon ZySentinel...' : 'Stopping ZySentinel daemon...'),
 		'restart': (SN_LANG === 'id' ? 'Memulai ulang daemon ZySentinel...' : 'Restarting ZySentinel daemon...'),
 		'reload': (SN_LANG === 'id' ? 'Memuat ulang konfigurasi & vhost...' : 'Reloading configuration & sites...')
 	};
-	var loadIdx = layer.msg(labels[aksi] || 'Processing...', {icon: 16, time: 0, shade: 0.1});
+	var btnEl = btn || (aksi === 'start' ? '#btnSvcStart' : (aksi === 'stop' ? '#btnSvcStop' : (aksi === 'restart' ? '#btnSvcRestart' : '#btnSvcReload')));
+	var pIdx = snProgress(labels[aksi] || 'Processing...');
 	snAjax('service_action', {action: aksi}, function(m){
-		layer.close(loadIdx);
 		if(m){
 			var text = (typeof m === 'string') ? m : (aksi.toUpperCase() + ' Success');
 			layer.msg(text, {icon: 1, time: 2500});
 			setTimeout(snStatus, 1200);
 		}
-	});
+	}, pIdx, btnEl);
 }
 
 function snClickGuardBadge(){
@@ -4435,11 +4958,10 @@ function snPanic(){
 					return;
 				}
 				layer.close(i);
-				layer.msg(isEn ? 'enabling panic...' : 'mengaktifkan panik...', {time:0, shade:[0.3,'#000']});
+				var pIdx = snProgress(isEn ? 'Activating Emergency Panic lockdown in kernel...' : 'Mengaktifkan kunci darurat panik di kernel netfilter...');
 				snAjax('set_panic', {active: 1}, function(r){
-					layer.closeAll();
-					if(r){ layer.msg(r, {time:4000}); snPanicMuat(); snStatus(); }
-				});
+					if(r){ layer.msg(r, {time:4000, icon: 1}); snPanicMuat(); snStatus(); }
+				}, pIdx);
 			}
 		});
 	});
@@ -4451,11 +4973,10 @@ function snUnpanic(){
 		btn: isEn ? ['Turn Off', 'Cancel'] : ['Matikan', 'Batal']
 	}, function(idx){
 		layer.close(idx);
-		layer.msg(isEn ? 'disabling panic...' : 'mematikan panik...', {time:0, shade:[0.3,'#000']});
+		var pIdx = snProgress(isEn ? 'Disabling Panic lockdown & releasing web ports...' : 'Mematikan kunci panik & memulihkan port web...');
 		snAjax('set_panic', {active: 0}, function(r){
-			layer.closeAll();
-			if(r){ layer.msg(r, {time:3000}); snPanicMuat(); snStatus(); }
-		});
+			if(r){ layer.msg(r, {time:3000, icon: 1}); snPanicMuat(); snStatus(); }
+		}, pIdx);
 	});
 }
 
@@ -4684,26 +5205,25 @@ function snRenderFwSets(jumlah_set){
 window.SN_FW_TIMER = null;
 
 function snStartFwTimer(){
+	// Polling 3 detik agresif dinonaktifkan demi stabilitas UI dan eliminasi lag.
+	// Data kernel packet counters disegarkan saat tab dibuka, via tombol Segarkan, atau via Auto-Refresh pengguna.
 	if(window.SN_FW_TIMER){ clearInterval(window.SN_FW_TIMER); window.SN_FW_TIMER = null; }
-	window.SN_FW_TIMER = setInterval(function(){
-		if(!$('#snModal').hasClass('on') || !$('#top-firewall').hasClass('on')){
-			if(window.SN_FW_TIMER){ clearInterval(window.SN_FW_TIMER); window.SN_FW_TIMER = null; }
-			return;
-		}
-		snFwCountersPoll();
-	}, 3000);
 }
 
-function snFwCountersPoll(){
+function snFwCountersPoll(btn, isSilent){
+	var stopSpin = snSpinBtn(btn);
 	snAjax('get_fw', {}, function(m){
+		stopSpin();
 		if(!m) return;
 		snRenderFwSets(m.jumlah_set || {});
 		snRenderFwHits(m.penghitung || []);
-	});
+	}, null, btn, isSilent);
 }
 
-function snFwMuat(){
+function snFwMuat(btn, isSilent){
+	var stopSpin = snSpinBtn(btn);
 	snAjax('get_fw', {}, function(m){
+		stopSpin();
 		if(!m) return;
 		var isEn = (SN_LANG !== 'id');
 
@@ -4759,15 +5279,17 @@ function snFwMuat(){
 		} else {
 			kosong('#tbChainRules', 5, isEn ? 'Kernel inspection chain is not active.' : 'Rantai inspeksi kernel tidak aktif.');
 		}
-	});
+	}, null, btn, isSilent);
 }
 
 /* ---------- Port Access Control (Inbound & Outbound) ---------- */
 var SN_PORT_CUR_TAB = 'inbound';
 var SN_PORT_DATA = null;
 
-function snPortLoad(){
+function snPortLoad(btn, isSilent){
+	var stopSpin = snSpinBtn(btn);
 	snAjax('get_port_firewall', {}, function(res){
+		stopSpin();
 		if(!res) return;
 		SN_PORT_DATA = res;
 		var isEn = (SN_LANG !== 'id');
@@ -4794,7 +5316,7 @@ function snPortLoad(){
 		$('#portFwSummary').html('<b>Critical Ports:</b> SSH Port: <code>' + sshPort + '</code> | aaPanel Port: <code>' + pnlPort + '</code> | Kernel Inbound: <b>' + (res.kernel_in_active ? 'ACTIVE' : 'INACTIVE') + '</b> | Kernel Outbound: <b>' + (res.kernel_out_active ? 'ACTIVE' : 'INACTIVE') + '</b>');
 
 		snPortRender(SN_PORT_CUR_TAB);
-	});
+	}, null, btn, isSilent);
 }
 
 function snPortTab(tab, el){
@@ -4863,29 +5385,32 @@ function snPortRender(direction){
 }
 
 function snPortToggle(ruleId){
+	var isEn = (SN_LANG !== 'id');
+	var pIdx = snProgress(isEn ? 'Updating port rule status...' : 'Mengubah status aturan port...');
 	snAjax('toggle_port_rule', {id: ruleId}, function(res){
 		if(res){
-			layer.msg(res, {time: 2500});
+			layer.msg(res, {time: 2500, icon: 1});
 			snPortLoad();
 			snFwMuat();
 		}
-	});
+	}, pIdx);
 }
 
 function snPortDelete(ruleId, port){
 	var isEn = (SN_LANG !== 'id');
-	layer.confirm(isEn ? ('Delete port rule ' + port + '? This rule will be removed from configuration and kernel.') : ('Hapus aturan port ' + port + '? Aturan ini akan dicabut dari konfigurasi dan kernel.'), {
+	layer.confirm(isEn ? ('Delete port rule <b>' + port + '</b>? This rule will be removed from configuration and kernel.') : ('Hapus aturan port <b>' + port + '</b>? Aturan ini akan dicabut dari konfigurasi dan kernel.'), {
 		title: isEn ? 'Delete Port Rule' : 'Hapus Aturan Port',
 		btn: isEn ? ['Delete', 'Cancel'] : ['Hapus', 'Batal']
 	}, function(idx){
 		layer.close(idx);
+		var pIdx = snProgress(isEn ? 'Removing port rule from kernel...' : 'Menghapus aturan port dari kernel...');
 		snAjax('del_port_rule', {id: ruleId}, function(res){
 			if(res){
-				layer.msg(res, {time: 2500});
+				layer.msg(res, {time: 2500, icon: 1});
 				snPortLoad();
 				snFwMuat();
 			}
-		});
+		}, pIdx);
 	});
 }
 
@@ -4901,12 +5426,13 @@ function snPortToggleGlobal(){
 		btn: isEn ? ['Confirm', 'Cancel'] : ['Konfirmasi', 'Batal']
 	}, function(idx){
 		layer.close(idx);
+		var pIdx = snProgress(isEn ? 'Updating global port firewall status...' : 'Mengubah status modul firewall port global...');
 		snAjax('toggle_port_firewall_global', {}, function(res){
 			if(res){
-				layer.msg(res, {time: 3000});
-			snPortLoad();
+				layer.msg(res, {time: 3000, icon: 1});
+				snPortLoad();
 			}
-		});
+		}, pIdx);
 	});
 }
 
@@ -4920,12 +5446,13 @@ function snPortResetConfirm(){
 		btn: isEn ? ['Reset Baseline', 'Cancel'] : ['Reset Baseline', 'Batal']
 	}, function(idx){
 		layer.close(idx);
+		var pIdx = snProgress(isEn ? 'Resetting port rules to defaults...' : 'Mereset aturan port ke standar default...');
 		snAjax('reset_port_firewall_defaults', {}, function(res){
 			if(res){
-				layer.msg(res, {time: 3500});
+				layer.msg(res, {time: 3500, icon: 1});
 				snPortLoad();
 			}
-		});
+		}, pIdx);
 	});
 }
 
@@ -4936,14 +5463,13 @@ function snPortApplyKernel(){
 		btn: isEn ? ['Apply', 'Cancel'] : ['Terapkan', 'Batal']
 	}, function(idx){
 		layer.close(idx);
-		layer.msg(isEn ? 'Applying rules to kernel...' : 'Menerapkan aturan ke kernel...', {time:0, shade:[0.3, '#000']});
+		var pIdx = snProgress(isEn ? 'Applying port rules to kernel netfilter...' : 'Menerapkan aturan port ke kernel netfilter...');
 		snAjax('apply_port_firewall_kernel', {}, function(res){
-			layer.closeAll();
 			if(res){
-				layer.msg(res, {time: 3000});
+				layer.msg(res, {time: 3000, icon: 1});
 				snPortLoad();
 			}
-		});
+		}, pIdx);
 	});
 }
 
@@ -5030,7 +5556,9 @@ function snPortRuleModal(){
 				direction: dir,
 				port: port,
 				protocol: proto,
-				action: act,
+				rule_action: act,
+				act: act,
+				aksi: act,
 				remark: remark
 			};
 			if(dir === 'inbound'){
@@ -5040,15 +5568,14 @@ function snPortRuleModal(){
 			}
 
 			layer.close(idx);
-			layer.msg(isEn ? 'Saving rule...' : 'Menyimpan aturan...', {time:0, shade:[0.3, '#000']});
+			var pIdx = snProgress(isEn ? 'Saving port firewall rule...' : 'Menyimpan aturan port firewall...');
 			snAjax('add_port_rule', payload, function(res){
-				layer.closeAll('loading');
 				if(res){
 					layer.msg(res, {time: 3000});
 					snPortLoad();
 					snFwMuat();
 				}
-			});
+			}, pIdx);
 			return false;
 		}
 	});
@@ -5061,25 +5588,31 @@ function snSetModPort(port, proto, remark){
 }
 
 function snPortModalDirChange(val){
+	var isEn = (SN_LANG !== 'id');
 	if(val === 'inbound'){
-		$('#lblModPortNet').text('Alamat Sumber IP / CIDR:');
+		$('#lblModPortNet').text(isEn ? 'Source IP Address / CIDR:' : 'Alamat Sumber IP / CIDR:');
 	} else {
-		$('#lblModPortNet').text('Alamat Tujuan IP / CIDR:');
+		$('#lblModPortNet').text(isEn ? 'Destination IP Address / CIDR:' : 'Alamat Tujuan IP / CIDR:');
 	}
 }
 
 function snFw(aksi){
+	var isEn = (SN_LANG !== 'id');
 	var nama = {
-		install: 'Pasang ulang aturan kernel?',
-		flush: 'Kosongkan semua IP yang sedang diblokir dan dibatasi? Ban akan hilang.',
-		remove: 'Lepas semua aturan kernel ZySentinel?'
+		install: isEn ? 'Reinstall kernel firewall rules?' : 'Pasang ulang aturan kernel?',
+		flush: isEn ? 'Flush all currently blocked and rate-limited IPs? All bans will be cleared.' : 'Kosongkan semua IP yang sedang diblokir dan dibatasi? Ban akan hilang.',
+		remove: isEn ? 'Remove all ZySentinel kernel rules?' : 'Lepas semua aturan kernel ZySentinel?'
 	}[aksi];
-	if(!nama){ layer.msg('aksi tidak dikenal', {time:2000}); return; }
-	layer.confirm(nama, function(idx){
+	if(!nama){ layer.msg(isEn ? 'Unknown action' : 'Aksi tidak dikenal', {time:2000}); return; }
+	layer.confirm(nama, {
+		title: isEn ? 'Firewall Action' : 'Aksi Firewall',
+		btn: isEn ? ['Confirm', 'Cancel'] : ['Konfirmasi', 'Batal']
+	}, function(idx){
 		layer.close(idx);
+		var pIdx = snProgress(isEn ? 'Applying kernel firewall action...' : 'Menerapkan aksi firewall ke kernel...');
 		snAjax('fw_action', {action: aksi}, function(m){
-			if(m){ layer.msg('selesai', {time:2000}); snFwAllMuat(); snStatus(); }
-		});
+			if(m){ layer.msg(isEn ? 'Firewall action completed' : 'Aksi firewall selesai', {time:2500, icon: 1}); snFwAllMuat(); snStatus(); }
+		}, pIdx);
 	});
 }
 
@@ -5087,17 +5620,23 @@ function snFw(aksi){
 /* Memuat backend OS, port firewall (inbound & outbound), aturan kernel milik sentinel,
    dan aturan terkelola (ban/allow/geo). Satu pemanggil supaya membuka
    tab selalu menampilkan keadaan lengkap, bukan sebagian. */
-function snFwAllMuat(){
-	snFwBackendMuat();
-	snPortLoad();
-	snFwMuat();
-	snFwrMuat();
-	snAllowMuat();
+function snFwAllMuat(btn, isSilent){
+	var stopSpin = snSpinBtn(btn);
+	snFwBackendMuat(null, isSilent);
+	snPortLoad(null, isSilent);
+	snFwMuat(null, isSilent);
+	setTimeout(function(){
+		snFwrMuat(null, isSilent);
+		snAllowMuat(null, isSilent);
+		stopSpin();
+	}, 200);
 }
 
 /* --- kartu backend firewall OS --- */
-function snFwBackendMuat(){
+function snFwBackendMuat(btn, isSilent){
+	var stopSpin = snSpinBtn(btn);
 	snAjax('get_fw_backend', {}, function(m){
+		stopSpin();
 		if(!m) return;
 		var l = $('#fwbBadge');
 		var nama = m.backend || '?';
@@ -5123,13 +5662,15 @@ function snFwBackendMuat(){
 			h += '<div><span>' + baris[i][0] + '</span><span>' + baris[i][1] + '</span></div>';
 		}
 		$('#fwbInfo').html(h);
-	});
+	}, null, btn, isSilent);
 }
 
 /* --- aturan terkelola: ban + allow + geo dalam satu tabel --- */
-function snFwrMuat(){
+function snFwrMuat(btn, isSilent){
 	var isEn = (SN_LANG !== 'id');
+	var stopSpin = snSpinBtn(btn);
 	snAjax('get_fw_rules', {}, function(m){
+		stopSpin();
 		if(!m) return;
 		var b = '';
 		for(var i = 0; i < m.length; i++){
@@ -5151,7 +5692,7 @@ function snFwrMuat(){
 		if(b){ $('#tbFwr').html(b); }
 		else { kosong('#tbFwr', 7, isEn ? 'No managed rules yet. Add a ban, allow, or country block.' : 'Belum ada aturan terkelola. Tambahkan ban, allow, atau blokir negara.'); }
 		snFwrRingkas(m);
-	});
+	}, null, btn, isSilent);
 }
 function snFwrRingkas(m){
 	var n = { ban:0, allow:0, geo:0 };
@@ -5160,18 +5701,22 @@ function snFwrRingkas(m){
 		+ ' allow, ' + (n.geo||0) + ' geo.');
 }
 function snFwrBan(){
+	var isEn = (SN_LANG !== 'id');
 	var ip = $('#fwrVal').val().trim();
-	if(!ip){ layer.msg('Alamat IP belum diisi', {time:2000}); return; }
+	if(!ip){ layer.msg(isEn ? 'IP address cannot be empty' : 'Alamat IP belum diisi', {time:2000}); return; }
+	var pIdx = snProgress(isEn ? 'Adding IP to kernel ban list...' : 'Menambahkan IP ke daftar blokir kernel...');
 	snAjax('ban_ip', {ip: ip}, function(m){
-		if(m){ layer.msg(m, {time:3000}); $('#fwrVal').val(''); snFwrMuat(); snStatus(); }
-	});
+		if(m){ layer.msg(m, {time:3000, icon: 1}); $('#fwrVal').val(''); snFwrMuat(); snStatus(); }
+	}, pIdx);
 }
 function snFwrAllow(){
+	var isEn = (SN_LANG !== 'id');
 	var ip = $('#fwrVal').val().trim();
-	if(!ip){ layer.msg('Alamat IP belum diisi', {time:2000}); return; }
+	if(!ip){ layer.msg(isEn ? 'IP address cannot be empty' : 'Alamat IP belum diisi', {time:2000}); return; }
+	var pIdx = snProgress(isEn ? 'Adding IP to allow list...' : 'Menambahkan IP ke daftar putih...');
 	snAjax('allow_ip', {ip: ip}, function(m){
-		if(m){ layer.msg(m, {time:3000}); $('#fwrVal').val(''); snFwrMuat(); snAllowMuat(); }
-	});
+		if(m){ layer.msg(m, {time:3000, icon: 1}); $('#fwrVal').val(''); snFwrMuat(); snAllowMuat(); }
+	}, pIdx);
 }
 function snFwrHapus(tipe, nilai){
 	var isEn = (SN_LANG !== 'id');
@@ -5180,9 +5725,10 @@ function snFwrHapus(tipe, nilai){
 		btn: isEn ? ['Delete', 'Cancel'] : ['Hapus', 'Batal']
 	}, function(idx){
 		layer.close(idx);
+		var pIdx = snProgress(isEn ? 'Removing firewall rule from kernel...' : 'Menghapus aturan firewall dari kernel...');
 		snAjax('del_fw_rule', {type: tipe, rule: nilai}, function(m){
-			if(m){ layer.msg(m, {time:2500}); snFwrMuat(); snAllowMuat(); snStatus(); }
-		});
+			if(m){ layer.msg(m, {time:2500, icon: 1}); snFwrMuat(); snAllowMuat(); snStatus(); }
+		}, pIdx);
 	});
 }
 /* --- blokir negara dari tab Firewall --- */
@@ -5220,12 +5766,11 @@ function snFwrGeoOn(){
 		btn: isEn ? ['Block Country', 'Cancel'] : ['Blokir Negara', 'Batal']
 	}, function(idx){
 		layer.close(idx);
-		layer.msg(isEn ? 'applying, please wait...' : 'menerapkan, tunggu sebentar', {time:0, shade:[0.3,'#000']});
+		var pIdx = snProgress(isEn ? ('Applying geo-ban for ' + kode + ' to ipset kernel, please wait...') : ('Menerapkan geo-ban untuk ' + kode + ' ke ipset kernel, mohon tunggu...'));
 		snAjax('set_geo_ban', {action:'on', mode:'block', negara:kode, confirm:'GEO'},
 			function(m){
-				layer.closeAll('loading');
-				if(m){ layer.msg(m, {time:4000}); snFwrMuat(); $('#fwrGeoBox').hide(); }
-			});
+				if(m){ layer.msg(m, {time:4000, icon: 1}); snFwrMuat(); $('#fwrGeoBox').hide(); }
+			}, pIdx);
 	});
 }
 function snFwrGeoOff(){
@@ -5235,9 +5780,10 @@ function snFwrGeoOff(){
 		btn: isEn ? ['Turn Off', 'Cancel'] : ['Matikan', 'Batal']
 	}, function(idx){
 		layer.close(idx);
+		var pIdx = snProgress(isEn ? 'Disabling geo-ban in kernel...' : 'Mematikan geo-ban di kernel...');
 		snAjax('geo_ban_off', {}, function(m){
-			if(m){ layer.msg(m, {time:3000}); snFwrMuat(); $('#fwrGeoBox').hide(); }
-		});
+			if(m){ layer.msg(m, {time:3000, icon: 1}); snFwrMuat(); $('#fwrGeoBox').hide(); }
+		}, pIdx);
 	});
 }
 
@@ -5296,8 +5842,10 @@ function snWafLencana(){
 	});
 }
 
-function snWafMuat(){
+function snWafMuat(btn, isSilent){
+	var stopSpin = snSpinBtn(btn);
 	snAjax('get_waf', {}, function(m){
+		stopSpin();
 		if(!m) return;
 		var isEn = (SN_LANG !== 'id');
 		var e = m.engine || {};
@@ -5360,18 +5908,22 @@ function snWafMuat(){
 		}
 		if(rl){ $('#tbWafRule').html(rl); }
 		else { kosong('#tbWafRule', 3, isEn ? 'No rules found.' : 'Tidak ada rule.'); }
-	});
+	}, null, btn, isSilent);
 }
 
 function snWafVhost(ws, site, state){
+	var isEn = (SN_LANG !== 'id');
+	var pIdx = snProgress(isEn ? ('Setting WAF for ' + site + '...') : ('Mengatur WAF untuk ' + site + '...'));
 	snAjax('set_waf_vhost', {ws: ws, site: site, state: state}, function(m){
 		if(m){ layer.msg(m, {time:4000}); snWafMuat(); snWafLencana(); }
-	});
+	}, pIdx);
 }
 function snWafRule(nama, state){
+	var isEn = (SN_LANG !== 'id');
+	var pIdx = snProgress(isEn ? ('Updating rule ' + nama + '...') : ('Mengubah status rule ' + nama + '...'));
 	snAjax('set_waf_rule', {rule: nama, state: state}, function(m){
 		if(m){ layer.msg(m, {time:3000}); snWafMuat(); }
-	});
+	}, pIdx);
 }
 
 /* ---------- Engine Choice + WAF Control (Config > Engine) ---------- */
@@ -5491,9 +6043,10 @@ function snEnginePilih(eng){
 		btn: isEn ? ['Select Engine', 'Cancel'] : ['Pilih Engine', 'Batal']
 	}, function(idx){
 		layer.close(idx);
+		var pIdx = snProgress(isEn ? ('Switching WAF engine to ' + nama + '...') : ('Mengalihkan engine WAF ke ' + nama + '...'));
 		snAjax('set_waf_engine', {engine: eng}, function(m){
 			if(m){ layer.msg(m, {time: 3500}); snWafMuat(); snWafLencana(); }
-		});
+		}, pIdx);
 	});
 }
 
@@ -5530,9 +6083,11 @@ function snModeSet(mode){
 	});
 }
 function snModeKirim(mode){
+	var isEn = (SN_LANG !== 'id');
+	var pIdx = snProgress(isEn ? ('Setting WAF mode to ' + mode + '...') : ('Mengatur mode WAF ke ' + mode + '...'));
 	snAjax('set_waf_mode', {mode: mode}, function(m){
 		if(m){ layer.msg(m, {time:3000}); snModeMuat(); snWafLencana(); }
-	});
+	}, pIdx);
 }
 
 function snCorazaUnduh(){
@@ -5543,11 +6098,11 @@ function snCorazaUnduh(){
 		btn: isEn ? ['Download', 'Cancel'] : ['Unduh', 'Batal']
 	}, function(idx){
 		layer.close(idx);
-		layer.msg(isEn ? 'downloading, please wait...' : 'mengunduh, tunggu sebentar', {time:0, shade:[0.3,'#000']});
+		var pIdx = snProgress(isEn ? 'Downloading Coraza & OWASP CRS assets...' : 'Mengunduh aset Coraza & rules CRS...');
 		snAjax('coraza_download', {}, function(m){
-			layer.closeAll();
-			if(m){ layer.msg(isEn ? 'done' : 'selesai', {time:2500}); }
-		});
+			if(m){ layer.msg(isEn ? 'Assets downloaded successfully' : 'Aset berhasil diunduh', {time:2500}); }
+			snEngineMuat();
+		}, pIdx);
 	});
 }
 
@@ -5620,46 +6175,60 @@ function snLuaMuat(){
 }
 
 function snFwOpen(){
-	var tanya = 'Nyalakan atau matikan seluruh WAF engine LUA? '
-		+ 'Perubahan berlaku untuk semua vhost yang dilindungi.';
-	layer.confirm(tanya, function(idx){
+	var isEn = (SN_LANG !== 'id');
+	var tanya = isEn ? 'Toggle entire Lua WAF engine state? Changes affect all protected virtual hosts.' : ('Nyalakan atau matikan seluruh WAF engine LUA? '
+		+ 'Perubahan berlaku untuk semua vhost yang dilindungi.');
+	layer.confirm(tanya, {
+		title: isEn ? 'Toggle Lua WAF Engine' : 'Sakelar Engine Lua WAF',
+		btn: isEn ? ['Confirm', 'Cancel'] : ['Konfirmasi', 'Batal']
+	}, function(idx){
 		layer.close(idx);
+		var pIdx = snProgress(isEn ? 'Updating Lua WAF state...' : 'Mengubah status Lua WAF...');
 		snAjax('get_freewaf', {}, function(m){
-			if(!m) return;
+			if(!m){ layer.close(pIdx); return; }
 			var aksi = m.open ? 'off' : 'on';
 			snAjax('set_fw_open', {state: aksi}, function(r){
 				if(r){ layer.msg(r, {time:3000}); snLuaMuat(); snModeMuat(); }
-			});
+			}, pIdx);
 		});
 	});
 }
 function snFwMonitor(){
+	var isEn = (SN_LANG !== 'id');
 	snAjax('get_freewaf', {}, function(m){
 		if(!m) return;
 		var aksi = m.monitor ? 'blocking' : 'monitor';
 		var tanya = aksi === 'blocking'
-			? 'Aktifkan mode blocking? WAF akan benar-benar memblokir request.'
-			: 'Kembali ke mode monitor? WAF hanya mencatat, tidak memblokir.';
-		layer.confirm(tanya, function(idx){
+			? (isEn ? 'Switch to Blocking mode? WAF will actively drop malicious requests.' : 'Aktifkan mode blocking? WAF akan benar-benar memblokir request.')
+			: (isEn ? 'Switch to Monitor mode? WAF will only log detections without blocking.' : 'Kembali ke mode monitor? WAF hanya mencatat, tidak memblokir.');
+		layer.confirm(tanya, {
+			title: isEn ? 'Lua WAF Mode' : 'Mode Lua WAF',
+			btn: isEn ? ['Confirm', 'Cancel'] : ['Konfirmasi', 'Batal']
+		}, function(idx){
 			layer.close(idx);
+			var pIdx = snProgress(isEn ? 'Updating WAF inspection mode...' : 'Memperbarui mode inspeksi WAF...');
 			snAjax('set_fw_monitor', {state: aksi}, function(r){
 				if(r){ layer.msg(r, {time:3000}); snLuaMuat(); snModeMuat(); }
-			});
+			}, pIdx);
 		});
 	});
 }
 function snFwModul(modul, state){
+	var isEn = (SN_LANG !== 'id');
+	var pIdx = snProgress(isEn ? ('Updating module ' + modul + '...') : ('Memperbarui modul ' + modul + '...'));
 	snAjax('set_fw_module', {module: modul, state: state}, function(m){
 		if(m){ layer.msg(m, {time:2500}); snLuaMuat(); }
-	});
+	}, pIdx);
 }
 function snFwCc(){
+	var isEn = (SN_LANG !== 'id');
 	var lim = $('#fwCcLimit').val().trim();
 	var cyc = $('#fwCcCycle').val().trim();
 	var end = $('#fwCcEnd').val().trim();
+	var pIdx = snProgress(isEn ? 'Saving CC Protection settings...' : 'Menyimpan setelan Proteksi CC...');
 	snAjax('set_fw_cc', {limit: lim, cycle: cyc, endtime: end}, function(m){
 		if(m){ layer.msg(m, {time:3000}); snLuaMuat(); }
-	});
+	}, pIdx);
 }
 
 function snFwSitesMuat(){
@@ -5682,9 +6251,11 @@ function snFwSitesMuat(){
 	});
 }
 function snFwSite(site, state){
+	var isEn = (SN_LANG !== 'id');
+	var pIdx = snProgress(isEn ? ('Updating ' + site + ' protection...') : ('Mengubah proteksi ' + site + '...'));
 	snAjax('set_fw_site', {site: site, state: state}, function(m){
 		if(m){ layer.msg(m, {time:2500}); snFwSitesMuat(); }
-	});
+	}, pIdx);
 }
 function snFwSiteCc(site){
 	var isEn = (SN_LANG !== 'id');
@@ -5694,9 +6265,10 @@ function snFwSiteCc(site){
 	if(cyc === null) return;
 	var end = prompt(isEn ? 'Block (seconds):' : 'Blokir (detik):', '300');
 	if(end === null) return;
+	var pIdx = snProgress(isEn ? ('Updating CC limit for ' + site + '...') : ('Menyimpan limit CC untuk ' + site + '...'));
 	snAjax('set_fw_site_cc', {site: site, limit: lim, cycle: cyc, endtime: end}, function(m){
 		if(m){ layer.msg(m, {time:3000}); snFwSitesMuat(); }
-	});
+	}, pIdx);
 }
 
 function snFwTab(nama, el){
@@ -5724,9 +6296,10 @@ function snFwListAdd(){
 	var isEn = (SN_LANG !== 'id');
 	var v = $('#fwListVal').val().trim();
 	if(!v){ layer.msg(isEn ? 'Value cannot be empty' : 'Nilai belum diisi', {time:2000}); return; }
+	var pIdx = snProgress(isEn ? 'Adding entry to list...' : 'Menambahkan entri ke daftar...');
 	snAjax('fw_list_add', {list: SN_FW_LIST, value: v}, function(m){
 		if(m){ layer.msg(m, {time:2500}); $('#fwListVal').val(''); snFwListMuat(); }
-	});
+	}, pIdx);
 }
 function snFwListDel(v){
 	var isEn = (SN_LANG !== 'id');
@@ -5735,9 +6308,10 @@ function snFwListDel(v){
 		btn: isEn ? ['Delete', 'Cancel'] : ['Hapus', 'Batal']
 	}, function(idx){
 		layer.close(idx);
+		var pIdx = snProgress(isEn ? 'Deleting entry from list...' : 'Menghapus entri dari daftar...');
 		snAjax('fw_list_del', {list: SN_FW_LIST, value: v}, function(m){
 			if(m){ layer.msg(m, {time:2500}); snFwListMuat(); }
-		});
+		}, pIdx);
 	});
 }
 
@@ -5745,6 +6319,9 @@ function snFwListDel(v){
 function snNwMuat(){
 	snAjax('freewaf_info', {}, function(s){
 		if(!s) return;
+		if(s.status && typeof s.status === 'object'){
+			s = Object.assign({}, s.status, s);
+		}
 		var isEn = (SN_LANG !== 'id');
 		var lencana = $('#nwBadge');
 		if(s.loaded === 'ya'){
@@ -5790,9 +6367,10 @@ function snNwInstall(){
 		btn: isEn ? ['Install', 'Cancel'] : ['Pasang', 'Batal']
 	}, function(idx){
 		layer.close(idx);
+		var pIdx = snProgress(isEn ? 'Installing Lua WAF engine & reconfiguring Nginx...' : 'Memasang engine Lua WAF & mengonfigurasi Nginx...');
 		snAjax('freewaf_engine', {action: 'install'}, function(m){
 			if(m){ layer.msg(m, {time:4000}); snNwMuat(); snLuaMuat(); }
-		});
+		}, pIdx);
 	});
 }
 function snNwRemove(){
@@ -5802,9 +6380,10 @@ function snNwRemove(){
 		btn: isEn ? ['Remove', 'Cancel'] : ['Cabut', 'Batal']
 	}, function(idx){
 		layer.close(idx);
+		var pIdx = snProgress(isEn ? 'Removing Lua WAF hook & reloading Nginx...' : 'Mencabut hook Lua WAF & me-reload Nginx...');
 		snAjax('freewaf_engine', {action: 'remove'}, function(m){
 			if(m){ layer.msg(m, {time:4000}); snNwMuat(); snLuaMuat(); }
-		});
+		}, pIdx);
 	});
 }
 
@@ -5855,21 +6434,25 @@ function snUploadScanMuat(){
 }
 
 function snUploadVhostToggle(vhost){
+	var isEn = (SN_LANG !== 'id');
+	var pIdx = snProgress(isEn ? ('Toggling upload scan for ' + vhost + '...') : ('Mengubah proteksi upload ' + vhost + '...'));
 	snAjax('toggle_vhost_upload_scan', {vhost: vhost}, function(res){
 		if(res){
 			layer.msg(res, {time: 2000});
 			snUploadScanMuat();
 		}
-	});
+	}, pIdx);
 }
 
 function snUploadScanServiceToggle(action){
+	var isEn = (SN_LANG !== 'id');
+	var pIdx = snProgress(isEn ? (action === 'start' ? 'Starting Real-Time Upload Scanner...' : 'Stopping Real-Time Upload Scanner...') : (action === 'start' ? 'Menjalankan Layanan Pemindai Upload...' : 'Menghentikan Layanan Pemindai Upload...'));
 	snAjax('toggle_upload_scan_service', {action: action}, function(res){
 		if(res){
 			layer.msg(res, {time: 2000});
 			setTimeout(snUploadScanMuat, 1000);
 		}
-	});
+	}, pIdx);
 }
 
 function snUploadQuarantineModal(vhost){
@@ -5929,10 +6512,11 @@ function snUploadQuarantineRestore(metaFile, vhost){
 		btn: isEn ? ['Restore', 'Cancel'] : ['Pulihkan', 'Batal']
 	}, function(idx){
 		layer.close(idx);
+		var pIdx = snProgress(isEn ? 'Restoring quarantined file...' : 'Memulihkan berkas karantina...');
 		snAjax('restore_vhost_quarantine', {meta_file: metaFile, vhost: vhost}, function(res){
 			layer.msg(res, {time: 2500});
 			snUploadQuarantineMuat();
-		});
+		}, pIdx);
 	});
 }
 
@@ -5943,10 +6527,11 @@ function snUploadQuarantineDelete(metaFile, vhost){
 		btn: isEn ? ['Delete', 'Cancel'] : ['Hapus', 'Batal']
 	}, function(idx){
 		layer.close(idx);
+		var pIdx = snProgress(isEn ? 'Deleting quarantined file...' : 'Menghapus berkas karantina...');
 		snAjax('delete_vhost_quarantine', {meta_file: metaFile, vhost: vhost}, function(res){
 			layer.msg(res, {time: 2500});
 			snUploadQuarantineMuat();
-		});
+		}, pIdx);
 	});
 }
 
@@ -6050,9 +6635,10 @@ function snNotifSimpan(){
 		var d = {kind: j, max_retries: m};
 		if(url !== null){ d.url = url; }
 		if(token !== null){ d.token = token; }
+		var pIdx = snProgress(isEn ? 'Saving notification settings...' : 'Menyimpan konfigurasi notifikasi...');
 		snAjax('set_notif_conf', d, function(res){
 			if(res){ layer.msg(res, {time:3000}); snNotifMuat(); }
-		});
+		}, pIdx);
 	}
 	if(u === '-'){
 		layer.confirm(isEn ? 'Empty the URL to turn notifications off?' : 'Kosongkan URL untuk mematikan notifikasi?', {
@@ -6060,16 +6646,18 @@ function snNotifSimpan(){
 			btn: isEn ? ['Disable', 'Cancel'] : ['Matikan', 'Batal']
 		}, function(idx){
 			layer.close(idx);
-		kirim('', null);
+			kirim('', null);
 		});
 		return;
 	}
 	kirim(u ? u : null, t ? t : null);
 }
 function snNotifUji(){
+	var isEn = (SN_LANG !== 'id');
+	var pIdx = snProgress(isEn ? 'Dispatching test notification...' : 'Mengirim uji coba notifikasi webhook/telegram...');
 	snAjax('test_notif', {}, function(m){
 		if(m){ layer.msg(m, {time:4000}); snNotifLog(); }
-	});
+	}, pIdx);
 }
 function snNotifLog(){
 	var isEn = (SN_LANG !== 'id');
@@ -6153,9 +6741,10 @@ function snRevPut(ip, keputusan){
 		btn: isEn ? ['Confirm', 'Cancel'] : ['Konfirmasi', 'Batal']
 	}, function(idx){
 		layer.close(idx);
+		var pIdx = snProgress(isEn ? ('Applying review decision for ' + ip + '...') : ('Menerapkan keputusan review untuk ' + ip + '...'));
 		snAjax('review_put', {ip: ip, action: keputusan}, function(m){
 			if(m){ layer.msg(m, {time:3500}); snRevMuat(SN_REV_STATUS); }
-		});
+		}, pIdx);
 	});
 }
 
@@ -6291,11 +6880,10 @@ function snGeoBanSimpan(){
 				return false;
 			}
 			layer.close(i);
-			layer.msg(isEn ? 'applying, please wait...' : 'menerapkan, tunggu sebentar', {time:0, shade:[0.3, '#000']});
+			var pIdx = snProgress(isEn ? 'Applying Geo-Ban rules...' : 'Menerapkan aturan Geo-Ban...');
 			snAjax('set_geo_ban', {action:'on', mode:mode, negara:negara, confirm:v}, function(r){
-				layer.closeAll('loading');
 				if(r){ layer.msg(r, {time:4500}); snGeoBanMuat(); }
-			});
+			}, pIdx);
 			return false;
 		}
 	});
@@ -6308,9 +6896,10 @@ function snGeoBanOff(){
 		btn: isEn ? ['Turn Off', 'Cancel'] : ['Matikan', 'Batal']
 	}, function(idx){
 		layer.close(idx);
+		var pIdx = snProgress(isEn ? 'Disabling Geo-Ban...' : 'Menonaktifkan Geo-Ban...');
 		snAjax('geo_ban_off', {}, function(m){
 			if(m){ layer.msg(m, {time:3000}); snGeoBanMuat(); }
-		});
+		}, pIdx);
 	});
 }
 
@@ -6356,16 +6945,24 @@ SN_SUB2 = {
 $(function(){
 	snInitLang();
 	snBuka();
-	snStatus();
-	snBans();
-	snPanicMuat();
 	SN_SYS_T = 0;
 
-	snAjax('get_lifecycle_status', {}, function(st){
-		if(st){
-			window.SN_HOSTNAME = st.hostname || location.hostname;
-			if(st.version) $('#snVerBadge').text(snFmtVer(st.version));
-		}
+	setTimeout(function(){
+		snAjax('get_lifecycle_status', {}, function(st){
+			if(st){
+				window.SN_HOSTNAME = st.hostname || location.hostname;
+				if(st.version) $('#snVerBadge').text(snFmtVer(st.version));
+			}
+		});
+	}, 1200);
+
+	/* Rekam tombol/link aksi yang diklik pengguna untuk otomatisasi animasi progress */
+	$(document).off('click.snSentinelClick').on('click.snSentinelClick', '.sn-btn, button, a, .sn-badge, .sn-tabs span, .sn-mtabs span, .layui-layer-btn a', function(e){
+		if($(this).hasClass('sn-mclose') || this.id === 'snBack') return;
+		window.SN_LAST_CLICK = {
+			el: this,
+			time: Date.now()
+		};
 	});
 
 	/* rpm mengikuti rps selama operator belum mengetiknya sendiri */
@@ -6378,7 +6975,7 @@ $(function(){
 	/* Handler dibongkar lebih dulu. Plugin bisa dibuka berulang di
 	   halaman yang sama; tanpa off() dulu, setiap pembukaan menambah
 	   salinan handler dan satu klik jadi menutup beberapa kali. */
-	$(document).off('.snSentinel');
+	$(document).off('.snSentinel').off('click.snSentinel');
 
 	/* klik backdrop atau tombol tutup untuk menutup dialog */
 	$('#snBack').off('click.snSentinel').on('click.snSentinel', snTutup);
@@ -6391,16 +6988,6 @@ $(function(){
 			snTutup();
 		}
 	});
-	/* Klik di luar kotak dialog ikut menutup. Ditangkap di fase capture
-	   supaya tidak tertahan elemen di atasnya. Dialog milik panel
-	   (layui-layer) dikecualikan agar tidak menutup diri sendiri
-	   saat sedang menjawab konfirmasi. */
-	$(document).on('click.snSentinel', function(e){
-		if(!$('#snModal').hasClass('on')) return;
-		var t = e.target;
-		if($(t).closest('.sn-mbox, .layui-layer').length) return;
-		snTutup();
-	}, true);
 
 	window.addEventListener('resize', function(){
 		if(SN_GRAF){ SN_GRAF.resize(); }
@@ -6446,9 +7033,10 @@ function snAvSub(nama, el){
 	else if(nama === 'logs'){ snAvLogsMuat(); }
 }
 
-function snAvMuat(){
-	snAvLencana();
+function snAvMuat(btn, isSilent){
+	var stopSpin = snSpinBtn(btn);
 	snAjax('get_av', {}, function(m){
+		stopSpin();
 		if(!m) return;
 		var isEn = (SN_LANG !== 'id');
 		var badge = $('#avStatusBadge');
@@ -6492,18 +7080,20 @@ function snAvMuat(){
 					+ (m.timer === 'ya' ? '<span class="sn-badge sn-ok">Aktif</span>' : '<span class="sn-badge sn-bad">Mati</span>'));
 			}
 		}
-	});
+	}, null, btn, isSilent);
 
-	if(SN_AV_TAB === 'vhost'){ snAvSitesMuat(); }
-	else if(SN_AV_TAB === 'integ'){ snAvIntegMuat(); }
-	else if(SN_AV_TAB === 'quar'){ snAvQuarMuat(); }
+	if(SN_AV_TAB === 'vhost'){ snAvSitesMuat(null, isSilent); }
+	else if(SN_AV_TAB === 'integ'){ snAvIntegMuat(null, isSilent); }
+	else if(SN_AV_TAB === 'quar'){ snAvQuarMuat(null, isSilent); }
 	else if(SN_AV_TAB === 'live'){ snScanStreamRefresh(true); }
-	else if(SN_AV_TAB === 'logs'){ snAvLogsMuat(); }
+	else if(SN_AV_TAB === 'logs'){ snAvLogsMuat(null, isSilent); }
 }
 
-function snAvSitesMuat(){
+function snAvSitesMuat(btn, isSilent){
 	var isEn = (SN_LANG !== 'id');
+	var stopSpin = snSpinBtn(btn);
 	snAjax('get_av_sites', {}, function(sites){
+		stopSpin();
 		if(!sites){
 			kosong('#tbAvSites', 6, isEn ? 'Failed to load sites list.' : 'Gagal memuat daftar situs.');
 			return;
@@ -6585,9 +7175,9 @@ function snAvSitesMuat(){
 			if(!window.SN_AV_POLL){
 				window.SN_AV_POLL = setInterval(function(){
 					if($('#top-antivirus').hasClass('on') && SN_AV_TAB === 'vhost'){
-						snAvSitesMuat();
+						snAvSitesMuat(null, true);
 					}
-				}, 3000);
+				}, 5000);
 			}
 		} else {
 			if(window.SN_AV_POLL){
@@ -6595,7 +7185,7 @@ function snAvSitesMuat(){
 				window.SN_AV_POLL = null;
 			}
 		}
-	});
+	}, null, btn, isSilent);
 }
 
 window.SN_SCAN_CONSOLE_LAYER = null;
@@ -6800,26 +7390,24 @@ function snAvDbUpdateMenu(){
 
 function snRkhunterPropupd(){
 	var isEn = (SN_LANG !== 'id');
-	var loadIdx = layer.msg(isEn ? 'Updating Rkhunter file properties (--propupd), please wait...' : 'Merekam ulang file properties Rkhunter (--propupd), mohon tunggu...', {time:0, shade:[0.3,'#000']});
+	var pIdx = snProgress(isEn ? 'Recording Rkhunter file properties (--propupd)...' : 'Merekam ulang file properties Rkhunter (--propupd)...');
 	snAjax('rkhunter_propupd', {}, function(m){
-		layer.close(loadIdx);
 		if(m){
 			layer.msg(m, {time: 3500});
 			snAvMuat();
 		}
-	});
+	}, pIdx);
 }
 
 function snRkhunterUpdate(){
 	var isEn = (SN_LANG !== 'id');
-	var loadIdx = layer.msg(isEn ? 'Checking Rkhunter signature updates (--update), please wait...' : 'Memeriksa update signature Rkhunter (--update), mohon tunggu...', {time:0, shade:[0.3,'#000']});
+	var pIdx = snProgress(isEn ? 'Checking Rkhunter signature updates (--update)...' : 'Memeriksa update signature Rkhunter (--update)...');
 	snAjax('rkhunter_update', {}, function(m){
-		layer.close(loadIdx);
 		if(m){
 			layer.msg(m, {time: 3500});
 			snAvMuat();
 		}
-	});
+	}, pIdx);
 }
 
 function snBukaScanConsole(targetLabel, targetPath, targetEngine){
@@ -6996,10 +7584,11 @@ function snScanAbort(){
 		{title: isEn ? 'Abort Scan' : 'Batalkan Pemindaian', btn: isEn ? ['Abort', 'Cancel'] : ['Hentikan', 'Batal']},
 		function(idx){
 			layer.close(idx);
+			var pIdx = snProgress(isEn ? 'Aborting threat scan...' : 'Menghentikan proses pemindaian...');
 			snAjax('av_scan_abort', {}, function(m){
 				layer.msg(m, {time: 2500});
 				snAvMuat();
-			});
+			}, pIdx);
 		}
 	);
 }
@@ -7010,11 +7599,11 @@ function snAvScanAll(){
 		{title: isEn ? 'Scan All Vhosts' : 'Pindai Semua Vhost', btn: isEn ? ['Start Scan', 'Cancel'] : ['Mulai Scan', 'Batal']},
 		function(idx){
 			layer.close(idx);
-			layer.msg(isEn ? 'Starting scan of all vhosts...' : 'Memulai pemindaian semua vhost...', {time: 2000});
+			var pIdx = snProgress(isEn ? 'Starting scan across all vhosts...' : 'Memulai pemindaian semua vhost...');
 			snAjax('av_scan_all', {}, function(m){
 				layer.msg(m, {time: 3500});
 				snAvSitesMuat();
-			});
+			}, pIdx);
 		}
 	);
 }
@@ -7026,24 +7615,22 @@ function snAvBaseline(path, label){
 		{title: isEn ? 'Record Integrity Baseline' : 'Rekam Baseline Integritas', btn: isEn ? ['Record Baseline', 'Cancel'] : ['Rekam Baseline', 'Batal']},
 		function(idx){
 			layer.close(idx);
-			var loadIdx = layer.msg(isEn ? 'Recording baseline...' : 'Merekam baseline...', {time:0, shade:[0.3,'#000']});
+			var pIdx = snProgress(isEn ? ('Recording integrity baseline for ' + label + '...') : ('Merekam baseline integritas untuk ' + label + '...'));
 			snAjax('av_baseline', {path: path, label: label}, function(m){
-				layer.close(loadIdx);
 				layer.msg(m, {time: 3000});
 				snAvSitesMuat();
-			});
+			}, pIdx);
 		}
 	);
 }
 
 function snAvCheck(path, label){
 	var isEn = (SN_LANG !== 'id');
-	var loadIdx = layer.msg(isEn ? ('Checking file integrity of ' + label + '...') : ('Memeriksa integritas berkas ' + label + '...'), {time:0, shade:[0.3,'#000']});
+	var pIdx = snProgress(isEn ? ('Checking file integrity of ' + label + '...') : ('Memeriksa integritas berkas ' + label + '...'));
 	snAjax('av_check', {path: path, label: label}, function(m){
-		layer.close(loadIdx);
 		layer.msg(m, {time: 3000});
 		snAvSitesMuat();
-	});
+	}, pIdx);
 }
 
 function snAvIntegMuat(){
@@ -7124,11 +7711,12 @@ function snAvRestore(id, path){
 		{title: isEn ? 'Restore Quarantined File' : 'Pulihkan Berkas Karantina', btn: isEn ? ['Restore', 'Cancel'] : ['Pulihkan', 'Batal']},
 		function(idx){
 			layer.close(idx);
-		snAjax('av_restore', {id: id}, function(m){
+			var pIdx = snProgress(isEn ? 'Restoring file from quarantine...' : 'Memulihkan berkas dari karantina...');
+			snAjax('av_restore', {id: id}, function(m){
 				layer.msg(m, {time: 3000});
 				snAvQuarMuat();
 				snAvMuat();
-			});
+			}, pIdx);
 		}
 	);
 }
@@ -7139,11 +7727,12 @@ function snAvDelete(id){
 		{title: isEn ? 'Permanent Delete' : 'Hapus Berkas Karantina', btn: isEn ? ['Delete', 'Cancel'] : ['Hapus', 'Batal']},
 		function(idx){
 			layer.close(idx);
-		snAjax('av_delete', {id: id}, function(m){
+			var pIdx = snProgress(isEn ? 'Deleting quarantined file...' : 'Menghapus berkas dari karantina...');
+			snAjax('av_delete', {id: id}, function(m){
 				layer.msg(m, {time: 2500});
 				snAvQuarMuat();
 				snAvMuat();
-			});
+			}, pIdx);
 		}
 	);
 }
@@ -7154,11 +7743,12 @@ function snAvQuarPurge(){
 		{title: isEn ? 'Purge Quarantine' : 'Purge Semua Karantina', btn: isEn ? ['Purge All', 'Cancel'] : ['Musnahkan Semua', 'Batal']},
 		function(idx){
 			layer.close(idx);
-		snAjax('av_quar_purge', {}, function(m){
+			var pIdx = snProgress(isEn ? 'Purging all quarantine files...' : 'Memusnahkan semua berkas karantina...');
+			snAjax('av_quar_purge', {}, function(m){
 				layer.msg(m, {time: 3000});
 				snAvQuarMuat();
 				snAvMuat();
-			});
+			}, pIdx);
 		}
 	);
 }
@@ -7169,12 +7759,11 @@ function snAvDbUpdate(){
 		{title: isEn ? 'Update Virus DB' : 'Update Database Virus', btn: isEn ? ['Update Now', 'Cancel'] : ['Perbarui Sekarang', 'Batal']},
 		function(idx){
 			layer.close(idx);
-			var loadIdx = layer.msg(isEn ? 'Updating virus database, please wait...' : 'Memperbarui database virus, mohon tunggu...', {time:0, shade:[0.3,'#000']});
+			var pIdx = snProgress(isEn ? 'Updating ClamAV virus database via freshclam...' : 'Memperbarui database virus ClamAV via freshclam...');
 			snAjax('av_db_update', {}, function(m){
-				layer.close(loadIdx);
 				layer.msg(m, {time: 3500});
 				snAvMuat();
-			});
+			}, pIdx);
 		}
 	);
 }
@@ -7349,17 +7938,16 @@ function snDoSelfHeal(){
 		{title: isEn ? '🩹 Confirm Self-Heal' : '🩹 Konfirmasi Self-Heal', icon: 3, btn: isEn ? ['Run Repair', 'Cancel'] : ['Jalankan Perbaikan', 'Batal']},
 		function(idx){
 			layer.close(idx);
-			var loadIdx = layer.msg(isEn ? 'Running diagnostics and self-heal, please wait...' : 'Menjalankan diagnostik dan perbaikan mandiri, mohon tunggu...', {time:0, shade:[0.4,'#000']});
+			var pIdx = snProgress(isEn ? 'Running diagnostics and self-heal...' : 'Menjalankan diagnostik dan perbaikan mandiri...');
 			if(typeof gtag === 'function'){
 				gtag('event', 'install_repair', {'event_category': 'lifecycle', 'app_version': '1.6.1'});
 			}
 			snAjax('run_lifecycle_action', {action: 'repair'}, function(res){
-				layer.close(loadIdx);
 				if(res){
 					layer.alert(res, {title: isEn ? 'Self-Heal Completed' : 'Self-Heal Selesai', icon: 1});
 					snMuatSemua();
 				}
-			});
+			}, pIdx);
 		}
 	);
 }
@@ -7388,12 +7976,11 @@ function snDoUninstall(){
 				return false;
 			}
 			layer.close(idx);
-			var loadIdx = layer.msg(isEn ? 'Uninstalling ZySentinel and cleaning files completely...' : 'Mencabut dan meng-uninstall ZySentinel secara total...', {time:0, shade:[0.5,'#000']});
+			var pIdx = snProgress(isEn ? 'Uninstalling ZySentinel and cleaning files completely...' : 'Mencabut dan meng-uninstall ZySentinel secara total...');
 			if(typeof gtag === 'function'){
 				gtag('event', 'uninstall_clean', {'event_category': 'lifecycle', 'app_version': '1.6.1'});
 			}
 			snAjax('run_lifecycle_action', {action: 'uninstall', confirm: txt}, function(res){
-				layer.close(loadIdx);
 				if(res){
 					layer.alert(res + (isEn ? '<br><br>This dashboard will now close.' : '<br><br>Dasbor ini akan ditutup.'), {
 						title: isEn ? 'Uninstallation Completed' : 'Uninstall Bersih Selesai',
@@ -7408,7 +7995,7 @@ function snDoUninstall(){
 						}
 					});
 				}
-			});
+			}, pIdx);
 		}
 	});
 }
@@ -7494,9 +8081,8 @@ function snBukaFeedback(){
 				return;
 			}
 
-			var loadIdx = layer.msg(isEn ? 'Sending report to developers...' : 'Mengirim laporan ke pengembang...', {time:0, shade:[0.4,'#000']});
+			var pIdx = snProgress(isEn ? 'Sending report to developers...' : 'Mengirim laporan ke pengembang...');
 			snAjax('send_feedback', {type: type, topic: topic, message: msg, email: email, include_log: includeLog}, function(res){
-				layer.close(loadIdx);
 				layer.close(idx);
 				if(res){
 					layer.alert((res.msg || (isEn ? 'Report submitted successfully.' : 'Laporan berhasil dikirim.')) + '<br><br><b>' + (isEn ? 'Subject:' : 'Subjek:') + '</b> <span class="sn-mono">' + (res.subject || '') + '</span>', {
@@ -7505,7 +8091,7 @@ function snBukaFeedback(){
 					});
 					snLoadFeedbackHistory();
 				}
-			});
+			}, pIdx);
 		}
 	});
 	snFbUpdatePreview();

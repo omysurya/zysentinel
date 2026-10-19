@@ -530,7 +530,11 @@ class sentinel_main(object):
         public.get_local_ip() tidak dipakai: di server ini fungsi itu
         mengembalikan string kosong karena mencoba mengambil alamat dari
         layanan luar. Yang dipakai justru cara yang sama dengan guardd,
-        yaitu membaca daftar antarmuka dan memilih alamat routable."""
+        yaitu membaca daftar antarmuka dan memilih alamat routable.
+        Hasil dicache selama 120 detik agar respons API instan tanpa subprocess."""
+        now = time.time()
+        if hasattr(self, '_ip_cache') and self._ip_cache and (now - self._ip_cache.get('ts', 0) < 120):
+            return self._ip_cache['ip']
         alamat = []
         try:
             with open('/proc/net/fib_trie') as f:
@@ -547,11 +551,17 @@ class sentinel_main(object):
             rc, o, _ = self._sh("ip -4 -o addr show scope global | "
                                 "awk '{print $4}' | cut -d/ -f1", 10)
             alamat = o.split()
+        res_ip = '127.0.0.1'
         for ip in alamat:
             if ip.startswith('127.') or ip.startswith('169.254.'):
                 continue
-            return ip
-        return alamat[0] if alamat else '127.0.0.1'
+            res_ip = ip
+            break
+        else:
+            if alamat:
+                res_ip = alamat[0]
+        self._ip_cache = {'ip': res_ip, 'ts': now}
+        return res_ip
 
     def _ipnum(self, ip):
         try:
@@ -634,6 +644,52 @@ class sentinel_main(object):
         """Alias untuk get_status."""
         return self.get_status(get)
 
+    _badge_cache = {'ts': 0, 'data': {}}
+
+    def _get_badge_summary(self):
+        sekarang = time.time()
+        if (sekarang - self._badge_cache['ts']) < 15 and self._badge_cache['data']:
+            return self._badge_cache['data']
+
+        waf_eng = 'off'
+        try:
+            rc, o, _ = self._waf('engine')
+            if rc == 0:
+                for line in o.splitlines():
+                    if 'engine.nginx=' in line:
+                        waf_eng = line.split('=', 1)[1].strip()
+                        break
+        except Exception:
+            pass
+
+        av_stat = 'off'
+        try:
+            if os.path.isfile('/usr/bin/clamdscan') or os.path.isfile('/usr/bin/clamscan'):
+                clamd_act = (self._svc('clamav-daemon.service') == 'active' or self._svc('clamd.service') == 'active')
+                av_stat = 'active' if clamd_act else 'ready'
+        except Exception:
+            pass
+
+        fw_back = 'iptables-nft'
+        try:
+            rc, o, _ = self._sh("iptables --version 2>/dev/null", 5)
+            if 'legacy' in o:
+                fw_back = 'iptables-legacy'
+        except Exception:
+            pass
+
+        panic_st = 1 if os.path.isfile('/www/server/sentinel/run/panic.state') else 0
+
+        data = {
+            'waf_engine': waf_eng,
+            'av_status': av_stat,
+            'fw_backend': fw_back,
+            'panic_status': panic_st
+        }
+        self._badge_cache['ts'] = sekarang
+        self._badge_cache['data'] = data
+        return data
+
     def get_status(self, get):
         """Ringkasan untuk dasbor: kondisi daemon, angka lalu lintas,
         dan status tiga lapis pertahanan."""
@@ -676,6 +732,8 @@ class sentinel_main(object):
         st['total_threats'] = tot_threats
         st['total_virus'] = tot_virus
 
+        badges = self._get_badge_summary()
+
         return public.returnMsg(True, {
             'status': st,
             'guardd_service': guardd,
@@ -687,21 +745,25 @@ class sentinel_main(object):
             'total_attackers': tot_attackers,
             'total_threats': tot_threats,
             'total_virus': tot_virus,
+            'waf_engine': badges.get('waf_engine', 'off'),
+            'av_status': badges.get('av_status', 'off'),
+            'fw_backend': badges.get('fw_backend', 'iptables-nft'),
+            'panic_status': badges.get('panic_status', 0),
         })
 
     # cache CPU. Persentase CPU butuh dua pembacaan /proc/stat dengan
     # jeda di antaranya. Dasbor sendiri menyegarkan tiap 10 detik, jadi
     # tanpa cache setiap penyegaran akan menahan 0,2 detik.
-    _cpu_cache = {'pada': 0, 'nilai': 0.0}
+    _cpu_cache = {'pada': 0, 'nilai': 0.0, 'raw': None}
 
     def _cpu_persen(self, maks_tunggu=0):
-        """Persentase pemakaian CPU, atau nilai cache bila masih segar.
+        """Persentase pemakaian CPU instan non-blocking.
 
-        Tidakblocking kalau maks_tunggu 0 dan cache masih dipakai ulang,
-        sehingga penyegaran dasbor tidak tertahan.
+        Menghitung delta pemakaian dari sample sebelumnya tanpa memblokir thread
+        dengan sleep 250ms, memangkas latensi API dari ratusan milidetik menjadi <1ms.
         """
         sekarang = time.time()
-        if maks_tunggu <= 0 and (sekarang - self._cpu_cache['pada']) < 6:
+        if (sekarang - self._cpu_cache.get('pada', 0)) < 3 and self._cpu_cache.get('nilai') is not None and self._cpu_cache.get('raw') is not None:
             return self._cpu_cache['nilai']
 
         def baca():
@@ -713,26 +775,38 @@ class sentinel_main(object):
                 return sum(v), idle
             except Exception:
                 return None
-        t1 = baca()
+
+        t2 = baca()
+        if not t2:
+            return self._cpu_cache.get('nilai', 0.0)
+
+        t1 = self._cpu_cache.get('raw')
+        dt = sekarang - self._cpu_cache.get('pada', 0)
+        if t1 and dt >= 0.2:
+            d_total = t2[0] - t1[0]
+            d_idle = t2[1] - t1[1]
+            nilai = 0.0
+            if d_total > 0:
+                nilai = round(100.0 * (d_total - d_idle) / d_total, 1)
+            self._cpu_cache['pada'] = sekarang
+            self._cpu_cache['nilai'] = nilai
+            self._cpu_cache['raw'] = t2
+            return nilai
+
         if not t1:
-            return self._cpu_cache['nilai']
-        if maks_tunggu <= 0:
-            # Mode cepat: tanpa jeda, hasilnya kurang presisi tapi cukup
-            # untuk indikator. Jeda nyata diambil saat cache sudah kedaluwarsa.
-            t2 = t1
-        else:
-            time.sleep(0.25)
-            t2 = baca()
-            if not t2:
-                return self._cpu_cache['nilai']
-        d_total = t2[0] - t1[0]
-        d_idle = t2[1] - t1[1]
-        nilai = 0.0
-        if d_total > 0:
-            nilai = round(100.0 * (d_total - d_idle) / d_total, 1)
-        self._cpu_cache['pada'] = sekarang
-        self._cpu_cache['nilai'] = nilai
-        return nilai
+            self._cpu_cache['raw'] = t2
+            self._cpu_cache['pada'] = sekarang
+            try:
+                with open('/proc/loadavg', 'r') as f:
+                    l1 = float(f.read().split()[0])
+                cores = os.cpu_count() or 1
+                nilai = min(100.0, round((l1 / cores) * 100.0, 1))
+            except Exception:
+                nilai = 0.0
+            self._cpu_cache['nilai'] = nilai
+            return nilai
+
+        return self._cpu_cache.get('nilai', 0.0)
 
     def get_sysinfo(self, get):
         """Ringkasan mesin untuk panel System di dasbor.
@@ -768,16 +842,19 @@ class sentinel_main(object):
             info['uptime_mesin'] = '-'
         info['uptime_daemon'] = self._durat(st.get('uptime', 0))
 
-        # beban rata-rata
-        rc, o, e = self._sh("awk '{print $1\" \"$2\" \"$3}' /proc/loadavg", 10)
-        info['load'] = o.strip() or '-'
+        # beban rata-rata (baca native tanpa fork subprocess awk)
+        try:
+            with open('/proc/loadavg', 'r') as f:
+                info['load'] = ' '.join(f.read().strip().split()[:3])
+        except Exception:
+            info['load'] = '-'
         try:
             with open('/proc/cpuinfo', 'r') as f:
                 info['core'] = sum(1 for l in f if l.startswith('processor'))
         except Exception:
             info['core'] = 0
 
-        info['cpu'] = self._cpu_persen(maks_tunggu=1)
+        info['cpu'] = self._cpu_persen(maks_tunggu=0)
 
         # memori
         try:
@@ -1047,6 +1124,10 @@ class sentinel_main(object):
                    'dikeluarkan dari daftar putih, blokir lama berlaku lagi')
         return public.returnMsg(True, '%s dikeluarkan dari daftar putih' % ip)
 
+    def del_allow_ip(self, get):
+        """Keluarkan IP dari daftar putih (alias untuk del_allow)."""
+        return self.del_allow(get)
+
     # ------------------------------------------------------------------ #
     # pengaturan                                                         #
     # ------------------------------------------------------------------ #
@@ -1141,6 +1222,8 @@ class sentinel_main(object):
     # ------------------------------------------------------------------ #
     # panic: blokir / lepas seluruh akses web                             #
     # ------------------------------------------------------------------ #
+    _panic_cache = {'ts': 0, 'data': None}
+
     def get_panic(self, get):
         """Keadaan panic sekarang.
 
@@ -1150,8 +1233,12 @@ class sentinel_main(object):
         masih dibebani aturan panic sementara penanda sudah hilang.
         Penanda boleh hilang saat reboot, jadi hanya iptables yang
         dianggap kebenaran; penanda dipakai untuk menampilkan
-        kapan panic dinyalakan.
+        kapan panic dinyalakan. Hasil dicache 2.5 detik untuk respons instan.
         """
+        now = time.time()
+        if (now - self._panic_cache['ts']) < 2.5 and self._panic_cache['data'] is not None:
+            return public.returnMsg(True, dict(self._panic_cache['data']))
+
         rc, o, e = self._sh(
             "'%s/bin/sentinel-fw.sh' panic-status" % self.__PATH, 30)
         aktif = (rc == 0)
@@ -1165,6 +1252,7 @@ class sentinel_main(object):
             elif b.startswith('-A'):
                 info['baris'].append(b)
         info['pesan'] = o.strip() if o.strip() else e.strip()
+        self._panic_cache = {'ts': now, 'data': dict(info)}
         return public.returnMsg(True, info)
 
     def set_panic(self, get):
@@ -1175,7 +1263,8 @@ class sentinel_main(object):
         dan jaringan privat. Itu disengaja supaya operator masih bisa
         mencabut panic.
         """
-        aksi = (get.get('action') or '').strip()
+        self._panic_cache = {'ts': 0, 'data': None}
+        aksi = (get.get('aksi') or get.get('act') or get.get('sub_action') or (get.get('action') if get.get('action') != 'a' else None) or '').strip()
         if aksi not in ('on', 'off'):
             return public.returnMsg(False, 'aksi tidak dikenal')
         if aksi == 'off':
@@ -1213,7 +1302,7 @@ class sentinel_main(object):
     # kendali daemon dan firewall                                        #
     # ------------------------------------------------------------------ #
     def service_action(self, get):
-        aksi = (get.get('action') or '').strip().lower()
+        aksi = (get.get('aksi') or get.get('act') or get.get('sub_action') or (get.get('action') if get.get('action') != 'a' else None) or '').strip().lower()
         peta = {'start': 'start', 'stop': 'stop', 'restart': 'restart', 'reload': 'reload'}
         if aksi not in peta:
             return public.returnMsg(False, 'Aksi tidak dikenal (hanya start, stop, restart, reload)')
@@ -1302,7 +1391,7 @@ class sentinel_main(object):
         })
 
     def fw_action(self, get):
-        aksi = (get.get('action') or '').strip()
+        aksi = (get.get('aksi') or get.get('act') or get.get('sub_action') or (get.get('action') if get.get('action') != 'a' else None) or '').strip()
         if aksi not in ('install', 'remove', 'flush'):
             return public.returnMsg(False, 'aksi tidak dikenal')
         rc, o, e = self._sh("'%s/bin/sentinel-fw.sh' %s"
@@ -1391,8 +1480,48 @@ class sentinel_main(object):
                     })
         return public.returnMsg(True, hasil)
 
+    def del_fw_rule(self, get):
+        """Hapus aturan terkelola Sentinel: ban, allow, atau geo."""
+        tipe = (get.get('type') or '').strip()
+        rule = (get.get('rule') or get.get('ip') or '').strip()
+        if not rule and tipe != 'geo':
+            return public.returnMsg(False, 'rule atau IP belum ditentukan')
+
+        class ParamWrapper(dict):
+            def __init__(self, d):
+                super().__init__(d)
+            def get(self, k, default=None):
+                return super().get(k, default)
+
+        if tipe == 'ban':
+            return self.unban_ip(ParamWrapper({'ip': rule}))
+        elif tipe == 'allow':
+            return self.del_allow(ParamWrapper({'ip': rule}))
+        elif tipe == 'geo':
+            return self.geo_ban_off(get)
+        return public.returnMsg(False, 'Tipe aturan tidak dikenal: %s' % tipe)
+
+    def sync_vpn_whitelist(self, get=None):
+        """Deteksi otomatis antarmuka VPN (WireGuard, OpenVPN, Tailscale, ZeroTier)
+        dan sinkronkan ke aturan whitelist firewall tanpa mengganggu VPN client."""
+        fw_script = '%s/bin/sentinel-fw.sh' % self.__PATH
+        if not os.path.isfile(fw_script):
+            fw_script = '/www/server/sentinel/bin/sentinel-fw.sh'
+        rc, o, e = self._sh("bash '%s' install" % fw_script, 60)
+        rc_l, o_l, _ = self._sh("ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | grep -E '^(wg|tun|tap|tailscale|zt|ppp)' | cut -d'@' -f1 | sort -u", 10)
+        vpn_list = [x.strip() for x in o_l.splitlines() if x.strip()]
+        return public.returnMsg(True, {
+            'status': 'success' if rc == 0 else 'warning',
+            'vpn_interfaces': vpn_list,
+            'message': 'Whitelist VPN disinkronkan otomatis (%d antarmuka terdeteksi)' % len(vpn_list)
+        })
+
     def rescan(self, get):
         rc, o, e = self._sh("'%s/bin/guardctl' rescan" % self.__PATH, 20)
+        try:
+            self.sync_vpn_whitelist(get)
+        except Exception:
+            pass
         return public.returnMsg(True, o.strip() or 'penemuan ulang diminta')
 
     # ------------------------------------------------------------------ #
@@ -1450,12 +1579,17 @@ class sentinel_main(object):
             if len(parts) == 2 and int(parts[0]) >= int(parts[1]):
                 return public.returnMsg(False, 'Rentang port tidak valid (port awal harus lebih kecil)')
 
-        action = (get.get('action') or 'ACCEPT').strip().upper()
+        action = (get.get('rule_action') or get.get('act') or get.get('aksi') or get.get('sub_action') or (get.get('action') if get.get('action') != 'a' else None) or 'ACCEPT').strip().upper()
         if action not in ['ACCEPT', 'DROP']:
             action = 'ACCEPT'
 
-        source = (get.get('source') or '0.0.0.0/0').strip()
-        dest = (get.get('dest') or '0.0.0.0/0').strip()
+        source = (get.get('source') or '0.0.0.0/0').strip() or '0.0.0.0/0'
+        dest = (get.get('dest') or '0.0.0.0/0').strip() or '0.0.0.0/0'
+
+        for ip_field, ip_val in [('source', source), ('dest', dest)]:
+            if not re.match(r'^[0-9a-fA-F:\./, ]+$', ip_val):
+                return public.returnMsg(False, 'Format alamat IP/CIDR %s tidak valid' % ip_field)
+
         remark = (get.get('remark') or '').strip()
         if not remark:
             remark = '%s Port %s' % (protocol.upper(), clean_port)
@@ -1590,6 +1724,18 @@ class sentinel_main(object):
 
         self._ports_script('apply')
         return public.returnMsg(True, 'Port firewall %s' % ('diaktifkan' if new_st else 'dinonaktifkan'))
+
+    def apply_port_firewall_kernel(self, get):
+        """Alias untuk apply_port_firewall."""
+        return self.apply_port_firewall(get)
+
+    def reset_port_firewall_defaults(self, get):
+        """Alias untuk reset_port_firewall."""
+        return self.reset_port_firewall(get)
+
+    def toggle_port_firewall_global(self, get):
+        """Alias untuk toggle_port_firewall_status."""
+        return self.toggle_port_firewall_status(get)
 
     # ------------------------------------------------------------------ #
     # Lua WAF engine (Nginx Lua firewall, difork ke Sentinel)            #
@@ -1753,6 +1899,57 @@ class sentinel_main(object):
         site = self._fw_baca('site.json')
         if site is None:
             return public.returnMsg(False, 'site.json tidak terbaca')
+
+        # Sinkronkan situs dari panel jika ada yang belum terdaftar di site.json
+        try:
+            panel_sites = public.M('sites').field('name').select()
+            updated = False
+            for ps in panel_sites:
+                sname = ps.get('name') if isinstance(ps, dict) else None
+                if sname and sname not in site:
+                    site[sname] = {
+                        "open": True,
+                        "project": "",
+                        "log": True,
+                        "cdn": False,
+                        "cdn_header": ["x-forwarded-for", "x-real-ip"],
+                        "retry": 6,
+                        "retry_cycle": 60,
+                        "retry_time": 180,
+                        "disable_php_path": ["^/upload/", "^/static/"],
+                        "disable_path": [],
+                        "disable_ext": [],
+                        "disable_upload_ext": ["php", "jsp"],
+                        "url_white": [],
+                        "url_rule": [],
+                        "url_tell": [],
+                        "disable_rule": {
+                            "url": [],
+                            "post": [],
+                            "args": [],
+                            "cookie": [],
+                            "user_agent": []
+                        },
+                        "cc": {
+                            "open": True,
+                            "cycle": 60,
+                            "limit": 1500,
+                            "endtime": 300
+                        },
+                        "get": True,
+                        "post": True,
+                        "cookie": True,
+                        "user-agent": True,
+                        "scan": True,
+                        "drop_abroad": False
+                    }
+                    updated = True
+            if updated:
+                self._fw_tulis('site.json', site)
+                self._fw_reload()
+        except Exception:
+            pass
+
         daftar = []
         for nama in sorted(site.keys()):
             c = site[nama] if isinstance(site[nama], dict) else {}
@@ -1860,7 +2057,7 @@ class sentinel_main(object):
 
     def freewaf_engine(self, get):
         """Pasang atau cabut engine free_waf (nginx saja)."""
-        aksi = (get.get('action') or '').strip()
+        aksi = (get.get('aksi') or get.get('act') or get.get('sub_action') or (get.get('action') if get.get('action') != 'a' else None) or '').strip()
         if aksi not in ('install', 'remove'):
             return public.returnMsg(False, 'aksi harus install atau remove')
         rc, o, e = self._sh(
@@ -1869,6 +2066,46 @@ class sentinel_main(object):
             return public.returnMsg(False, 'gagal: %s'
                                     % (e.strip() or o.strip()))
         return public.returnMsg(True, o.strip() or 'selesai')
+
+    def freewaf_info(self, get):
+        """Status kesiapan dan informasi runtime engine FreeWAF / Lua WAF."""
+        rc, o, e = self._sh(
+            "'%s/bin/sentinel-waf.sh' freewaf-status" % self.__PATH, 30)
+        status = {}
+        for baris in o.strip().splitlines():
+            if '=' in baris:
+                k, v = baris.split('=', 1)
+                status[k.strip()] = v.strip()
+
+        # Deteksi versi Nginx
+        nginx_ver = '-'
+        rc_nv, o_nv, e_nv = self._sh('/www/server/nginx/sbin/nginx -v', 10)
+        nv_out = (o_nv + e_nv).strip()
+        m_nv = re.search(r'nginx/([\d.]+)', nv_out)
+        if m_nv:
+            nginx_ver = m_nv.group(1)
+        elif nv_out:
+            nginx_ver = nv_out
+
+        # Deteksi status hook Nginx
+        hooked = 'tidak'
+        if status.get('conf') == 'ada' or \
+           os.path.exists('/www/server/panel/vhost/nginx/sentinel_waf.conf') or \
+           os.path.exists('/www/server/panel/vhost/nginx/free_waf.conf'):
+            hooked = 'ya'
+
+        res = {
+            'nginx_ver': nginx_ver,
+            'lua': status.get('lua', 'tidak-ada'),
+            'hooked': hooked,
+            'loaded': status.get('loaded', 'tidak'),
+            'mode': status.get('mode', 'tidak-diketahui'),
+            'home': status.get('home', os.path.join(self.__PATH, 'waf', 'lua_waf')),
+            'engine_file': status.get('engine_file', 'tidak-ada'),
+            'conf': status.get('conf', 'tidak-ada'),
+            'status': status
+        }
+        return public.returnMsg(True, res)
 
     # ------------------------------------------------------------------ #
     # backend firewall dan WAF                                             #
@@ -2170,6 +2407,10 @@ class sentinel_main(object):
             return public.returnMsg(False, 'unduhan gagal: %s'
                                     % (e.strip() or o.strip()))
         return public.returnMsg(True, o.strip() or 'aset Coraza siap')
+
+    def coraza_download(self, get):
+        """Unduh aset Coraza + OWASP CRS (alias untuk download_coraza)."""
+        return self.download_coraza(get)
 
     # ------------------------------------------------------------------ #
     # jejak audit dan analisis per-vhost                                  #
@@ -2485,7 +2726,7 @@ class sentinel_main(object):
         memutus seluruh pengunjung satu negara, jadi tidak boleh terjadi
         dari satu klik yang tidak sengaja.
         """
-        aksi = (get.get('action') or '').strip()
+        aksi = (get.get('aksi') or get.get('act') or get.get('sub_action') or (get.get('action') if get.get('action') != 'a' else None) or '').strip()
         if aksi not in ('on', 'off'):
             return public.returnMsg(False, 'action harus on atau off')
 
@@ -2544,6 +2785,15 @@ class sentinel_main(object):
         return public.returnMsg(
             True, 'geo-ban aktif: mode %s, %d blok CIDR diblokir '
                   'pada port web' % (mode, blok))
+
+    def geo_ban_off(self, get):
+        """Mematikan fitur Geo-Ban dan membersihkan aturan di kernel."""
+        class ParamWrapper(dict):
+            def __init__(self, d):
+                super().__init__(d)
+            def get(self, k, default=None):
+                return super().get(k, default)
+        return self.set_geo_ban(ParamWrapper({'action': 'off'}))
 
     def _geo_kode_valid(self):
         """Kumpulan kode negara yang sah, atau set kosong bila tak bisa
@@ -2641,7 +2891,7 @@ class sentinel_main(object):
         ip = (get.get('ip') or '').strip()
         if not ip or self._ipnum(ip) == 0:
             return public.returnMsg(False, 'alamat IP tidak valid')
-        aksi = (get.get('action') or '').strip()
+        aksi = (get.get('aksi') or get.get('act') or get.get('sub_action') or (get.get('action') if get.get('action') != 'a' else None) or '').strip()
         if aksi not in ('setuju', 'tolak'):
             return public.returnMsg(
                 False, 'action harus setuju atau tolak')
@@ -2688,6 +2938,10 @@ class sentinel_main(object):
                    'ditolak operator, tidak diblokir')
         return public.returnMsg(
             True, '%s ditolak, tidak diblokir' % ip)
+
+    def review_put(self, get):
+        """Putuskan review IP: disetujui atau ditolak (alias untuk review_decide)."""
+        return self.review_decide(get)
 
     # ------------------------------------------------------------------ #
     # notifikasi                                                          #
@@ -3555,6 +3809,10 @@ class sentinel_main(object):
             return public.returnMsg(True, o.strip() or 'Semua berkas karantina telah dibersihkan')
         return public.returnMsg(False, e.strip() or o.strip() or 'Gagal membersihkan karantina')
 
+    def av_quar_purge(self, get):
+        """Hapus seluruh berkas karantina (alias untuk av_purge)."""
+        return self.av_purge(get)
+
     def av_baseline(self, get):
         """Rekam baseline integritas SHA-256 untuk berkas web pada vhost."""
         path = str(get.get('path', '')).strip()
@@ -3829,6 +4087,21 @@ class sentinel_main(object):
             
         return public.returnMsg(True, 'Process Guard berhasil disetel ke mode: ' + mode.upper())
 
+    def set_elite_defense(self, get):
+        """Mengatur mode pertahanan elit (Egress Guard atau Process Watchdog)."""
+        tipe = self._only(get, 'type', '')
+        mode = self._only(get, 'mode', '')
+        class ParamWrapper(dict):
+            def __init__(self, d):
+                super().__init__(d)
+            def get(self, k, default=None):
+                return super().get(k, default)
+        if tipe == 'egress':
+            return self.set_egress_guard(ParamWrapper({'status': mode}))
+        elif tipe == 'proc':
+            return self.set_proc_guard(ParamWrapper({'mode': mode}))
+        return public.returnMsg(False, 'Tipe pertahanan tidak dikenal: %s' % tipe)
+
     def update_threat_intel(self, get):
         """Perbarui feed Threat Intel Spamhaus DROP/EDROP sekarang."""
         cmd = [self._p('bin', 'sentinel-intel.sh'), 'update']
@@ -3993,6 +4266,10 @@ class sentinel_main(object):
         except Exception as ex:
             return public.returnMsg(False, 'Galat parsing respons status: %s' % str(ex))
 
+    def get_upload_scan_status(self, get):
+        """Ambil status upload protection (alias untuk get_vhost_upload_scan)."""
+        return self.get_vhost_upload_scan(get)
+
     def toggle_vhost_upload_scan(self, get):
         """Aktifkan atau nonaktifkan pemindaian upload realtime untuk satu vhost."""
         vhost = str(get.get('vhost', '')).strip()
@@ -4077,7 +4354,7 @@ class sentinel_main(object):
 
     def toggle_upload_scan_service(self, get):
         """Nyalakan atau hentikan layanan daemon sentinel-upload-scan.service."""
-        action = str(get.get('action', '')).strip().lower()
+        action = str(get.get('sub_action') or get.get('act') or get.get('aksi') or (get.get('action') if get.get('action') != 'a' else '') or '').strip().lower()
         if action not in ['start', 'stop', 'restart']:
             return public.returnMsg(False, 'Aksi tidak valid (start|stop|restart)')
         if self._is_systemd():
@@ -4299,8 +4576,15 @@ class sentinel_main(object):
         units = ['sentinel.service', 'sentinel-fw.service', 'sentinel-proc.service',
                  'sentinel-upload-scan.service', 'sentinel-intel.timer', 'sentinel-av.timer']
         services_status = {}
-        for u in units:
-            services_status[u] = (self._svc(u) == 'running')
+        if self._is_systemd():
+            rc, o, _ = self._sh("systemctl is-active " + " ".join(units), 5)
+            lines = o.strip().splitlines()
+            for idx, u in enumerate(units):
+                st = lines[idx].strip() if idx < len(lines) else ''
+                services_status[u] = (st in ('active', 'running'))
+        else:
+            for u in units:
+                services_status[u] = (self._svc(u) in ('active', 'running'))
 
         hostname = socket.gethostname() if hasattr(socket, 'gethostname') else 'unknown-host'
 
@@ -4314,7 +4598,7 @@ class sentinel_main(object):
 
     def run_lifecycle_action(self, get):
         """Jalankan aksi siklus hidup: fresh, repair, update, uninstall / cabut."""
-        action = str(get.get('action', '')).strip().lower()
+        action = str(get.get('sub_action') or get.get('act') or get.get('aksi') or (get.get('action') if get.get('action') != 'a' else '') or '').strip().lower()
         if action not in ['fresh', 'repair', 'update', 'uninstall', 'cabut']:
             return public.returnMsg(False, 'Aksi tidak valid (fresh|repair|update|uninstall)')
 

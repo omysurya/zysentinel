@@ -259,6 +259,70 @@ install_allow_rules() {
   return 0
 }
 
+# --- 2b. deteksi otomatis antarmuka & koneksi VPN (WireGuard, OpenVPN, Tailscale, ZeroTier) ---
+auto_detect_vpn_whitelist() {
+  local vpn_devs dev ip_cidr r_net ep aip
+  vpn_devs="$(ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | grep -E '^(wg|tun|tap|tailscale|zt|ppp)' | cut -d'@' -f1 | sort -u)"
+  [ -z "$vpn_devs" ] && return 0
+
+  for dev in $vpn_devs; do
+    say "vpn-guard: antarmuka VPN aktif terdeteksi: $dev"
+
+    # 1. Bypass inspeksi INPUT pada antarmuka VPN
+    "$IPT" -A "$CHAIN" -i "$dev" -j RETURN 2>/dev/null || true
+
+    # 2. Whitelist seluruh IP/CIDR lokal antarmuka VPN
+    for ip_cidr in $(ip -o -4 addr show dev "$dev" 2>/dev/null | awk '{print $4}'); do
+      [ -n "$ip_cidr" ] || continue
+      "$IPT" -A "$CHAIN" -s "$ip_cidr" -j RETURN 2>/dev/null || true
+      "$IPSET" add aapanel.ipv4.whitelist "$ip_cidr" -exist 2>/dev/null || true
+      if [ -f "$ALLOW_FILE" ] && ! grep -qF "$ip_cidr" "$ALLOW_FILE" 2>/dev/null; then
+        printf '\n# Auto-whitelist antarmuka VPN %s\n%s\n' "$dev" "$ip_cidr" >> "$ALLOW_FILE"
+      fi
+    done
+
+    # 3. Whitelist rute terkait antarmuka VPN
+    for r_net in $(ip -o route show dev "$dev" 2>/dev/null | awk '{print $1}' | grep -v default); do
+      [ -n "$r_net" ] || continue
+      "$IPT" -A "$CHAIN" -s "$r_net" -j RETURN 2>/dev/null || true
+      "$IPSET" add aapanel.ipv4.whitelist "$r_net" -exist 2>/dev/null || true
+      if [ -f "$ALLOW_FILE" ] && ! grep -qF "$r_net" "$ALLOW_FILE" 2>/dev/null; then
+        printf '%s\n' "$r_net" >> "$ALLOW_FILE"
+      fi
+    done
+
+    # 4. Ambil endpoints dan allowed-ips WireGuard bila tersedia
+    if command -v wg >/dev/null 2>&1 && [[ "$dev" =~ ^wg ]]; then
+      for ep in $(wg show "$dev" endpoints 2>/dev/null | awk '{print $2}' | cut -d: -f1); do
+        if [[ "$ep" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          "$IPT" -A "$CHAIN" -s "$ep/32" -j RETURN 2>/dev/null || true
+          "$IPSET" add aapanel.ipv4.whitelist "$ep/32" -exist 2>/dev/null || true
+          if [ -f "$ALLOW_FILE" ] && ! grep -qF "$ep" "$ALLOW_FILE" 2>/dev/null; then
+            printf '# WireGuard peer endpoint\n%s/32\n' "$ep" >> "$ALLOW_FILE"
+          fi
+        fi
+      done
+      for aip in $(wg show "$dev" allowed-ips 2>/dev/null | awk '{$1=""; print $0}' | tr ',' ' '); do
+        if [[ "$aip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?$ ]]; then
+          "$IPT" -A "$CHAIN" -s "$aip" -j RETURN 2>/dev/null || true
+          "$IPSET" add aapanel.ipv4.whitelist "$aip" -exist 2>/dev/null || true
+          if [ -f "$ALLOW_FILE" ] && ! grep -qF "$aip" "$ALLOW_FILE" 2>/dev/null; then
+            printf '%s\n' "$aip" >> "$ALLOW_FILE"
+          fi
+        fi
+      done
+    fi
+
+    # 5. Routing & Penerusan FORWARD (menjamin Docker container seperti payroll-api bebas akses ke VPN)
+    "$IPT" -C FORWARD -i "$dev" -j ACCEPT 2>/dev/null || "$IPT" -I FORWARD 1 -i "$dev" -j ACCEPT 2>/dev/null || true
+    "$IPT" -C FORWARD -o "$dev" -j ACCEPT 2>/dev/null || "$IPT" -I FORWARD 1 -o "$dev" -j ACCEPT 2>/dev/null || true
+
+    # 6. Pastikan NAT MASQUERADE untuk trafik keluar lewat VPN
+    "$IPT" -t nat -C POSTROUTING -o "$dev" -j MASQUERADE 2>/dev/null || "$IPT" -t nat -I POSTROUTING 1 -o "$dev" -j MASQUERADE 2>/dev/null || true
+  done
+  return 0
+}
+
 # --- 3. lompatan induk -> SENTINEL (definisi ada di blok kompatibilitas) ---
 
 do_install() {
@@ -328,6 +392,9 @@ do_install() {
 
   # 2) whitelist persisten (allowlist.txt)
   install_allow_rules
+
+  # 2a) deteksi otomatis koneksi WireGuard & VPN lain (auto-whitelist & routing)
+  auto_detect_vpn_whitelist
 
   # 2b) GEO-BAN: blokir seluruh blok CIDR negara terpilih.
   #

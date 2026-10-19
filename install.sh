@@ -601,13 +601,11 @@ perbaiki_mandiri() {
     fi
   fi
 
-  # 7. Periksa aturan firewall kernel
+  # 7. Periksa dan pulihkan aturan firewall kernel & auto-whitelist VPN
   if [ -x "$BIN/sentinel-fw.sh" ]; then
-    if ! iptables -S IN_BT 2>/dev/null | grep -q 'sentinel_in' && ! iptables -S INPUT 2>/dev/null | grep -q 'sentinel_in'; then
-      bash "$BIN/sentinel-fw.sh" install >/dev/null 2>&1 || true
-      say "aturan kernel firewall sentinel_in dipasang ulang"
-      dipulihkan=$((dipulihkan + 1))
-    fi
+    bash "$BIN/sentinel-fw.sh" install >/dev/null 2>&1 || true
+    say "aturan firewall kernel dan auto-whitelist VPN disinkronkan"
+    dipulihkan=$((dipulihkan + 1))
   fi
 
   # 8. Periksa hook WAF & validasi Nginx (Zero Downtime)

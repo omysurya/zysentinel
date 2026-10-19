@@ -187,6 +187,14 @@ def apply_kernel(cfg=None):
     for net in ['127.0.0.0/8', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16']:
         run_cmd(f"{ipt} -A {in_chain} -s {net} -j ACCEPT 2>/dev/null || true")
 
+    # 4b. Antarmuka VPN aktif (WireGuard, OpenVPN, Tailscale, ZeroTier)
+    rc_v, o_v, _ = run_cmd("ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | grep -E '^(wg|tun|tap|tailscale|zt|ppp)' | cut -d'@' -f1 | sort -u")
+    if rc_v == 0 and o_v:
+        for vpn_iface in o_v.splitlines():
+            vpn_iface = vpn_iface.strip()
+            if vpn_iface:
+                run_cmd(f"{ipt} -A {in_chain} -i {vpn_iface} -j ACCEPT 2>/dev/null || true")
+
     # 5. Pasang aturan port inbound
     for r in cfg.get('inbound', []):
         if not r.get('enabled', True):
@@ -198,13 +206,21 @@ def apply_kernel(cfg=None):
         rid = str(r.get('id', 'rule'))[:20]
         cmt = f"sentinel:in:{rid}"
 
+        is_all_ports = (port in ['all', 'any', '1:65535', '0:65535', ''])
         if proto in ['all', 'any']:
             run_cmd(f"{ipt} -A {in_chain} -s {src} -m comment --comment '{cmt}' -j {action}")
         elif proto in ['tcp/udp', 'tcp+udp']:
-            run_cmd(f"{ipt} -A {in_chain} -p tcp --dport {port} -s {src} -m comment --comment '{cmt}' -j {action}")
-            run_cmd(f"{ipt} -A {in_chain} -p udp --dport {port} -s {src} -m comment --comment '{cmt}' -j {action}")
+            if is_all_ports:
+                run_cmd(f"{ipt} -A {in_chain} -p tcp -s {src} -m comment --comment '{cmt}' -j {action}")
+                run_cmd(f"{ipt} -A {in_chain} -p udp -s {src} -m comment --comment '{cmt}' -j {action}")
+            else:
+                run_cmd(f"{ipt} -A {in_chain} -p tcp --dport {port} -s {src} -m comment --comment '{cmt}' -j {action}")
+                run_cmd(f"{ipt} -A {in_chain} -p udp --dport {port} -s {src} -m comment --comment '{cmt}' -j {action}")
         else:
-            run_cmd(f"{ipt} -A {in_chain} -p {proto} --dport {port} -s {src} -m comment --comment '{cmt}' -j {action}")
+            if is_all_ports:
+                run_cmd(f"{ipt} -A {in_chain} -p {proto} -s {src} -m comment --comment '{cmt}' -j {action}")
+            else:
+                run_cmd(f"{ipt} -A {in_chain} -p {proto} --dport {port} -s {src} -m comment --comment '{cmt}' -j {action}")
 
     # 6. ICMP Ping diizinkan
     run_cmd(f"{ipt} -A {in_chain} -p icmp -j ACCEPT")
@@ -218,6 +234,13 @@ def apply_kernel(cfg=None):
     # --- ATURAN OUTBOUND (SENTINEL_OUT_PORTS) ---
     run_cmd(f"{ipt} -A {out_chain} -o lo -j ACCEPT")
     run_cmd(f"{ipt} -A {out_chain} -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT")
+
+    # Bypass antarmuka VPN aktif pada trafik keluar
+    if rc_v == 0 and o_v:
+        for vpn_iface in o_v.splitlines():
+            vpn_iface = vpn_iface.strip()
+            if vpn_iface:
+                run_cmd(f"{ipt} -A {out_chain} -o {vpn_iface} -j ACCEPT 2>/dev/null || true")
 
     out_allow_all = False
     for r in cfg.get('outbound', []):
@@ -242,13 +265,21 @@ def apply_kernel(cfg=None):
             dst = r.get('dest', '0.0.0.0/0').strip() or '0.0.0.0/0'
             rid = str(r.get('id', 'rule'))[:20]
             cmt = f"sentinel:out:{rid}"
+            is_all_ports = (port in ['all', 'any', '1:65535', '0:65535', ''])
             if proto in ['all', 'any']:
                 run_cmd(f"{ipt} -A {out_chain} -d {dst} -m comment --comment '{cmt}' -j {action}")
             elif proto in ['tcp/udp', 'tcp+udp']:
-                run_cmd(f"{ipt} -A {out_chain} -p tcp --dport {port} -d {dst} -m comment --comment '{cmt}' -j {action}")
-                run_cmd(f"{ipt} -A {out_chain} -p udp --dport {port} -d {dst} -m comment --comment '{cmt}' -j {action}")
+                if is_all_ports:
+                    run_cmd(f"{ipt} -A {out_chain} -p tcp -d {dst} -m comment --comment '{cmt}' -j {action}")
+                    run_cmd(f"{ipt} -A {out_chain} -p udp -d {dst} -m comment --comment '{cmt}' -j {action}")
+                else:
+                    run_cmd(f"{ipt} -A {out_chain} -p tcp --dport {port} -d {dst} -m comment --comment '{cmt}' -j {action}")
+                    run_cmd(f"{ipt} -A {out_chain} -p udp --dport {port} -d {dst} -m comment --comment '{cmt}' -j {action}")
             else:
-                run_cmd(f"{ipt} -A {out_chain} -p {proto} --dport {port} -d {dst} -m comment --comment '{cmt}' -j {action}")
+                if is_all_ports:
+                    run_cmd(f"{ipt} -A {out_chain} -p {proto} -d {dst} -m comment --comment '{cmt}' -j {action}")
+                else:
+                    run_cmd(f"{ipt} -A {out_chain} -p {proto} --dport {port} -d {dst} -m comment --comment '{cmt}' -j {action}")
 
         if cfg.get('outbound_policy', 'ACCEPT').upper() == 'DROP':
             run_cmd(f"{ipt} -A {out_chain} -m conntrack --ctstate NEW -j REJECT --reject-with icmp-port-unreachable")

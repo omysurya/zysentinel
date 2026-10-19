@@ -177,7 +177,7 @@ vhost_dir() {
 # Berkas di direktori vhost yang BUKAN situs: helper panel, status,
 # dan pemantau. Tanpa daftar ini UI akan menawarkan WAF untuk berkas
 # yang bukan situs.
-BUKAN_SITUS="free_waf phpfpm_status waf2monitor_data"
+BUKAN_SITUS="free_waf sentinel_waf phpfpm_status waf2monitor_data"
 
 do_vhosts() {
   # Keluaran: ws|site|keadaan. keadaan dibaca dari snippet sentinel.
