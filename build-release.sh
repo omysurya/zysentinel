@@ -39,12 +39,16 @@ rsync -rltD --exclude='.git' \
             --exclude='tests' \
             "$SCRIPT_DIR/" "$STAGE_DIR/sentinel/"
 
-# 4. Pastikan izin eksekusi berkas skrip
+# 4. Pastikan izin eksekusi berkas skrip & library
 chmod 755 "$STAGE_DIR/sentinel/install.sh"
 chmod 755 "$STAGE_DIR/sentinel/payload"/*.sh \
           "$STAGE_DIR/sentinel/payload"/*.py \
           "$STAGE_DIR/sentinel/payload"/guardctl 2>/dev/null || true
 [ -f "$STAGE_DIR/sentinel/payload/guardd" ] && chmod 755 "$STAGE_DIR/sentinel/payload/guardd" || true
+[ -f "$STAGE_DIR/sentinel/payload/waf/lua_waf/cjson.so" ] && chmod 755 "$STAGE_DIR/sentinel/payload/waf/lua_waf/cjson.so" || true
+[ -f "$STAGE_DIR/sentinel/payload/lua_waf/cjson.so" ] && chmod 755 "$STAGE_DIR/sentinel/payload/lua_waf/cjson.so" || true
+find "$STAGE_DIR/sentinel/payload/systemd" -type f -exec chmod 644 {} + 2>/dev/null || true
+[ -f "$STAGE_DIR/sentinel/payload/init.d/sentinel" ] && chmod 755 "$STAGE_DIR/sentinel/payload/init.d/sentinel" || true
 
 # 5. Kompresi menjadi ZIP resmi
 mkdir -p "$OUT_DIR"
@@ -52,6 +56,7 @@ TARGET_ZIP="$OUT_DIR/sentinel.zip"
 VERSIONED_ZIP="$OUT_DIR/zysentinel-v${VERSION}.zip"
 
 echo "[*] Mengompresi paket ke $TARGET_ZIP..."
+rm -f "$TARGET_ZIP" "$VERSIONED_ZIP" "/tmp/sentinel.zip"
 (cd "$STAGE_DIR" && zip -r -9 "$TARGET_ZIP" sentinel/ >/dev/null)
 cp -f "$TARGET_ZIP" "$VERSIONED_ZIP"
 cp -f "$TARGET_ZIP" "/tmp/sentinel.zip"

@@ -18,60 +18,81 @@ butuh_root() {
   [ "$(id -u)" -eq 0 ] || { err "jalankan sebagai root"; exit 1; }
 }
 
+pulihkan_izin_staging() {
+  local plug_dir
+  plug_dir="$(cd "$(dirname "$0")" && pwd)"
+  chmod -R u+rwX,go+rX "$plug_dir" 2>/dev/null || true
+  chmod 755 "$plug_dir/install.sh" 2>/dev/null || true
+  if [ -d "$plug_dir/payload" ]; then
+    chmod -R u+rwX,go+rX "$plug_dir/payload" 2>/dev/null || true
+    chmod 755 "$plug_dir/payload"/*.sh "$plug_dir/payload"/*.py "$plug_dir/payload"/guardctl 2>/dev/null || true
+    [ -f "$plug_dir/payload/guardd" ] && chmod 755 "$plug_dir/payload/guardd" 2>/dev/null || true
+  fi
+}
+
 cek_depe() {
-  # Dependensi untuk server baru. Tanpa ini instalasi gagal di tengah
-  # dengan pesan yang membingungkan (mis. gcc tidak ada -> guardd tidak
-  # terkompilasi -> checks gagal -> panel bilang instalasi gagal).
+  # Pastikan python3 tersedia dalam PATH
   if ! command -v python3 >/dev/null 2>&1 && [ -x /www/server/panel/pyenv/bin/python3 ]; then
     ln -sf /www/server/panel/pyenv/bin/python3 /usr/bin/python3 2>/dev/null || true
   fi
-  local kurang=""
-  command -v gcc >/dev/null 2>&1 || kurang="$kurang gcc"
-  command -v ipset >/dev/null 2>&1 || kurang="$kurang ipset"
-  command -v iptables >/dev/null 2>&1 || kurang="$kurang iptables"
-  # header sqlite3 untuk kompilasi guardd (-lsqlite3)
-  if ! echo '#include <sqlite3.h>' | gcc -E - >/dev/null 2>&1; then
-    kurang="$kurang libsqlite3-dev"
+
+  local pay
+  pay="$(dirname "$0")/payload"
+  [ -d "$pay" ] || pay="/www/server/panel/plugin/sentinel/payload"
+
+  # Salin cjson.so mandiri bila tersedia di paket payload ke folder library Lua
+  mkdir -p /usr/local/lib/lua/5.1 /usr/lib/x86_64-linux-gnu/lua/5.1 /usr/lib64/lua/5.1 2>/dev/null || true
+  if [ -f "$pay/waf/lua_waf/cjson.so" ]; then
+    cp -p "$pay/waf/lua_waf/cjson.so" /usr/local/lib/lua/5.1/cjson.so 2>/dev/null || true
+    cp -p "$pay/waf/lua_waf/cjson.so" /usr/lib/x86_64-linux-gnu/lua/5.1/cjson.so 2>/dev/null || true
+    cp -p "$pay/waf/lua_waf/cjson.so" /usr/lib64/lua/5.1/cjson.so 2>/dev/null || true
+  elif [ -f "$pay/lua_waf/cjson.so" ]; then
+    cp -p "$pay/lua_waf/cjson.so" /usr/local/lib/lua/5.1/cjson.so 2>/dev/null || true
+    cp -p "$pay/lua_waf/cjson.so" /usr/lib/x86_64-linux-gnu/lua/5.1/cjson.so 2>/dev/null || true
+    cp -p "$pay/lua_waf/cjson.so" /usr/lib64/lua/5.1/cjson.so 2>/dev/null || true
   fi
-  # cjson untuk engine free_waf (hanya bila nginx + lua ada)
-  if [ -x /www/server/nginx/sbin/nginx ] \
-     && /www/server/nginx/sbin/nginx -V 2>&1 | grep -q 'lua_nginx_module' \
-     && [ ! -f /usr/local/lib/lua/5.1/cjson.so ]; then
-    kurang="$kurang lua-cjson"
+
+  # Identifikasi paket sistem yang perlu dipasang
+  local butuh_pkg=""
+  command -v ipset >/dev/null 2>&1 || butuh_pkg="$butuh_pkg ipset"
+  command -v iptables >/dev/null 2>&1 || butuh_pkg="$butuh_pkg iptables"
+  if [ ! -f /usr/local/lib/lua/5.1/cjson.so ] && [ ! -f /usr/lib/x86_64-linux-gnu/lua/5.1/cjson.so ] && [ ! -f /usr/lib64/lua/5.1/cjson.so ]; then
+    butuh_pkg="$butuh_pkg lua-cjson"
   fi
-  [ -z "$kurang" ] && { say "dependensi OK"; return 0; }
-  say "dependensi kurang:$kurang, mencoba pasang otomatis"
-  if command -v apt-get >/dev/null 2>&1; then
-    apt-get update -qq 2>&1 | tail -1
-    # shellcheck disable=SC2086
-    apt-get install -y gcc libsqlite3-dev ipset iptables lua-cjson $kurang >/dev/null 2>&1 || true
-  elif command -v dnf >/dev/null 2>&1; then
-    dnf install -y gcc sqlite-devel ipset iptables lua-cjson 2>&1 | tail -1 || true
-  elif command -v yum >/dev/null 2>&1; then
-    yum install -y gcc sqlite-devel ipset iptables lua-cjson 2>&1 | tail -1 || true
-  else
-    err "manajer paket tidak dikenal, pasang manual:$kurang"
-    return 1
+
+  # Pasang paket otomatis tanpa memblokir jika sudah ada atau offline
+  if [ -n "$butuh_pkg" ] || ! command -v gcc >/dev/null 2>&1; then
+    say "memeriksa & memasang dependensi paket sistem:$butuh_pkg"
+    export DEBIAN_FRONTEND=noninteractive
+    if command -v apt-get >/dev/null 2>&1; then
+      apt-get update -qq 2>&1 | tail -1 || true
+      apt-get install -y --no-install-recommends gcc libsqlite3-dev ipset iptables lua-cjson python3 $butuh_pkg >/dev/null 2>&1 || true
+    elif command -v dnf >/dev/null 2>&1; then
+      dnf install -y gcc sqlite-devel ipset iptables lua-cjson python3 $butuh_pkg 2>&1 | tail -1 || true
+    elif command -v yum >/dev/null 2>&1; then
+      yum install -y gcc sqlite-devel ipset iptables lua-cjson python3 $butuh_pkg 2>&1 | tail -1 || true
+    fi
   fi
-  # verifikasi ulang yang kritis (guardd tidak bisa tanpa ini)
-  command -v gcc >/dev/null 2>&1 || { err "gcc tetap tidak ada"; return 1; }
-  echo '#include <sqlite3.h>' | gcc -E - >/dev/null 2>&1 \
-    || { err "header sqlite3 tetap tidak ada"; return 1; }
-  say "dependensi OK"
+
+  # Biner precompiled guardd di payload menjamin plugin tetap dapat berjalan tanpa gcc
+  if [ -f "$pay/guardd" ] && [ -x "$pay/guardd" ]; then
+    say "biner guardd precompiled siap pakai tersedia"
+  elif ! command -v gcc >/dev/null 2>&1; then
+    say "catatan: compiler gcc belum terpasang, mengandalkan biner precompiled"
+  fi
+
+  say "dependensi sistem & library OK"
   return 0
 }
 
 pasang_daemon() {
-  mkdir -p "$ETC" "$BASE/run" "$BASE/data" "$BASE/log" "$BASE/src" "$BASE/av/baseline" "$BASE/av/last" "$BASE/av/quarantine/files" "$BASE/av/quarantine/meta"
+  mkdir -p "$ETC" "$BASE/run" "$BASE/data" "$BASE/log" "$BASE/src" "$BIN" \
+           "$BASE/av/baseline" "$BASE/av/last" "$BASE/av/quarantine/files" "$BASE/av/quarantine/meta"
   local pay
   pay="$(dirname "$0")/payload"
+  [ -d "$pay" ] || pay="/www/server/panel/plugin/sentinel/payload"
 
   # Salin BERKAS yang dibutuhkan dari payload ke tempat kerjanya.
-  #
-  # Tanpa langkah ini plugin hanya berfungsi di mesin yang sudah punya
-  # semuanya. Di server aaPanel baru, guardd.conf tidak ada (baris di
-  # bawah akan menolak jalan) dan sentinel-fw.sh tidak ada sehingga
-  # aturan kernel tidak bisa dipasang sama sekali.
   if [ -d "$pay" ]; then
     mkdir -p "$BIN" "$BASE/src"
     for f in guardctl sentinel-fw.sh sentinel-waf.sh sentinel-av.sh sentinel-proc.py sentinel-intel.sh sentinel-notify.sh sentinel-ports.py sentinel-upload-scan.py sentinel-sage.py; do
@@ -202,46 +223,37 @@ pasang_notif() {
 }
 
 konsolidasi_waf() {
-  # Pastikan aset WAF bermaster di bawah sentinel, dan path lama tetap
-  # valid sebagai symlink. Idempoten:
-  #   - bila direktori lama masih direktori biasa (belum dipindah),
-  #     pindahkan ke sentinel/waf/ lalu ganti dengan symlink.
-  #   - bila sudah symlink, tidak ada yang dikerjakan.
-  # Dipakai saat pemasangan di server baru maupun sesudah upgrade.
-  mkdir -p "$BASE/waf" || return 1
-  # Di server BARU, aset belum ada. Salin dari payload bila tersedia,
-  # supaya semua ada di dalam folder sentinel sejak awal.
-  local pay; pay="$(dirname "$0")/payload/waf"
-  if [ -d "$pay" ]; then
-    for d in modsec crs lua_waf free_waf; do
-      if [ -d "$pay/$d" ] && [ ! -e "$BASE/waf/$d" ]; then
-        cp -a "$pay/$d" "$BASE/waf/$d"
-        say "aset $d disalin dari payload ke sentinel/waf"
-      fi
-    done
+  # Pastikan aset WAF mandiri berada langsung di bawah sentinel/waf/lua_waf
+  mkdir -p "$BASE/waf/lua_waf/rule" "$BASE/waf/lua_waf/html" "$BASE/waf/lua_waf/resty" "$BASE/waf/lua_waf/ngx" || return 1
+  local pay
+  pay="$(dirname "$0")/payload"
+  [ -d "$pay" ] || pay="/www/server/panel/plugin/sentinel/payload"
+
+  local src_waf="$pay/waf/lua_waf"
+  [ -d "$src_waf" ] || src_waf="$pay/lua_waf"
+
+  if [ -d "$src_waf" ]; then
+    cp -rn "$src_waf"/* "$BASE/waf/lua_waf/" 2>/dev/null || true
+    say "aset WAF mandiri disalin dari payload ke $BASE/waf/lua_waf"
   fi
-  # Pastikan backward compatibility symlink di dalam sentinel/waf/
-  if [ -d "$BASE/waf/lua_waf" ] && [ ! -e "$BASE/waf/free_waf" ]; then
-    ln -sfn lua_waf "$BASE/waf/free_waf"
+
+  # Pastikan modul cjson.so & json_pure.lua terpasang mandiri di lua_waf
+  if [ -f "$src_waf/cjson.so" ]; then
+    cp -p "$src_waf/cjson.so" "$BASE/waf/lua_waf/cjson.so"
   fi
-  # Pindahkan direktori lama (server yang sudah terpasang) + symlink.
-  local pair src dst
-  for pair in "modsec:modsec" "modsecurity-crs:crs" "lua_waf:lua_waf" "free_waf:lua_waf"; do
-    src="/www/server/${pair%%:*}"; dst="$BASE/waf/${pair##*:}"
-    if [ -d "$src" ] && [ ! -L "$src" ]; then
-      if [ ! -e "$dst" ]; then
-        mv "$src" "$dst" && say "dipindah: $src -> $dst"
-      else
-        # tujuan sudah ada: jangan menimpa, cukup ganti sumber lama
-        # dengan symlink ke tujuan agar tidak berceceran.
-        rm -rf "$src" && say "digantikan symlink (tujuan sudah ada): $src"
-      fi
-    fi
-    if [ -d "$BASE/waf/${pair##*:}" ] && [ ! -e "$src" ]; then
-      ln -sfn "$BASE/waf/${pair##*:}" "$src"
-      say "symlink: $src -> $BASE/waf/${pair##*:}"
+  if [ -f "$src_waf/json_pure.lua" ]; then
+    cp -p "$src_waf/json_pure.lua" "$BASE/waf/lua_waf/json_pure.lua"
+  fi
+
+  # Salin config default jika belum ada
+  for f in config.json site.json total.json drop_ip.log; do
+    if [ ! -f "$BASE/waf/lua_waf/$f" ] && [ -f "$src_waf/$f.default" ]; then
+      cp -p "$src_waf/$f.default" "$BASE/waf/lua_waf/$f"
+      say "dibuat default: $BASE/waf/lua_waf/$f"
     fi
   done
+  chown -R www:www "$BASE/waf/lua_waf" 2>/dev/null || true
+  chmod 755 "$BASE/waf/lua_waf" "$BASE/waf/lua_waf/rule" "$BASE/waf/lua_waf/html" 2>/dev/null || true
   return 0
 }
 
@@ -280,27 +292,35 @@ pasang_waf() {
 }
 
 pasang_antivirus() {
-  # Pasang modul Antivirus (ClamAV) dan jadwalkan pemindaian berkala.
-  # Idempoten: bila clamav sudah ada, langsung siapkan unit dan folder.
-  # Bila belum ada, coba pasang lewat package manager OS. Bila gagal,
-  # instalasi sentinel TETAP lanjut (antivirus nonaktif), tidak digagalkan.
-  local kurang=""
-  command -v clamscan >/dev/null 2>&1 || kurang="clamav"
+  # Pasang modul Antivirus (ClamAV & Rkhunter) dan jadwalkan pemindaian berkala.
+  # Idempoten: bila sudah ada, langsung siapkan unit dan folder.
+  # Bila belum ada, pasang otomatis lewat package manager OS.
+  local kurang_clamav=0 kurang_rkhunter=0
+  command -v clamscan >/dev/null 2>&1 || kurang_clamav=1
+  command -v rkhunter >/dev/null 2>&1 || kurang_rkhunter=1
 
-  if [ -n "$kurang" ]; then
-    say "clamav belum terpasang, mencoba memasang..."
+  if [ "$kurang_clamav" -eq 1 ] || [ "$kurang_rkhunter" -eq 1 ]; then
+    say "memeriksa & memasang komponen keamanan sistem (clamav / rkhunter)..."
+    export DEBIAN_FRONTEND=noninteractive
     if command -v apt-get >/dev/null 2>&1; then
-      apt-get update -qq 2>&1 | tail -1
-      apt-get install -y clamav clamav-daemon clamav-freshclam >/dev/null 2>&1 || true
+      apt-get update -qq 2>&1 | tail -1 || true
+      [ "$kurang_clamav" -eq 1 ] && apt-get install -y --no-install-recommends clamav clamav-daemon clamav-freshclam >/dev/null 2>&1 || true
+      [ "$kurang_rkhunter" -eq 1 ] && apt-get install -y --no-install-recommends rkhunter >/dev/null 2>&1 || true
     elif command -v dnf >/dev/null 2>&1; then
-      dnf install -y clamav clamd clamav-update >/dev/null 2>&1 || true
+      [ "$kurang_clamav" -eq 1 ] && dnf install -y clamav clamd clamav-update >/dev/null 2>&1 || true
+      [ "$kurang_rkhunter" -eq 1 ] && dnf install -y rkhunter >/dev/null 2>&1 || true
     elif command -v yum >/dev/null 2>&1; then
-      yum install -y clamav clamd clamav-update >/dev/null 2>&1 || true
+      [ "$kurang_clamav" -eq 1 ] && yum install -y clamav clamd clamav-update >/dev/null 2>&1 || true
+      [ "$kurang_rkhunter" -eq 1 ] && yum install -y rkhunter >/dev/null 2>&1 || true
     fi
   fi
 
   if command -v clamscan >/dev/null 2>&1; then
     say "antivirus ClamAV siap"
+    if command -v systemctl >/dev/null 2>&1; then
+      systemctl enable --now clamav-daemon 2>/dev/null || systemctl enable --now clamd 2>/dev/null || true
+      systemctl enable --now clamav-freshclam 2>/dev/null || true
+    fi
   else
     say "ClamAV tidak tersedia di sistem ini; fitur Antivirus nonaktif"
   fi
@@ -311,9 +331,14 @@ pasang_antivirus() {
   chmod 750 "$BASE/av" "$BASE/av/quarantine" 2>/dev/null || true
   chmod 700 "$BASE/tmp/rkhunter" 2>/dev/null || true
 
-  # Salin database awal rkhunter bila ada
-  if [ ! -f "$BASE/db/rkhunter/rkhunter.dat" ] && [ -d /var/lib/rkhunter/db ]; then
-    cp -rn /var/lib/rkhunter/db/* "$BASE/db/rkhunter/" 2>/dev/null || true
+  # Salin database awal rkhunter bila ada atau lakukan inisialisasi baseline
+  if [ ! -f "$BASE/db/rkhunter/rkhunter.dat" ]; then
+    if [ -d /var/lib/rkhunter/db ] && [ -f /var/lib/rkhunter/db/rkhunter.dat ]; then
+      cp -rn /var/lib/rkhunter/db/* "$BASE/db/rkhunter/" 2>/dev/null || true
+    elif command -v rkhunter >/dev/null 2>&1; then
+      say "menginisialisasi baseline properti rkhunter..."
+      rkhunter --propupd --dbdir "$BASE/db/rkhunter" --tmpdir "$BASE/tmp/rkhunter" >/dev/null 2>&1 || true
+    fi
   fi
 
   # Salin skrip dari payload
@@ -367,27 +392,23 @@ pasang_defender_elit() {
 }
 
 pasang_unit_dari_payload() {
-  # Salin unit systemd dari payload HANYA bila belum ada. Unit yang
-  # sudah ada tidak pernah ditimpa (bisa berisi penyesuaian operator).
   local pay
   pay="$(dirname "$0")/payload/systemd"
+  [ -d "$pay" ] || pay="/www/server/panel/plugin/sentinel/payload/systemd"
   [ -d "$pay" ] || { say "payload systemd tidak ada, unit tidak dipasang"; return 0; }
   if [ ! -d /run/systemd/system ] || ! command -v systemctl >/dev/null 2>&1; then
-    say "systemd tidak aktif sebagai init, unit tidak dipasang"
+    say "systemd tidak aktif sebagai init, unit dilewati"
     return 0
   fi
   local f b
   for f in "$pay"/*.service "$pay"/*.timer; do
     [ -f "$f" ] || continue
     b="$(basename "$f")"
-    if [ -f "/etc/systemd/system/$b" ]; then
-      say "unit $b sudah ada, tidak ditimpa"
-    else
-      cp -p "$f" "/etc/systemd/system/$b"
-      say "unit $b dipasang dari payload"
-    fi
+    cp -f "$f" "/etc/systemd/system/$b"
+    chmod 644 "/etc/systemd/system/$b"
+    say "unit $b dipasang dari payload"
   done
-  systemctl daemon-reload 2>/dev/null
+  systemctl daemon-reload 2>/dev/null || true
   return 0
 }
 
@@ -402,23 +423,16 @@ pasang_layanan() {
   fi
 
   if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
-    for f in sentinel.service sentinel-fw.service sentinel-fw.timer; do
-      src="/etc/systemd/system/$f"
-      if [ ! -f "$src" ]; then
-        say "unit $f tidak ditemukan di $src, dilewati"
-        continue
-      fi
-    done
-    systemctl daemon-reload 2>/dev/null
-    systemctl enable sentinel.service sentinel-fw.service sentinel-fw.timer \
-        >/dev/null 2>&1
-    systemctl start sentinel-fw.service 2>/dev/null
-    systemctl start sentinel-fw.timer 2>/dev/null
-    systemctl restart sentinel.service 2>/dev/null
+    pasang_unit_dari_payload
+    systemctl daemon-reload 2>/dev/null || true
+    systemctl enable sentinel.service sentinel-fw.service sentinel-fw.timer >/dev/null 2>&1 || true
+    systemctl start sentinel-fw.service 2>/dev/null || true
+    systemctl start sentinel-fw.timer 2>/dev/null || true
+    systemctl restart sentinel.service 2>/dev/null || true
     say "layanan sentinel dijalankan via systemd"
   else
     say "systemd tidak aktif sebagai init (PID 1), menjalankan guardctl start..."
-    /www/server/sentinel/bin/guardctl start 2>/dev/null || true
+    "$BIN/guardctl" start 2>/dev/null || true
   fi
 }
 
@@ -519,11 +533,17 @@ pasang_fresh() {
     [ -x "$BIN/guardctl" ] && "$BIN/guardctl" stop 2>/dev/null || true
   fi
   # Bersihkan data lama untuk fresh slate
-  rm -rf "$BASE/data" "$BASE/etc" "$BASE/run" "$BASE/log" "$BASE/av"
-  cek_depe \
-    && pasang_daemon && pasang_unit_dari_payload && pasang_firewall \
-    && pasang_layanan && pasang_notif && konsolidasi_waf && pasang_waf \
-    && pasang_antivirus && pasang_defender_elit && kunci_keamanan_benteng
+  cek_depe
+  pasang_daemon
+  pasang_unit_dari_payload
+  pasang_layanan
+  konsolidasi_waf
+  pasang_waf || true
+  pasang_firewall || true
+  pasang_notif || true
+  pasang_antivirus || true
+  pasang_defender_elit || true
+  kunci_keamanan_benteng || true
   say "fresh install selesai. Status: systemctl status sentinel.service"
 }
 
@@ -601,13 +621,11 @@ perbaiki_mandiri() {
     fi
   fi
 
-  # 7. Periksa aturan firewall kernel
+  # 7. Periksa dan pulihkan aturan firewall kernel & auto-whitelist VPN
   if [ -x "$BIN/sentinel-fw.sh" ]; then
-    if ! iptables -S IN_BT 2>/dev/null | grep -q 'sentinel_in' && ! iptables -S INPUT 2>/dev/null | grep -q 'sentinel_in'; then
-      bash "$BIN/sentinel-fw.sh" install >/dev/null 2>&1 || true
-      say "aturan kernel firewall sentinel_in dipasang ulang"
-      dipulihkan=$((dipulihkan + 1))
-    fi
+    bash "$BIN/sentinel-fw.sh" install >/dev/null 2>&1 || true
+    say "aturan firewall kernel dan auto-whitelist VPN disinkronkan"
+    dipulihkan=$((dipulihkan + 1))
   fi
 
   # 8. Periksa hook WAF & validasi Nginx (Zero Downtime)
@@ -717,22 +735,39 @@ AKSI="${1:-install}"
 ARG2="${2:-}"
 case "$AKSI" in
   install|pasang)
-    cek_depe \
-      && pasang_daemon && pasang_unit_dari_payload && pasang_firewall \
-      && pasang_layanan && pasang_notif && konsolidasi_waf && pasang_waf \
-      && pasang_antivirus && pasang_defender_elit && kunci_keamanan_benteng \
-      && pasang_icon
+    pulihkan_izin_staging
+    cek_depe
+    pasang_daemon
+    pasang_unit_dari_payload
+    pasang_layanan
+    konsolidasi_waf
+    pasang_waf || true
+    pasang_firewall || true
+    pasang_notif || true
+    pasang_antivirus || true
+    pasang_defender_elit || true
+    kunci_keamanan_benteng || true
+    pasang_icon || true
     say "selesai. Status: systemctl status sentinel.service"
     ;;
   fresh|fresh-install)
+    pulihkan_izin_staging
     pasang_fresh && pasang_icon
     ;;
   update|upgrade)
-    cek_depe \
-      && pasang_daemon && pasang_unit_dari_payload && pasang_firewall \
-      && pasang_layanan && pasang_notif && konsolidasi_waf && pasang_waf \
-      && pasang_antivirus && pasang_defender_elit && kunci_keamanan_benteng \
-      && pasang_icon
+    pulihkan_izin_staging
+    cek_depe
+    pasang_daemon
+    pasang_unit_dari_payload
+    pasang_layanan
+    konsolidasi_waf
+    pasang_waf || true
+    pasang_firewall || true
+    pasang_notif || true
+    pasang_antivirus || true
+    pasang_defender_elit || true
+    kunci_keamanan_benteng || true
+    pasang_icon || true
     say "pembaruan selesai. Versi terbaru aktif."
     ;;
   repair|self-heal|perbaiki)

@@ -19,18 +19,30 @@
 ]]
 
 local cpath = "/www/server/sentinel/waf/lua_waf/"
-do
-    local fp = io.open(cpath .. "config.json", "r")
-    if fp then
-        fp:close()
+local jpath = cpath .. "rule/"
+
+-- [ZySentinel Standalone] Daftarkan direktori mandiri ke package.cpath dan package.path
+package.cpath = cpath .. "?.so;/usr/local/lib/lua/5.1/?.so;/usr/lib/x86_64-linux-gnu/lua/5.1/?.so;/usr/lib64/lua/5.1/?.so;" .. (package.cpath or "")
+package.path = cpath .. "?.lua;" .. cpath .. "resty/?.lua;" .. (package.path or "")
+
+-- Pemuatan JSON mandiri: coba cjson (biner performa tinggi), cjson.safe, lalu fallback aman json_pure
+local json
+local has_cjson, cjson_mod = pcall(require, "cjson")
+if has_cjson and type(cjson_mod) == "table" then
+    json = cjson_mod
+else
+    local has_safe, safe_mod = pcall(require, "cjson.safe")
+    if has_safe and type(safe_mod) == "table" then
+        json = safe_mod
     else
-        cpath = "/www/server/lua_waf/"
-        local fp2 = io.open(cpath .. "config.json", "r")
-        if fp2 then fp2:close() else cpath = "/www/server/sentinel/waf/free_waf/" end
+        local has_pure, pure_mod = pcall(require, "json_pure")
+        if has_pure and type(pure_mod) == "table" then
+            json = pure_mod
+        else
+            error("[ZySentinel] Gagal memuat library JSON (cjson / json_pure)")
+        end
     end
 end
-local jpath = cpath .. "rule/"
-local json = require "cjson"
 local ngx_match = ngx.re.find
 
 -- [ZySens] Shared dictionary helpers (dukungan native sentinel_waf dengan fallback free_waf)

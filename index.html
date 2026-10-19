@@ -2998,7 +2998,9 @@ function snUpdateBadgesAndNotes(m){
 
 	var lWaf = $('#bWaf');
 	var wEng = m.waf_engine || 'off';
-	if(wEng === 'modsecurity'){
+	if(wEng === 'lua_waf' || wEng === 'free_waf'){
+		lWaf.text('🌐 WAF: Lua').attr('class', 'sn-badge sn-ok').attr('title', isEn ? 'Nginx WAF: Embedded Lua WAF active & filtering HTTP traffic' : 'WAF Nginx: Lua WAF mandiri aktif menyaring lalu lintas HTTP');
+	} else if(wEng === 'modsecurity'){
 		lWaf.text('🌐 WAF: ModSec').attr('class', 'sn-badge sn-ok').attr('title', isEn ? 'Nginx WAF: ModSecurity inspecting HTTP traffic' : 'WAF Nginx: ModSecurity aktif memeriksa request HTTP');
 	} else if(wEng === 'coraza'){
 		lWaf.text('🌐 WAF: Coraza').attr('class', 'sn-badge sn-ok').attr('title', isEn ? 'Nginx WAF: Coraza inspecting HTTP traffic' : 'WAF Nginx: Coraza WAF aktif memeriksa request HTTP');
@@ -5829,7 +5831,10 @@ function snWafLencana(){
 		var isEn = (SN_LANG !== 'id');
 		var l = $('#bWaf');
 		var e = (m.engine && m.engine.nginx) || '?';
-		if(e === 'modsecurity'){
+		if(e === 'lua_waf' || e === 'free_waf'){
+			l.text('🌐 WAF: Lua'); l.attr('class', 'sn-badge sn-ok');
+			l.attr('title', isEn ? 'Nginx WAF: Embedded Lua WAF actively inspecting HTTP requests' : 'WAF Nginx: Lua WAF mandiri aktif memeriksa request HTTP');
+		} else if(e === 'modsecurity'){
 			l.text('🌐 WAF: ModSec'); l.attr('class', 'sn-badge sn-ok');
 			l.attr('title', isEn ? 'Nginx WAF: ModSecurity actively inspecting HTTP requests' : 'WAF Nginx: ModSecurity aktif memeriksa request HTTP');
 		} else if(e === 'coraza'){

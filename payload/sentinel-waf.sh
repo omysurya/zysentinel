@@ -71,6 +71,13 @@ do_engine() {
     case "$v" in
       *[Cc]oraza*) n="coraza" ;;
       *[Mm]od[Ss]ecurity*) n="modsecurity" ;;
+      *)
+        if [ "$v" != "${v#*lua_nginx_module}" ]; then
+          if [ -f "$FREEWAF_CONF" ] || [ -f /www/server/panel/vhost/nginx/sentinel_waf.conf ] || [ -f /www/server/panel/vhost/nginx/free_waf.conf ]; then
+            n="lua_waf"
+          fi
+        fi
+        ;;
     esac
   else
     n="nginx-tidak-ada"
@@ -406,34 +413,34 @@ do_freewaf_install() {
   # site yang sudah ada TIDAK PERNAH ditimpa (isinya adalah keadaan
   # produksi). Hanya berkas yang hilang yang disalin dari payload.
   local P; P="$(payload_dir)"
-  local P_WAF="$P/lua_waf"
+  local P_WAF="$P/waf/lua_waf"
+  [ -d "$P_WAF" ] || P_WAF="$P/lua_waf"
   [ -d "$P_WAF" ] || P_WAF="$P/free_waf"
-  [ -d "$P_WAF" ] || { err "payload tidak ditemukan: $P/lua_waf"; return 1; }
+  [ -d "$P_WAF" ] || { err "payload tidak ditemukan: $P/waf/lua_waf atau $P/lua_waf"; return 1; }
   if ! nginx_has_lua; then
     err "nginx tanpa lua_nginx_module. Engine tidak bisa dipasang."
     err "Bangun ulang nginx dengan modul lua di panel, lalu ulangi."
     return 1
   fi
-  # cjson dibutuhkan init.lua. Tanpa ini nginx gagal start dengan
-  # "module 'cjson' not found", dan karena error_log crit kegagalannya senyap.
-  if [ ! -f /usr/local/lib/lua/5.1/cjson.so ]; then
-    err "lua-cjson tidak ada (/usr/local/lib/lua/5.1/cjson.so)."
-    err "Pasang dulu: apt install lua-cjson (atau bangun dari sumber)."
-    return 1
+
+  # Pasang cjson.so mandiri bila tersedia di payload
+  mkdir -p "$FREEWAF_HOME/rule" "$FREEWAF_HOME/html" "$FREEWAF_LOGDIR" /usr/local/lib/lua/5.1
+  if [ -f "$P_WAF/cjson.so" ]; then
+    cp -p "$P_WAF/cjson.so" "$FREEWAF_HOME/cjson.so"
+    [ -f /usr/local/lib/lua/5.1/cjson.so ] || cp -p "$P_WAF/cjson.so" /usr/local/lib/lua/5.1/cjson.so 2>/dev/null || true
   fi
-  mkdir -p "$FREEWAF_HOME/rule" "$FREEWAF_HOME/html" "$FREEWAF_LOGDIR"
-  # lua-resty-core harus bisa dibaca dari path Lua bawaan. ngx_lua
-  # memuat resty.core saat VM start, SEBELUM lua_package_path berlaku.
-  # nginx menyimpan resty/core.lua di lib miliknya sendiri yang tidak
-  # ada di path bawaan; tanpa symlink ini nginx gagal start secara
-  # senyap (error_log crit tidak menampilkan apa pun, worker lama
-  # tetap jalan dan WAF tidak pernah aktif).
-  resty_dir="$(dirname "$NGINX_BIN" | sed 's|/sbin$||')/lib/lua/resty"
-  if [ -f "$resty_dir/core.lua" ] && [ ! -e /usr/local/share/lua/5.1/resty ]; then
+  [ -f "$P_WAF/json_pure.lua" ] && cp -p "$P_WAF/json_pure.lua" "$FREEWAF_HOME/json_pure.lua"
+
+  # Salin modul resty & ngx mandiri langsung ke direktori WAF dan share
+  if [ -d "$P_WAF/resty" ]; then
+    cp -rn "$P_WAF/resty" "$FREEWAF_HOME/" 2>/dev/null || true
     mkdir -p /usr/local/share/lua/5.1
-    ln -sfn "$resty_dir" /usr/local/share/lua/5.1/resty
-    say "resty.core ditautkan ke path Lua bawaan"
+    [ -e /usr/local/share/lua/5.1/resty ] || cp -rn "$P_WAF/resty" /usr/local/share/lua/5.1/ 2>/dev/null || true
   fi
+  if [ -d "$P_WAF/ngx" ]; then
+    cp -rn "$P_WAF/ngx" "$FREEWAF_HOME/" 2>/dev/null || true
+  fi
+
   # engine: selalu segarkan dari payload (kode, bukan keadaan)
   cp -p "$P_WAF/init.lua" "$P_WAF/waf.lua" "$FREEWAF_HOME/"
   # rules: hanya yang hilang (operator boleh menambah rule sendiri)

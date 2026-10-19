@@ -13,5 +13,7 @@
 	[1, "into(\\s+)+(?:dump|out)file\\s*", "SQL injection filtering 9", 0],
 	[1, "group\\s+by.+\\(", "SQL injection filtering 10", 0],
 	[0, "\\<(iframe|script|body|img|layer|div|meta|style|base|object|input)", "XSS Filter 1", 0],
-	[0, "(onmouseover|onerror|onload)\\=", "XSS Filter 2", 0]
+	[0, "(onmouseover|onerror|onload)\\=", "XSS Filter 2", 0],
+	[1, "\\b(?:slot88|slot[\\s_-]*gacor|judi[\\s_-]*online|situs[\\s_-]*judi|daftar[\\s_-]*slot|maxwin[\\s_-]*slot|zeus[\\s_-]*slot|pragmatic[\\s_-]*play|rtp[\\s_-]*live[\\s_-]*slot|bandar[\\s_-]*togel|toto[\\s_-]*macau|sbobet)\\b", "Indonesian Judol Post Filter", 0],
+	[1, "(?:stratum[\\s+_-]*(?:tcp|ssl|tls)|coinhive|cryptonight|webminepool)", "Crypto Mining Post Filter", 0]
 ]

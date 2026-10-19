@@ -55,6 +55,10 @@ jobs:
           chmod 755 "$STAGE_DIR/install.sh"
           chmod 755 "$STAGE_DIR/payload"/*.sh "$STAGE_DIR/payload"/*.py "$STAGE_DIR/payload"/guardctl 2>/dev/null || true
           [ -f "$STAGE_DIR/payload/guardd" ] && chmod 755 "$STAGE_DIR/payload/guardd" || true
+          [ -f "$STAGE_DIR/payload/waf/lua_waf/cjson.so" ] && chmod 755 "$STAGE_DIR/payload/waf/lua_waf/cjson.so" || true
+          [ -f "$STAGE_DIR/payload/lua_waf/cjson.so" ] && chmod 755 "$STAGE_DIR/payload/lua_waf/cjson.so" || true
+          find "$STAGE_DIR/payload/systemd" -type f -exec chmod 644 {} + 2>/dev/null || true
+          [ -f "$STAGE_DIR/payload/init.d/sentinel" ] && chmod 755 "$STAGE_DIR/payload/init.d/sentinel" || true
 
           # Buat arsip ZIP resmi siap upload ke aaPanel
           cd /tmp/sentinel_build

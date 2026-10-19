@@ -57,7 +57,57 @@ def _angka_json(teks, kunci):
 
 
 class sentinel_main(object):
-    __PATH = '/www/server/sentinel/'
+    __PATH = '/www/server/sentinel'
+
+    def _ensure_core_files(self):
+        """Self-healing: pastikan skrip helper bin & unit systemd selalu tersedia."""
+        try:
+            bin_dir = os.path.join(self.__PATH, 'bin')
+            etc_dir = os.path.join(self.__PATH, 'etc')
+            os.makedirs(bin_dir, exist_ok=True)
+            os.makedirs(etc_dir, exist_ok=True)
+
+            plug_dir = os.path.dirname(os.path.abspath(__file__))
+            payload_dir = os.path.join(plug_dir, 'payload')
+            if not os.path.isdir(payload_dir):
+                return
+
+            # Helper scripts yang wajib ada di /www/server/sentinel/bin
+            core_scripts = [
+                'sentinel-ports.py', 'sentinel-waf.sh', 'sentinel-fw.sh',
+                'sentinel-av.sh', 'sentinel-proc.py', 'sentinel-intel.sh',
+                'sentinel-notify.sh', 'sentinel-upload-scan.py',
+                'sentinel-sage.py', 'guardctl', 'guardd'
+            ]
+            for s in core_scripts:
+                target = os.path.join(bin_dir, s)
+                source = os.path.join(payload_dir, s)
+                if not os.path.exists(target) and os.path.isfile(source):
+                    shutil.copy2(source, target)
+                    try:
+                        os.chmod(target, 0o755)
+                    except Exception:
+                        pass
+
+            # Systemd units yang wajib ada di /etc/systemd/system
+            unit_dir = os.path.join(payload_dir, 'systemd')
+            if os.path.isdir(unit_dir) and os.path.isdir('/etc/systemd/system'):
+                unit_installed = False
+                for u in ['sentinel.service', 'sentinel-fw.service', 'sentinel-fw.timer',
+                          'sentinel-proc.service', 'sentinel-intel.service', 'sentinel-intel.timer']:
+                    u_src = os.path.join(unit_dir, u)
+                    u_dst = os.path.join('/etc/systemd/system', u)
+                    if not os.path.exists(u_dst) and os.path.isfile(u_src):
+                        shutil.copy2(u_src, u_dst)
+                        try:
+                            os.chmod(u_dst, 0o644)
+                        except Exception:
+                            pass
+                        unit_installed = True
+                if unit_installed:
+                    self._sh('systemctl daemon-reload 2>/dev/null', 10)
+        except Exception:
+            pass
 
     # ------------------------------------------------------------------ #
     # penjaga keamanan endpoint & otentikasi                             #
@@ -325,6 +375,7 @@ class sentinel_main(object):
             return attr
 
         def secure_api_wrapper(get=None, *args, **kwargs):
+            self._ensure_core_files()
             active_lang = self._get_active_lang(get)
             ok, err_msg = self._enforce_security_guard(name, get)
             if not ok:
@@ -656,16 +707,33 @@ class sentinel_main(object):
             rc, o, _ = self._waf('engine')
             if rc == 0:
                 for line in o.splitlines():
-                    if 'engine.nginx=' in line:
-                        waf_eng = line.split('=', 1)[1].strip()
+                    if line.startswith('nginx='):
+                        val = line.split('=', 1)[1].strip()
+                        if val not in ('none', 'nginx-tidak-ada'):
+                            waf_eng = val
                         break
+                    elif 'engine.nginx=' in line:
+                        val = line.split('=', 1)[1].strip()
+                        if val not in ('none', 'nginx-tidak-ada'):
+                            waf_eng = val
+                        break
+            if waf_eng in ('off', 'none'):
+                rc_fw, o_fw, _ = self._waf('freewaf-status')
+                if rc_fw == 0:
+                    fw_map = {}
+                    for line in o_fw.splitlines():
+                        if '=' in line:
+                            k, v = line.split('=', 1)
+                            fw_map[k.strip()] = v.strip()
+                    if fw_map.get('loaded') == 'ya' and fw_map.get('mode') not in ('disable', 'off', ''):
+                        waf_eng = 'lua_waf'
         except Exception:
             pass
 
         av_stat = 'off'
         try:
-            if os.path.isfile('/usr/bin/clamdscan') or os.path.isfile('/usr/bin/clamscan'):
-                clamd_act = (self._svc('clamav-daemon.service') == 'active' or self._svc('clamd.service') == 'active')
+            if os.path.isfile('/usr/bin/clamdscan') or os.path.isfile('/usr/bin/clamscan') or os.path.isfile('/usr/bin/rkhunter'):
+                clamd_act = (self._svc('clamav-daemon.service') == 'active' or self._svc('clamd.service') == 'active' or self._svc('sentinel-av.timer') == 'active')
                 av_stat = 'active' if clamd_act else 'ready'
         except Exception:
             pass
@@ -873,8 +941,8 @@ class sentinel_main(object):
             info['mem_persen'] = 0.0
 
         st_ver = st.get('version')
-        if not st_ver or str(st_ver).strip() in ('1.0.0', '1.6', '1.6.0', '1.6.1', '-'):
-            info['versi'] = 'v1.6.1'
+        if not st_ver or str(st_ver).strip() in ('1.0.0', '1.6', '1.6.0', '1.6.1', '1.6.2', '-'):
+            info['versi'] = 'v1.6.2'
         else:
             info['versi'] = str(st_ver) if str(st_ver).lower().startswith('v') else ('v' + str(st_ver))
         info['pid'] = st.get('pid', 0)
@@ -1302,6 +1370,7 @@ class sentinel_main(object):
     # kendali daemon dan firewall                                        #
     # ------------------------------------------------------------------ #
     def service_action(self, get):
+        self._ensure_core_files()
         aksi = (get.get('aksi') or get.get('act') or get.get('sub_action') or (get.get('action') if get.get('action') != 'a' else None) or '').strip().lower()
         peta = {'start': 'start', 'stop': 'stop', 'restart': 'restart', 'reload': 'reload'}
         if aksi not in peta:
@@ -1532,10 +1601,12 @@ class sentinel_main(object):
 
     def _ports_script(self, action):
         """Panggil helper biner sentinel-ports.py."""
-        bin_path = '%s/bin/sentinel-ports.py' % self.__PATH
-        if not os.path.isfile(bin_path):
-            bin_path = '/www/server/sentinel/bin/sentinel-ports.py'
-        rc, o, e = self._sh("python3 '%s' %s" % (bin_path, action), 20)
+        self._ensure_core_files()
+        bin_path = os.path.join(self.__PATH, 'bin', 'sentinel-ports.py')
+        py_bin = '/www/server/panel/pyenv/bin/python3'
+        if not os.path.isfile(py_bin):
+            py_bin = 'python3'
+        rc, o, e = self._sh("'%s' '%s' %s" % (py_bin, bin_path, action), 20)
         return rc, o, e
 
     def get_port_firewall(self, get):
@@ -2131,7 +2202,9 @@ class sentinel_main(object):
         return public.returnMsg(True, info)
 
     def _waf(self, *args):
-        cmd = ' '.join(["'%s/bin/sentinel-waf.sh'" % self.__PATH] +
+        self._ensure_core_files()
+        waf_script = os.path.join(self.__PATH, 'bin', 'sentinel-waf.sh')
+        cmd = ' '.join(["'%s'" % waf_script] +
                        ["'%s'" % a for a in args])
         return self._sh(cmd, 60)
 
@@ -4507,12 +4580,12 @@ class sentinel_main(object):
                 except Exception:
                     pass
 
-            v_info = '1.6.1'
+            v_info = '1.6.2'
             try:
                 info_p = os.path.join(os.path.dirname(__file__), 'info.json')
                 if os.path.exists(info_p):
                     with open(info_p, 'r', encoding='utf-8') as f:
-                        v_info = json.load(f).get('versions', '1.6.1')
+                        v_info = json.load(f).get('versions', '1.6.2')
             except Exception:
                 pass
 
@@ -4537,7 +4610,7 @@ class sentinel_main(object):
             pass
 
     def _parse_version(self, v_str):
-        """Parse semver string menjadi tuple integer (mis. 'v1.6.1' -> (1, 6, 1))."""
+        """Parse semver string menjadi tuple integer (mis. 'v1.6.2' -> (1, 6, 2))."""
         if not v_str:
             return (0, 0, 0)
         v_clean = str(v_str).strip().lstrip('vV')
@@ -4552,20 +4625,20 @@ class sentinel_main(object):
         return tuple(parts[:3])
 
     def _normalize_version(self, v_str):
-        """Pastikan format versi selalu berawalan 'v' (mis. 'v1.6.1')."""
+        """Pastikan format versi selalu berawalan 'v' (mis. 'v1.6.2')."""
         if not v_str or str(v_str).strip() in ('-', ''):
-            return 'v1.6.1'
+            return 'v1.6.2'
         s = str(v_str).strip()
         return s if s.lower().startswith('v') else ('v' + s)
 
     def get_lifecycle_status(self, get):
         """Ambil status detail siklus hidup, versi, dan diagnostik komponen."""
-        v_info = 'v1.6.1'
+        v_info = 'v1.6.2'
         try:
             info_p = os.path.join(os.path.dirname(__file__), 'info.json')
             if os.path.exists(info_p):
                 with open(info_p, 'r', encoding='utf-8') as f:
-                    v_raw = json.load(f).get('versions', '1.6.1')
+                    v_raw = json.load(f).get('versions', '1.6.2')
                     v_info = self._normalize_version(v_raw)
         except Exception:
             pass
@@ -4638,13 +4711,13 @@ class sentinel_main(object):
         """Periksa versi rilis terbaru di repository GitHub omysurya/zysentinel.
         
         Mendukung inspeksi melalui Releases API, Tags API, dan Branches API
-        (untuk branch rilis seperti v1.6.1), dengan parsing semver akurat."""
-        v_current = 'v1.6.1'
+        (untuk branch rilis seperti v1.6.2), dengan parsing semver akurat."""
+        v_current = 'v1.6.2'
         try:
             info_p = os.path.join(os.path.dirname(__file__), 'info.json')
             if os.path.exists(info_p):
                 with open(info_p, 'r', encoding='utf-8') as f:
-                    v_raw = json.load(f).get('versions', '1.6.1')
+                    v_raw = json.load(f).get('versions', '1.6.2')
                     v_current = self._normalize_version(v_raw)
         except Exception:
             pass
@@ -4742,7 +4815,7 @@ class sentinel_main(object):
         chk = self.check_github_update(get)
         data = chk.get('msg', {})
         download_url = data.get('download_url')
-        latest_ver = self._normalize_version(data.get('latest_version', 'v1.6.1'))
+        latest_ver = self._normalize_version(data.get('latest_version', 'v1.6.2'))
 
         staging_zip = '/tmp/sentinel_update.zip'
         staging_dir = '/tmp/sentinel_update_staging'
@@ -4750,7 +4823,7 @@ class sentinel_main(object):
         try:
             if download_url and download_url.startswith('http'):
                 try:
-                    headers = {'User-Agent': 'ZySentinel-Updater/1.6.1'}
+                    headers = {'User-Agent': 'ZySentinel-Updater/1.6.2'}
                     req = urllib.request.Request(download_url, headers=headers)
                     with urllib.request.urlopen(req, timeout=30) as resp, open(staging_zip, 'wb') as out_f:
                         out_f.write(resp.read())
@@ -4892,13 +4965,13 @@ class sentinel_main(object):
                 'subject': subject,
                 'message': full_body,
                 'email': user_email,
-                'version': '1.6.1'
+                'version': '1.6.2'
             }).encode('utf-8')
             dev_url = 'https://api.zysens.com/api/v1/sentinel/feedback'
             req = urllib.request.Request(
                 dev_url,
                 data=payload_data,
-                headers={'Content-Type': 'application/json', 'User-Agent': 'ZySentinel-Feedback/1.6.1'}
+                headers={'Content-Type': 'application/json', 'User-Agent': 'ZySentinel-Feedback/1.6.2'}
             )
             urllib.request.urlopen(req, timeout=4.0)
         except Exception:
