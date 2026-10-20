@@ -17,7 +17,11 @@ CONF_FILE="$BASE/etc/guardd.conf"
 mkdir -p "$DATA_DIR" "$LOG_DIR" 2>/dev/null
 
 IPSET="$(command -v ipset || echo /usr/sbin/ipset)"
-IPT="$(command -v iptables || echo /usr/sbin/iptables)"
+IPT_BIN="$(command -v iptables || echo /usr/sbin/iptables)"
+# Semua pemanggilan iptables menunggu kunci xtables (docker, aaPanel, fail2ban memegangnya
+# sebentar-sebentar); tanpa -w sebuah aturan bisa gagal dipasang diam-diam.
+ipt_w() { "$IPT_BIN" -w 10 "$@"; }
+IPT=ipt_w
 SET_NAME="sentinel_intel"
 SET_TMP="sentinel_intel_tmp"
 CACHE_FILE="$DATA_DIR/threat_intel_cached.txt"

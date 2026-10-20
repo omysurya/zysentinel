@@ -33,6 +33,13 @@ jobs:
           echo "tag=${TAG}" >> $GITHUB_OUTPUT
           echo "Building ZySentinel Plugin Release: ${TAG}"
 
+      - name: Compile guardd from source (hardened)
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq gcc libsqlite3-dev
+          gcc -O2 -Wall -Wextra -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -pie -Wl,-z,relro,-z,now \
+              -o payload/guardd payload/guardd.c -lsqlite3 -lm
+          sha256sum payload/guardd.c | awk '{print $1}' > payload/guardd.srchash
+
       - name: Prepare Clean aaPanel Plugin Package
         run: |
           TAG="${{ steps.vars.outputs.tag }}"
@@ -55,8 +62,6 @@ jobs:
           chmod 755 "$STAGE_DIR/install.sh"
           chmod 755 "$STAGE_DIR/payload"/*.sh "$STAGE_DIR/payload"/*.py "$STAGE_DIR/payload"/guardctl 2>/dev/null || true
           [ -f "$STAGE_DIR/payload/guardd" ] && chmod 755 "$STAGE_DIR/payload/guardd" || true
-          [ -f "$STAGE_DIR/payload/waf/lua_waf/cjson.so" ] && chmod 755 "$STAGE_DIR/payload/waf/lua_waf/cjson.so" || true
-          [ -f "$STAGE_DIR/payload/lua_waf/cjson.so" ] && chmod 755 "$STAGE_DIR/payload/lua_waf/cjson.so" || true
           find "$STAGE_DIR/payload/systemd" -type f -exec chmod 644 {} + 2>/dev/null || true
           [ -f "$STAGE_DIR/payload/init.d/sentinel" ] && chmod 755 "$STAGE_DIR/payload/init.d/sentinel" || true
 

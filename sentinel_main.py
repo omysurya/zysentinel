@@ -21,6 +21,10 @@ import sqlite3
 import urllib.request
 import urllib.parse
 import shutil
+import ipaddress
+import shlex
+import uuid
+import fcntl
 
 if sys.version_info[0] == 2:
     reload(sys)
@@ -56,12 +60,279 @@ def _angka_json(teks, kunci):
     return int(nilai)
 
 
+# ---------------------------------------------------------------------- #
+# validasi masukan (IP, CIDR, rentang, regex, path, ID)                  #
+#                                                                        #
+# Semua endpoint daftar putih / blokir memakai fungsi di bawah ini,      #
+# supaya satu aturan berlaku di firewall, WAF, EDR, dan antivirus.       #
+# Prinsip: nilai tak valid DITOLAK dengan alasan jelas, tidak diperbaiki #
+# diam-diam (mis. aksi "DENY" tidak boleh berubah jadi ACCEPT).          #
+# ---------------------------------------------------------------------- #
+_OKTET = r'(?:0|[1-9][0-9]{0,2})'
+_RE_IPV4 = re.compile(r'%s(?:\.%s){3}' % (_OKTET, _OKTET))
+_RE_PREFIX = re.compile(r'(?:0|[1-9][0-9]?)')
+_RE_ID = re.compile(r'[A-Za-z0-9_-]{1,40}')
+
+
+def _aman(s, n=40):
+    """Potongan nilai masukan yang aman untuk dimasukkan ke pesan galat."""
+    return re.sub(r'[^0-9A-Za-z.:/,_ -]', '?', str(s))[:n]
+
+
+def v4_alamat(s):
+    """IPv4Address bila s adalah IPv4 desimal bertitik yang ketat, selain itu None.
+
+    Ketat artinya: empat oktet 0-255 tanpa nol di depan ("01.2.3.4" bisa
+    dibaca sebagai oktal oleh alat lain), tanpa spasi, tanda +/-, garis
+    bawah, maupun digit non-ASCII yang diterima int() Python.
+    """
+    if not isinstance(s, str) or not _RE_IPV4.fullmatch(s):
+        return None
+    try:
+        return ipaddress.IPv4Address(s)
+    except ValueError:
+        return None
+
+
+def parse_v4(s, cidr=True, min_prefix=8, tujuan='putih', semua=False):
+    """Validasi IPv4 tunggal atau CIDR. Mengembalikan (IPv4Network, None) atau (None, pesan).
+
+    cidr       : izinkan notasi a.b.c.d/n
+    min_prefix : prefix terkecil yang boleh (menolak /0 sampai /7 secara bawaan)
+    tujuan     : 'blokir' juga menolak loopback dan link-local; 'putih' dan
+                 'netral' hanya menolak alamat yang tidak mungkin sah
+    semua      : izinkan 0.0.0.0/0 (khusus aturan port, bukan daftar IP)
+    Bit host pada CIDR tidak boleh terisi: 10.0.0.5/24 ditolak dengan saran
+    10.0.0.0/24, bukan diubah diam-diam.
+    """
+    if not isinstance(s, str):
+        return None, 'nilai harus berupa teks'
+    s = s.strip()
+    if not s:
+        return None, 'alamat IP kosong'
+    if ':' in s:
+        return None, 'IPv6 belum didukung di sini (hanya IPv4)'
+    if len(s) > 18:
+        return None, 'format IP/CIDR tidak valid: %s' % _aman(s)
+    ip_s, sep, pre_s = s.partition('/')
+    if v4_alamat(ip_s) is None:
+        return None, 'format IPv4 tidak valid: %s' % _aman(s)
+    if sep:
+        if not cidr:
+            return None, 'CIDR tidak diperbolehkan di sini, pakai IP tunggal'
+        if not _RE_PREFIX.fullmatch(pre_s) or int(pre_s) > 32:
+            return None, 'prefix CIDR harus angka 0-32 tanpa nol di depan: %s' % _aman(s)
+        pre = int(pre_s)
+    else:
+        pre = 32
+    if pre < min_prefix and not (semua and pre == 0):
+        return None, 'prefix /%d terlalu luas (minimal /%d)' % (pre, min_prefix)
+    try:
+        net = ipaddress.IPv4Network('%s/%d' % (ip_s, pre), strict=True)
+    except ValueError:
+        saran = ipaddress.IPv4Network('%s/%d' % (ip_s, pre), strict=False)
+        return None, 'bit host CIDR terisi: gunakan %s' % saran
+    if semua and pre == 0:
+        return net, None
+    for a in (net.network_address, net.broadcast_address):
+        if a.is_unspecified or a.is_multicast or a.is_reserved or a.packed[0] == 0:
+            return None, 'alamat tidak dapat dipakai (0.x, multicast, atau cadangan): %s' % net
+        if tujuan == 'blokir' and (a.is_loopback or a.is_link_local):
+            return None, 'alamat loopback/link-local tidak boleh diblokir: %s' % net
+    return net, None
+
+
+def v4_tampil(net):
+    """Bentuk tampil/penyimpanan: IP tunggal tanpa /32, selain itu CIDR."""
+    return str(net.network_address) if net.prefixlen == 32 else str(net)
+
+
+def parse_v4_daftar(s, maks=10, **kw):
+    """Daftar IPv4/CIDR dipisah koma (iptables -s a,b). (list[str], None) atau (None, pesan)."""
+    if not isinstance(s, str) or not s.strip():
+        return None, 'alamat kosong'
+    bagian = [x.strip() for x in s.split(',')]
+    if len(bagian) > maks:
+        return None, 'maksimal %d alamat per aturan' % maks
+    hasil = []
+    for b in bagian:
+        net, err = parse_v4(b, **kw)
+        if err:
+            return None, err
+        t = v4_tampil(net) if net.prefixlen != 0 else '0.0.0.0/0'
+        if t not in hasil:
+            hasil.append(t)
+    return hasil, None
+
+
+def parse_v4_rentang(s, maks_alamat=1 << 24, tujuan='putih'):
+    """Rentang 'a.b.c.d-e.f.g.h'. (awal, akhir, None) sebagai IPv4Address, atau (None, None, pesan)."""
+    if not isinstance(s, str) or s.count('-') != 1:
+        return None, None, 'format rentang tidak valid: %s' % _aman(s)
+    a_s, b_s = [x.strip() for x in s.split('-')]
+    a, b = v4_alamat(a_s), v4_alamat(b_s)
+    if a is None or b is None:
+        return None, None, 'format IPv4 pada rentang tidak valid: %s' % _aman(s)
+    if int(a) > int(b):
+        return None, None, 'awal rentang lebih besar dari akhir'
+    if int(b) - int(a) + 1 > maks_alamat:
+        return None, None, 'rentang terlalu luas (maksimal %d alamat)' % maks_alamat
+    for x in (a, b):
+        if x.is_unspecified or x.is_multicast or x.is_reserved or x.packed[0] == 0:
+            return None, None, 'alamat tidak dapat dipakai (0.x, multicast, atau cadangan): %s' % x
+    if tujuan == 'blokir' and (int(a) <= 0x7f000001 <= int(b) or a.is_loopback or b.is_loopback):
+        return None, None, 'rentang memuat loopback, tidak boleh diblokir'
+    return a, b, None
+
+
+def v4_kisaran(net):
+    return net.network_address, net.broadcast_address
+
+
+def teks_aman(s, maks, nama='nilai', boleh_kosong=False):
+    """Teks bebas (catatan, nama): tanpa karakter kontrol, panjang dibatasi."""
+    if not isinstance(s, str):
+        return None, '%s harus berupa teks' % nama
+    s = s.strip()
+    if not s and not boleh_kosong:
+        return None, '%s wajib diisi' % nama
+    if len(s) > maks:
+        return None, '%s terlalu panjang (maksimal %d karakter)' % (nama, maks)
+    if re.search(r'[\x00-\x1f\x7f]', s):
+        return None, '%s memuat karakter kontrol' % nama
+    return s, None
+
+
+def id_valid(s):
+    return isinstance(s, str) and bool(_RE_ID.fullmatch(s.strip()))
+
+
+_RX_WORKER = "\nimport re, sys, json\npats = json.loads(sys.stdin.read())\nout = []\nPR = ('/', '/index.php', '/a/b/c', '/x?y=1')\nADV = ['a' * 40 + '!', '/' + 'a' * 40 + '!', '/' + '/a' * 20 + '!', '/' + '1' * 40 + 'x', ('a' * 20 + ' ') * 4 + '!']\nfor p in pats:\n    try:\n        rx = re.compile(p)\n    except re.error:\n        out.append('err'); continue\n    luas = all(rx.search(x) for x in PR)\n    for x in ADV:\n        rx.search(x)\n    out.append('luas' if luas else 'ok')\nprint(json.dumps(out))\n"
+
+
+def rx_uji_subproses(pola_list, timeout=4):
+    """Uji regex di PROSES TERPISAH dengan batas waktu. Pola ReDoS (mis. '(?:.*.*)*')
+    membuat `re` Python berjalan berdetik-detik dan tidak bisa dihentikan dari
+    dalam proses yang sama. Hasil per pola: 'ok', 'luas', 'err', atau 'lambat'."""
+    try:
+        r = subprocess.run([sys.executable, '-I', '-c', _RX_WORKER], input=json.dumps(list(pola_list)),
+                           capture_output=True, text=True, timeout=timeout)
+        if r.returncode == 0:
+            return json.loads(r.stdout)
+    except subprocess.TimeoutExpired:
+        pass
+    except Exception:
+        return ['err'] * len(pola_list)
+    return ['lambat'] * len(pola_list)
+
+
+def regex_waras(pola, maks=300):
+    """Pola regex untuk daftar URL: harus bisa dikompilasi, tidak mencocokkan SEMUA URL,
+    dan tidak boleh lambat (ReDoS).
+
+    Pola yang cocok dengan '/', '/index.php', '/a/b/c' sekaligus (mis. '.*')
+    di url_black memblokir seluruh situs, dan di url_white melewatkan semua
+    pemeriksaan WAF. Kompilasi memakai re Python sebagai pendekatan PCRE.
+    """
+    s, err = teks_aman(pola, maks, 'pola URL')
+    if err:
+        return None, err
+    hasil = rx_uji_subproses([s])[0]
+    if hasil == 'err':
+        return None, 'regex tidak valid'
+    if hasil == 'lambat':
+        return None, 'pola ditolak: terlalu lambat dievaluasi (risiko ReDoS), sederhanakan polanya'
+    if hasil == 'luas':
+        return None, 'pola terlalu luas: cocok dengan semua URL'
+    return s, None
+
+
+def path_aman_shell(p):
+    """shlex.quote untuk nilai yang disisipkan ke perintah shell."""
+    return shlex.quote(str(p))
+
+
+
+# Padanan Inggris untuk pesan validasi masukan (validator di atas). Dipakai
+# sebagai cadangan di _localize_msg: kamus exact-match tidak cukup karena
+# pesan ini memuat alasan dan nilai yang berubah-ubah.
+_EN_VALIDASI = [
+    (r'^alamat IP tidak valid: ', 'Invalid IP address: '),
+    (r'^alamat IP/CIDR tidak valid: ', 'Invalid IP/CIDR address: '),
+    (r'^nilai tidak valid: ', 'Invalid value: '),
+    (r'^Format alamat IP/CIDR (source|dest) tidak valid: ', r'Invalid IP/CIDR format for \1: '),
+    (r'nilai harus berupa teks', 'value must be text'),
+    (r'alamat IP kosong', 'IP address is empty'),
+    (r'IPv6 belum didukung di sini \(hanya IPv4\)', 'IPv6 is not supported here (IPv4 only)'),
+    (r'format IP/CIDR tidak valid: ', 'invalid IP/CIDR format: '),
+    (r'format IPv4 tidak valid: ', 'invalid IPv4 format: '),
+    (r'format IPv4 pada rentang tidak valid: ', 'invalid IPv4 format in range: '),
+    (r'format rentang tidak valid: ', 'invalid range format: '),
+    (r'CIDR tidak diperbolehkan di sini, pakai IP tunggal', 'CIDR is not allowed here, use a single IP'),
+    (r'prefix CIDR harus angka 0-32 tanpa nol di depan: ', 'CIDR prefix must be a number 0-32 without leading zeros: '),
+    (r'prefix /(\d+) terlalu luas \(minimal /(\d+)\)', r'prefix /\1 is too broad (minimum /\2)'),
+    (r'bit host CIDR terisi: gunakan ', 'CIDR host bits are set: use '),
+    (r'alamat tidak dapat dipakai \(0\.x, multicast, atau cadangan\): ', 'address cannot be used (0.x, multicast, or reserved): '),
+    (r'alamat loopback/link-local tidak boleh diblokir: ', 'loopback/link-local addresses must not be blocked: '),
+    (r'rentang memuat loopback, tidak boleh diblokir', 'range contains loopback, it must not be blocked'),
+    (r'awal rentang lebih besar dari akhir', 'range start is greater than range end'),
+    (r'rentang terlalu luas \(maksimal (\d+) alamat\)', r'range is too wide (maximum \1 addresses)'),
+    (r'maksimal (\d+) alamat per aturan', r'at most \1 addresses per rule'),
+    (r'^tidak boleh memblokir alamat server ini atau alamat Anda yang sedang mengakses panel: ',
+     'must not block this server or your own address currently accessing the panel: '),
+    (r'daftar hitam memuat alamat server ini atau alamat Anda sendiri: ', 'blacklist would contain this server or your own address: '),
+    (r'nilai sudah ada di daftar', 'value already exists in the list'),
+    (r'nilai tidak ada di daftar', 'value is not in the list'),
+    (r'gagal menulis daftar putih: ', 'failed to write allowlist: '),
+    (r' sudah ada di daftar putih$', ' is already in the allowlist'),
+    (r'^(.*) dikeluarkan dari daftar putih$', r'\1 removed from allowlist'),
+    (r'^(.*) keluar dari (ip_black|ip_white|url_black|url_white)$', r'\1 removed from \2'),
+    (r'^(.*) masuk (ip_black|ip_white|url_black|url_white)$', r'\1 added to \2'),
+    (r'^Nama ', 'Name '),
+    (r'^Catatan ', 'Note '),
+    (r'^pola URL ', 'URL pattern '),
+    (r'harus berupa teks', 'must be text'),
+    (r'wajib diisi', 'is required'),
+    (r'terlalu panjang \(maksimal (\d+) karakter\)', r'is too long (maximum \1 characters)'),
+    (r'memuat karakter kontrol', 'contains control characters'),
+    (r'regex tidak valid: ', 'invalid regex: '),
+    (r'pola terlalu luas: cocok dengan semua URL', 'pattern is too broad: it matches every URL'),
+    (r'^Protokol harus tcp, udp, tcp/udp, atau all$', 'Protocol must be tcp, udp, tcp/udp, or all'),
+    (r'^Aksi harus ACCEPT atau DROP$', 'Action must be ACCEPT or DROP'),
+    (r'^Aturan yang sama sudah ada \((.*)\)$', r'The same rule already exists (\1)'),
+    (r'^Format ID aturan tidak valid$', 'Invalid rule ID format'),
+    (r'^Aturan baseline \(SSH, panel, web\) tidak boleh dihapus; menghapusnya bisa memutus akses admin$',
+     'Baseline rules (SSH, panel, web) must not be deleted; doing so can cut off admin access'),
+    (r'^Aturan baseline \(SSH, panel, web\) tidak boleh dimatikan; bisa memutus akses admin$',
+     'Baseline rules (SSH, panel, web) must not be disabled; it can cut off admin access'),
+    (r'^Aturan ditolak saat diterapkan ke kernel dan dibatalkan: ', 'Rule was rejected when applied to the kernel and has been rolled back: '),
+    (r'^Tipe harus cmdline_match, exe_exact, basename, atau cwd_match$', 'Type must be cmdline_match, exe_exact, basename, or cwd_match'),
+    (r'^Pola terlalu pendek \(minimal 3 karakter\)$', 'Pattern is too short (minimum 3 characters)'),
+    (r'^basename tidak boleh memuat "/" atau spasi$', 'basename must not contain "/" or spaces'),
+    (r'^Path tidak boleh memuat "\.\."$', 'Path must not contain ".."'),
+    (r'^Path tidak boleh memuat spasi$', 'Path must not contain spaces'),
+    (r'^cwd_match harus path absolut minimal dua tingkat .*$', 'cwd_match must be an absolute path of at least two levels (for example /www/wwwroot/site); "/" would whitelist every process'),
+    (r'^exe_exact: pakai path absolut atau nama biner saja$', 'exe_exact: use an absolute path or just the binary name'),
+    (r'^Format ID karantina tidak valid$', 'Invalid quarantine ID format'),
+    (r'^ID karantina tidak boleh kosong$', 'Quarantine ID must not be empty'),
+    (r'^Engine tidak dikenal: ', 'Unknown engine: '),
+    (r'Path target pemindaian wajib diisi', 'Scan target path is required'),
+    (r'Path memuat karakter tidak valid atau terlalu panjang', 'Path contains invalid characters or is too long'),
+    (r'Direktori tidak valid atau tidak ditemukan: ', 'Directory is invalid or not found: '),
+    (r'Path target pemindaian tidak ditemukan: ', 'Scan target path not found: '),
+    (r'^kode negara tidak dikenal: ', 'Unknown country code: '),
+]
+
 class sentinel_main(object):
     __PATH = '/www/server/sentinel'
 
     def _ensure_core_files(self):
         """Self-healing: pastikan skrip helper bin & unit systemd selalu tersedia."""
         try:
+            # Plugin yang baru dicabut (install.sh uninstall) tidak boleh hidup lagi karena
+            # satu panggilan API yang kebetulan masuk sebelum folder plugin dihapus panel.
+            if os.path.exists(os.path.join(os.path.dirname(os.path.abspath(__file__)), '.uninstalled')):
+                return
             bin_dir = os.path.join(self.__PATH, 'bin')
             etc_dir = os.path.join(self.__PATH, 'etc')
             os.makedirs(bin_dir, exist_ok=True)
@@ -77,7 +348,7 @@ class sentinel_main(object):
                 'sentinel-ports.py', 'sentinel-waf.sh', 'sentinel-fw.sh',
                 'sentinel-av.sh', 'sentinel-proc.py', 'sentinel-intel.sh',
                 'sentinel-notify.sh', 'sentinel-upload-scan.py',
-                'sentinel-sage.py', 'guardctl', 'guardd'
+                'sentinel-sage.py', 'sentinel-zyrules.py', 'guardctl', 'guardd'
             ]
             for s in core_scripts:
                 target = os.path.join(bin_dir, s)
@@ -361,7 +632,11 @@ class sentinel_main(object):
             for pattern, repl in PATTERNS_TO_EN:
                 if re.match(pattern, msg):
                     return re.sub(pattern, repl, msg)
-            return msg
+            # pesan validasi masukan: awalan + alasan diterjemahkan frasa demi frasa
+            hasil = msg
+            for pattern, repl in _EN_VALIDASI:
+                hasil = re.sub(pattern, repl, hasil)
+            return hasil
 
         # Jika lang == 'id', jika pesan kebetulan masuk dalam bahasa Inggris, kembalikan padanan Indonesianya
         EN_TO_ID = {v: k for k, v in ID_TO_EN.items()}
@@ -544,12 +819,24 @@ class sentinel_main(object):
             return None
 
     def _sh(self, cmd, timeout=30):
+        p = None
         try:
             p = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE,
-                                 stderr=subprocess.PIPE)
+                                 stderr=subprocess.PIPE, start_new_session=True)
             o, e = p.communicate(timeout=timeout)
             return p.returncode, o.decode('utf-8', 'replace'), \
                 e.decode('utf-8', 'replace')
+        except subprocess.TimeoutExpired:
+            # Tanpa ini proses anak tetap berjalan (dan memakan CPU) setelah timeout.
+            try:
+                os.killpg(p.pid, 9)
+            except Exception:
+                pass
+            try:
+                p.communicate(timeout=5)
+            except Exception:
+                pass
+            return 1, '', 'timeout setelah %ss' % timeout
         except Exception as ex:
             return 1, '', str(ex)
 
@@ -717,16 +1004,12 @@ class sentinel_main(object):
                         if val not in ('none', 'nginx-tidak-ada'):
                             waf_eng = val
                         break
+            # Apache dan OpenLiteSpeed memakai ModSecurity dengan ruleset yang sama
             if waf_eng in ('off', 'none'):
-                rc_fw, o_fw, _ = self._waf('freewaf-status')
-                if rc_fw == 0:
-                    fw_map = {}
-                    for line in o_fw.splitlines():
-                        if '=' in line:
-                            k, v = line.split('=', 1)
-                            fw_map[k.strip()] = v.strip()
-                    if fw_map.get('loaded') == 'ya' and fw_map.get('mode') not in ('disable', 'off', ''):
-                        waf_eng = 'lua_waf'
+                for line in o.splitlines():
+                    if line.startswith(('apache=', 'openlitespeed=')) and line.split('=', 1)[1].strip() == 'modsecurity':
+                        waf_eng = 'modsecurity'
+                        break
         except Exception:
             pass
 
@@ -1048,9 +1331,16 @@ class sentinel_main(object):
 
     def ban_ip(self, get):
         """Blokir satu IP sekarang juga lewat soket daemon."""
-        ip = (get.get('ip') or '').strip()
-        if not ip or self._ipnum(ip) == 0:
-            return public.returnMsg(False, 'alamat IP tidak valid')
+        net, err = parse_v4(get.get('ip'), cidr=False, tujuan='blokir')
+        if err:
+            return public.returnMsg(False, 'alamat IP tidak valid: %s' % err)
+        ip = str(net.network_address)
+        # Jangan memutus diri sendiri: alamat server ini dan alamat admin
+        # yang sedang membuka panel tidak boleh diblokir dari panel.
+        if ip in (self._self_ip(), self._req_ip()):
+            return public.returnMsg(
+                False, 'tidak boleh memblokir alamat server ini atau alamat '
+                       'Anda yang sedang mengakses panel: %s' % ip)
         # Durasi harus diperiksa eksplisit, bukan sekadar int() yang
         # dibungkus-or. Dua kegagalan nyata muncul dari cara lama:
         #   - "abc" membuat int() melempar galat, dan traceback-nya
@@ -1116,9 +1406,10 @@ class sentinel_main(object):
 
     def unban_ip(self, get):
         """Lepas blokir dan hapus dari allowlist supaya tidak diblokir lagi."""
-        ip = (get.get('ip') or '').strip()
-        if not ip or self._ipnum(ip) == 0:
-            return public.returnMsg(False, 'alamat IP tidak valid')
+        net, err = parse_v4(get.get('ip'), cidr=False, tujuan='netral')
+        if err:
+            return public.returnMsg(False, 'alamat IP tidak valid: %s' % err)
+        ip = str(net.network_address)
         rc, o, e = self._sh(
             "'%s/bin/guardctl' unban '%s'" % (self.__PATH, ip), 20)
         if rc != 0 or '"ok":true' not in o:
@@ -1154,42 +1445,109 @@ class sentinel_main(object):
             'jumlah': len(isi),
         })
 
+    def _req_ip(self):
+        """Alamat klien yang sedang memanggil endpoint ini (kosong bila bukan dari web)."""
+        try:
+            from flask import request, has_request_context
+            if has_request_context():
+                return request.remote_addr or ''
+        except Exception:
+            pass
+        return ''
+
+    def _allow_nets(self):
+        """Isi allowlist.txt sebagai daftar (IPv4Network, baris-asli). Baris tak valid dilewati."""
+        hasil = []
+        try:
+            with open(self._allow_path(), 'r') as f:
+                for line in f:
+                    t = line.split('#')[0].strip()
+                    if not t:
+                        continue
+                    net, err = parse_v4(t, cidr=True, min_prefix=0,
+                                        tujuan='netral', semua=True)
+                    if net is not None:
+                        hasil.append(net)
+        except Exception:
+            pass
+        return hasil
+
     def allow_ip(self, get):
-        """Tambahkan ke daftar putih permanen."""
-        ip = (get.get('ip') or '').strip()
-        if not ip or self._ipnum(ip) == 0:
-            return public.returnMsg(False, 'alamat IP tidak valid')
-        rc, o, e = self._sh(
-            "'%s/bin/guardctl' allow '%s'" % (self.__PATH, ip), 20)
-        if rc != 0 or '"ok":true' not in o:
-            return public.returnMsg(False, 'gagal menambah: %s'
-                                    % (o.strip() or e.strip()))
+        """Tambahkan IP tunggal atau CIDR ke daftar putih permanen."""
+        net, err = parse_v4(get.get('ip'), cidr=True, min_prefix=8,
+                            tujuan='putih')
+        if err:
+            return public.returnMsg(False, 'alamat IP/CIDR tidak valid: %s' % err)
+        ip = v4_tampil(net)
+        # Idempoten: entri yang sama tidak ditulis dua kali.
+        if net in self._allow_nets():
+            return public.returnMsg(True, '%s sudah ada di daftar putih' % ip)
+        if net.prefixlen == 32:
+            rc, o, e = self._sh(
+                "'%s/bin/guardctl' allow '%s'" % (self.__PATH, ip), 20)
+            if rc != 0 or '"ok":true' not in o:
+                return public.returnMsg(False, 'gagal menambah: %s'
+                                        % (o.strip() or e.strip()))
+        else:
+            # guardctl allow hanya menerima IP tunggal. CIDR ditulis langsung
+            # ke allowlist.txt (format yang sama dibaca guardd dan
+            # sentinel-fw.sh), dengan kunci berkas agar tidak bertabrakan
+            # dengan tulisan daemon.
+            try:
+                with open(self._allow_path(), 'a+') as f:
+                    fcntl.flock(f, fcntl.LOCK_EX)
+                    f.seek(0, 2)
+                    if f.tell() > 0:
+                        f.seek(f.tell() - 1)
+                        if f.read(1) != '\n':
+                            f.write('\n')
+                    f.write('%s\n' % ip)
+                    f.flush()
+                    fcntl.flock(f, fcntl.LOCK_UN)
+            except Exception as ex:
+                return public.returnMsg(False, 'gagal menulis daftar putih: %s' % ex)
+            self._sh("'%s/bin/guardctl' rescan" % self.__PATH, 20)
         # aturan iptables perlu dipasang ulang supaya whitelist langsung
         # berlaku di kernel, bukan menunggu timer lima menit.
         self._sh("'%s/bin/sentinel-fw.sh' install" % self.__PATH, 60)
-        self._aksi(ip, 'allow', 'panel', 'ditambahkan ke daftar putih')
+        if net.prefixlen == 32:
+            self._aksi(ip, 'allow', 'panel', 'ditambahkan ke daftar putih')
         return public.returnMsg(True, '%s masuk daftar putih' % ip)
 
     def del_allow(self, get):
-        """Keluarkan dari daftar putih permanen."""
-        ip = (get.get('ip') or '').strip()
-        if not ip:
-            return public.returnMsg(False, 'alamat IP tidak valid')
+        """Keluarkan IP tunggal atau CIDR dari daftar putih permanen."""
+        net, err = parse_v4(get.get('ip'), cidr=True, min_prefix=0,
+                            tujuan='netral', semua=True)
+        if err:
+            return public.returnMsg(False, 'alamat IP/CIDR tidak valid: %s' % err)
+        ip = v4_tampil(net) if net.prefixlen != 0 else '0.0.0.0/0'
         path = self._allow_path()
         try:
             with open(path, 'r') as f:
                 baris = f.readlines()
         except Exception as ex:
             return public.returnMsg(False, 'gagal membaca daftar putih: %s' % ex)
-        sisa = [b for b in baris if b.split('#')[0].strip() != ip]
+        sisa = []
+        for b in baris:
+            t = b.split('#')[0].strip()
+            n2, _ = parse_v4(t, cidr=True, min_prefix=0, tujuan='netral',
+                             semua=True) if t else (None, None)
+            # bandingkan sebagai jaringan: "1.2.3.4" dan "1.2.3.4/32" sama
+            if n2 is not None and n2 == net:
+                continue
+            sisa.append(b)
         if len(sisa) == len(baris):
             return public.returnMsg(False, '%s tidak ada di daftar putih' % ip)
         with open(path, 'w') as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
             f.writelines(sisa)
+            f.flush()
+            fcntl.flock(f, fcntl.LOCK_UN)
         self._sh("'%s/bin/sentinel-fw.sh' install" % self.__PATH, 60)
         self._sh("'%s/bin/guardctl' rescan" % self.__PATH, 20)
-        self._aksi(ip, 'del-allow', 'panel',
-                   'dikeluarkan dari daftar putih, blokir lama berlaku lagi')
+        if net.prefixlen == 32:
+            self._aksi(ip, 'del-allow', 'panel',
+                       'dikeluarkan dari daftar putih, blokir lama berlaku lagi')
         return public.returnMsg(True, '%s dikeluarkan dari daftar putih' % ip)
 
     def del_allow_ip(self, get):
@@ -1625,43 +1983,55 @@ class sentinel_main(object):
                 return public.returnMsg(False, 'Gagal memuat status port firewall: %s' % (e or str(ex)))
 
     def add_port_rule(self, get):
-        """Menambahkan aturan port baru (Inbound atau Outbound)."""
-        direction = (get.get('direction') or 'inbound').strip().lower()
+        """Menambahkan aturan port baru (Inbound atau Outbound).
+
+        Semua masukan divalidasi ketat. Nilai tak valid DITOLAK, tidak
+        dikoreksi diam-diam: aksi "DENY" yang berubah jadi ACCEPT, atau
+        IP yang salah tetapi tetap tersimpan, membuat aturan tidak berlaku
+        di kernel sementara layar menampilkan sukses.
+        """
+        direction = str(get.get('direction') or 'inbound').strip().lower()
         if direction not in ['inbound', 'outbound']:
             return public.returnMsg(False, 'Arah aturan harus inbound atau outbound')
 
-        protocol = (get.get('protocol') or 'tcp').strip().lower()
+        protocol = str(get.get('protocol') or 'tcp').strip().lower()
         if protocol not in ['tcp', 'udp', 'tcp/udp', 'all']:
-            protocol = 'tcp'
+            return public.returnMsg(False, 'Protokol harus tcp, udp, tcp/udp, atau all')
 
-        port = (get.get('port') or '').strip()
+        port = str(get.get('port') or '').strip()
         if not port:
             return public.returnMsg(False, 'Nomor port atau rentang port wajib diisi')
         clean_port = port.replace(':', '-')
-        if not re.match(r'^[0-9]+(-[0-9]+)?$', clean_port) and clean_port.lower() != 'all':
+        if clean_port.lower() == 'all':
+            clean_port = 'all'
+        elif not re.fullmatch(r'[1-9][0-9]{0,4}(-[1-9][0-9]{0,4})?', clean_port):
             return public.returnMsg(False, 'Format port tidak valid (contoh: 80 atau 8000-8080)')
-
-        if clean_port.lower() != 'all':
+        else:
             parts = clean_port.split('-')
             for p_str in parts:
-                p_val = int(p_str)
-                if p_val < 1 or p_val > 65535:
+                if int(p_str) < 1 or int(p_str) > 65535:
                     return public.returnMsg(False, 'Nomor port harus berada di antara 1 dan 65535')
             if len(parts) == 2 and int(parts[0]) >= int(parts[1]):
                 return public.returnMsg(False, 'Rentang port tidak valid (port awal harus lebih kecil)')
 
-        action = (get.get('rule_action') or get.get('act') or get.get('aksi') or get.get('sub_action') or (get.get('action') if get.get('action') != 'a' else None) or 'ACCEPT').strip().upper()
+        action = str(get.get('rule_action') or get.get('act') or get.get('aksi') or get.get('sub_action') or (get.get('action') if get.get('action') != 'a' else None) or 'ACCEPT').strip().upper()
+        # Alias lama dipetakan secara eksplisit. Nilai lain ditolak, bukan
+        # diubah diam-diam menjadi ACCEPT.
+        action = {'ALLOW': 'ACCEPT', 'PERMIT': 'ACCEPT', 'DENY': 'DROP', 'BLOCK': 'DROP'}.get(action, action)
         if action not in ['ACCEPT', 'DROP']:
-            action = 'ACCEPT'
+            return public.returnMsg(False, 'Aksi harus ACCEPT atau DROP')
 
-        source = (get.get('source') or '0.0.0.0/0').strip() or '0.0.0.0/0'
-        dest = (get.get('dest') or '0.0.0.0/0').strip() or '0.0.0.0/0'
+        kolom = 'source' if direction == 'inbound' else 'dest'
+        mentah = str(get.get(kolom) or '0.0.0.0/0').strip() or '0.0.0.0/0'
+        alamat, err = parse_v4_daftar(mentah, cidr=True, min_prefix=0,
+                                      tujuan='netral', semua=True)
+        if err:
+            return public.returnMsg(False, 'Format alamat IP/CIDR %s tidak valid: %s' % (kolom, err))
+        alamat_str = ','.join(alamat)
 
-        for ip_field, ip_val in [('source', source), ('dest', dest)]:
-            if not re.match(r'^[0-9a-fA-F:\./, ]+$', ip_val):
-                return public.returnMsg(False, 'Format alamat IP/CIDR %s tidak valid' % ip_field)
-
-        remark = (get.get('remark') or '').strip()
+        remark, err = teks_aman(str(get.get('remark') or ''), 120, 'Catatan', boleh_kosong=True)
+        if err:
+            return public.returnMsg(False, err)
         if not remark:
             remark = '%s Port %s' % (protocol.upper(), clean_port)
 
@@ -1675,7 +2045,17 @@ class sentinel_main(object):
             with open(self.PORTS_CONF, 'r') as fp:
                 cfg = json.load(fp)
 
-        rule_id = '%s-%d' % ('in' if direction == 'inbound' else 'out', int(time.time()))
+        daftar = cfg.setdefault(direction, [])
+        for r in daftar:
+            if (r.get('port') == clean_port and r.get('protocol') == protocol
+                    and r.get('action') == action
+                    and r.get(kolom) == alamat_str):
+                return public.returnMsg(False, 'Aturan yang sama sudah ada (%s)' % r.get('id'))
+
+        # ID unik: detik saja bisa bentrok bila dua aturan dibuat bersamaan,
+        # dan hapus berdasarkan ID akan menghapus keduanya.
+        rule_id = '%s-%d-%s' % ('in' if direction == 'inbound' else 'out',
+                                int(time.time()), uuid.uuid4().hex[:4])
         new_rule = {
             'id': rule_id,
             'port': clean_port,
@@ -1683,28 +2063,36 @@ class sentinel_main(object):
             'action': action,
             'remark': remark,
             'system': False,
-            'enabled': True
+            'enabled': True,
+            kolom: alamat_str,
         }
-        if direction == 'inbound':
-            new_rule['source'] = source
-            cfg.setdefault('inbound', []).append(new_rule)
-        else:
-            new_rule['dest'] = dest
-            cfg.setdefault('outbound', []).append(new_rule)
+        daftar.append(new_rule)
 
         with open(self.PORTS_CONF, 'w') as fp:
             json.dump(cfg, fp, indent=2)
 
         if cfg.get('active', True):
-            self._ports_script('apply')
+            rc, o, e = self._ports_script('apply')
+            if rc != 0:
+                # Jangan biarkan aturan yang ditolak kernel tersimpan sebagai
+                # "berhasil": batalkan dan terapkan ulang keadaan sebelumnya.
+                cfg[direction] = [r for r in cfg.get(direction, []) if r.get('id') != rule_id]
+                with open(self.PORTS_CONF, 'w') as fp:
+                    json.dump(cfg, fp, indent=2)
+                self._ports_script('apply')
+                return public.returnMsg(
+                    False, 'Aturan ditolak saat diterapkan ke kernel dan dibatalkan: %s'
+                           % ((o or e).strip()[:300]))
 
         return public.returnMsg(True, 'Aturan port %s berhasil ditambahkan' % clean_port)
 
     def del_port_rule(self, get):
         """Menghapus aturan port berdasarkan ID."""
-        rule_id = (get.get('id') or '').strip()
+        rule_id = str(get.get('id') or '').strip()
         if not rule_id:
             return public.returnMsg(False, 'ID aturan wajib disertakan')
+        if not id_valid(rule_id):
+            return public.returnMsg(False, 'Format ID aturan tidak valid')
 
         try:
             with open(self.PORTS_CONF, 'r') as fp:
@@ -1712,6 +2100,12 @@ class sentinel_main(object):
         except Exception as ex:
             return public.returnMsg(False, 'Gagal membaca konfigurasi: %s' % str(ex))
 
+        for d in ['inbound', 'outbound']:
+            for r in cfg.get(d, []):
+                if r.get('id') == rule_id and r.get('system'):
+                    return public.returnMsg(
+                        False, 'Aturan baseline (SSH, panel, web) tidak boleh '
+                               'dihapus; menghapusnya bisa memutus akses admin')
         removed = False
         for d in ['inbound', 'outbound']:
             rules = cfg.get(d, [])
@@ -1733,9 +2127,11 @@ class sentinel_main(object):
 
     def toggle_port_rule(self, get):
         """Menyalakan atau mematikan status aturan port."""
-        rule_id = (get.get('id') or '').strip()
+        rule_id = str(get.get('id') or '').strip()
         if not rule_id:
             return public.returnMsg(False, 'ID aturan wajib disertakan')
+        if not id_valid(rule_id):
+            return public.returnMsg(False, 'Format ID aturan tidak valid')
 
         try:
             with open(self.PORTS_CONF, 'r') as fp:
@@ -1748,6 +2144,10 @@ class sentinel_main(object):
         for d in ['inbound', 'outbound']:
             for r in cfg.get(d, []):
                 if r.get('id') == rule_id:
+                    if r.get('system'):
+                        return public.returnMsg(
+                            False, 'Aturan baseline (SSH, panel, web) tidak '
+                                   'boleh dimatikan; bisa memutus akses admin')
                     r['enabled'] = not r.get('enabled', True)
                     new_state = r['enabled']
                     updated = True
@@ -1809,374 +2209,313 @@ class sentinel_main(object):
         return self.toggle_port_firewall_status(get)
 
     # ------------------------------------------------------------------ #
-    # Lua WAF engine (Nginx Lua firewall, difork ke Sentinel)            #
+    # Ruleset ZySentinel: modul, pengaturan, daftar IP/URL, log           #
     #                                                                     #
-    # Engine Lua ini hanya jalan di nginx. Konfigurasi global dan per     #
-    # situs dibaca init.lua sekali saat worker start, jadi setiap         #
-    # perubahan wajib diikuti reload nginx agar berlaku.                  #
+    # WAF memakai Coraza (nginx) dan ModSecurity v2 (Apache, OpenLiteSpeed)#
+    # dengan SATU ruleset SecLang: OWASP CRS + ruleset ZySentinel + daftar #
+    # di bawah ini. Berkas konfigurasi turunan disusun oleh               #
+    # sentinel-zyrules.py; setiap perubahan baru berlaku setelah web      #
+    # server di-reload, jadi setiap endpoint di bawah menjalankan reload  #
+    # yang terverifikasi (param reload=0 untuk menundanya).               #
     # ------------------------------------------------------------------ #
-    # Master aset WAF ada di bawah sentinel (sejak konsolidasi); path
-    # lama /www/server/free_waf tetap ada sebagai symlink untuk nginx.
-    FW_HOME = '/www/server/sentinel/waf/lua_waf/' if os.path.exists('/www/server/sentinel/waf/lua_waf') else '/www/server/sentinel/waf/free_waf/'
-    FW_MODUL = ['cc', 'get', 'post', 'cookie', 'user-agent', 'scan',
-                'url_black', 'drop_abroad']
+    WAF_LISTS_DIR = '/www/server/sentinel/etc/waf-lists'
+    WAF_AUDIT_LOG = '/www/wwwlogs/zysentinel_waf_audit.jsonl'
+    ZY_MODUL = ('sensitive_files', 'webshell', 'spam', 'scanner', 'bot',
+                'lfi_args')
+    ZY_SETTING = {'bot_level': (0, 3), 'strict': (0, 1), 'fallback': (0, 1),
+                  'paranoia': (1, 4), 'threshold': (1, 100),
+                  'body_nofiles_kb': (16, 4096), 'body_total_mb': (1, 512)}
+    WAF_LISTS = ('ip_white', 'ip_black', 'url_white', 'url_black')
+    WAF_LIST_MAKS = 5000
 
-    def _fw_baca(self, nama):
-        try:
-            with open(self.FW_HOME + nama, 'r') as f:
-                return json.load(f)
-        except Exception as e:
-            return None
+    def _zy_siap(self):
+        """Pastikan ruleset terpasang dan konfigurasi turunan tersusun."""
+        if not os.path.isfile('/www/server/sentinel/waf/zyrules/gen/main.conf'):
+            rc, o, e = self._waf('zyrules-install')
+            if rc != 0:
+                return False, (e.strip() or o.strip() or 'ruleset belum siap')
+        return True, ''
 
-    def _fw_tulis(self, nama, data):
-        try:
-            tmp = self.FW_HOME + nama + '.tmp'
-            with open(tmp, 'w') as f:
-                json.dump(data, f, ensure_ascii=False)
-            os.rename(tmp, self.FW_HOME + nama)
-            return True
-        except Exception:
-            return False
-
-    def _fw_reload(self):
-        """Reload nginx agar config.json/site.json baru terbaca worker.
-
-        init.lua membaca kedua berkas sekali saat start, bukan per
-        request. Tanpa reload, perubahan hanya tersimpan tetapi tidak
-        berlaku. Return code reload tidak diverifikasi di sini karena
-        panel memanggil nginx -t lebih dulu di tempat lain; yang
-        penting reloadnya dijalankan.
-        """
-        self._sh('/etc/init.d/nginx reload', 60)
-
-    def get_freewaf(self, get):
-        """Status engine + ringkasan konfigurasi global."""
-        rc, o, e = self._sh(
-            "'%s/bin/sentinel-waf.sh' freewaf-status" % self.__PATH, 30)
-        status = {}
-        for baris in o.strip().splitlines():
-            if '=' in baris:
-                k, v = baris.split('=', 1)
-                status[k.strip()] = v.strip()
-        if rc != 0 or not status:
-            return public.returnMsg(False, 'gagal membaca status: %s'
-                                    % (e.strip() or o.strip()))
-        config = self._fw_baca('config.json')
-        if config is None:
-            return public.returnMsg(False, 'config.json tidak terbaca; '
-                                           'engine belum terpasang benar')
-        modul = {}
-        for m in self.FW_MODUL:
-            v = config.get(m)
-            if isinstance(v, dict):
-                modul[m] = bool(v.get('open', False))
-            elif isinstance(v, bool):
-                modul[m] = v
-            else:
-                modul[m] = None
-        return public.returnMsg(True, {
-            'status': status,
-            'open': bool(config.get('open', False)),
-            'monitor': bool(config.get('monitor', False)),
-            'modul': modul,
-            'cc': config.get('cc', {}),
-            'retry': {k: config.get(k) for k in
-                      ('retry', 'retry_cycle', 'retry_time')},
-        })
-
-    def set_fw_open(self, get):
-        """Nyalakan atau matikan seluruh WAF."""
-        config = self._fw_baca('config.json')
-        if config is None:
-            return public.returnMsg(False, 'config.json tidak terbaca')
-        aksi = (get.get('state') or '').strip()
-        if aksi not in ('on', 'off'):
-            return public.returnMsg(False, 'state harus on atau off')
-        config['open'] = (aksi == 'on')
-        config['start_time'] = int(time.time()) if aksi == 'on' else 0
-        if not self._fw_tulis('config.json', config):
-            return public.returnMsg(False, 'gagal menulis config.json')
-        self._fw_reload()
-        return public.returnMsg(True, 'WAF %s' % ('aktif' if aksi == 'on'
-                                                 else 'mati'))
-
-    def set_fw_monitor(self, get):
-        """Monitor (log saja) atau blocking."""
-        config = self._fw_baca('config.json')
-        if config is None:
-            return public.returnMsg(False, 'config.json tidak terbaca')
-        aksi = (get.get('state') or '').strip()
-        if aksi not in ('monitor', 'blocking'):
-            return public.returnMsg(False, 'state harus monitor atau blocking')
-        config['monitor'] = (aksi == 'monitor')
-        if not self._fw_tulis('config.json', config):
-            return public.returnMsg(False, 'gagal menulis config.json')
-        self._fw_reload()
-        return public.returnMsg(True, 'mode %s aktif' % aksi)
-
-    def set_fw_module(self, get):
-        """Nyalakan atau matikan satu modul global (cc, get, post, ...)."""
-        config = self._fw_baca('config.json')
-        if config is None:
-            return public.returnMsg(False, 'config.json tidak terbaca')
-        m = (get.get('module') or '').strip()
-        aksi = (get.get('state') or '').strip()
-        if m not in self.FW_MODUL:
-            return public.returnMsg(False, 'modul tidak dikenal: %s' % m)
-        if aksi not in ('on', 'off'):
-            return public.returnMsg(False, 'state harus on atau off')
-        v = config.get(m)
-        if isinstance(v, dict):
-            v['open'] = (aksi == 'on')
-        elif isinstance(v, bool) or v is None:
-            config[m] = (aksi == 'on')
-        else:
-            return public.returnMsg(False, 'bentuk modul tidak dikenal')
-        if not self._fw_tulis('config.json', config):
-            return public.returnMsg(False, 'gagal menulis config.json')
-        self._fw_reload()
-        return public.returnMsg(True, 'modul %s %s' % (m, aksi))
-
-    def set_fw_cc(self, get):
-        """Ubah batas CC global: limit per cycle detik, blokir endtime detik."""
-        config = self._fw_baca('config.json')
-        if config is None:
-            return public.returnMsg(False, 'config.json tidak terbaca')
-        try:
-            limit = int(get.get('limit') or 0)
-            cycle = int(get.get('cycle') or 0)
-            endtime = int(get.get('endtime') or 0)
-        except (ValueError, TypeError):
-            return public.returnMsg(False, 'limit, cycle, endtime harus angka')
-        if limit < 1 or cycle < 1 or endtime < 1:
-            return public.returnMsg(False, 'semua nilai minimal 1')
-        if limit > 100000 or cycle > 3600 or endtime > 86400:
-            return public.returnMsg(False, 'nilai di luar batas wajar')
-        cc = config.get('cc')
-        if not isinstance(cc, dict):
-            return public.returnMsg(False, 'bagian cc rusak di config.json')
-        cc['limit'] = limit
-        cc['cycle'] = cycle
-        cc['endtime'] = endtime
-        if not self._fw_tulis('config.json', config):
-            return public.returnMsg(False, 'gagal menulis config.json')
-        self._fw_reload()
-        return public.returnMsg(
-            True, 'CC global: %d request per %d detik, blokir %d detik'
-                  % (limit, cycle, endtime))
-
-    def get_fw_sites(self, get):
-        """Daftar situs di site.json beserta status perlindungannya."""
-        site = self._fw_baca('site.json')
-        if site is None:
-            return public.returnMsg(False, 'site.json tidak terbaca')
-
-        # Sinkronkan situs dari panel jika ada yang belum terdaftar di site.json
-        try:
-            panel_sites = public.M('sites').field('name').select()
-            updated = False
-            for ps in panel_sites:
-                sname = ps.get('name') if isinstance(ps, dict) else None
-                if sname and sname not in site:
-                    site[sname] = {
-                        "open": True,
-                        "project": "",
-                        "log": True,
-                        "cdn": False,
-                        "cdn_header": ["x-forwarded-for", "x-real-ip"],
-                        "retry": 6,
-                        "retry_cycle": 60,
-                        "retry_time": 180,
-                        "disable_php_path": ["^/upload/", "^/static/"],
-                        "disable_path": [],
-                        "disable_ext": [],
-                        "disable_upload_ext": ["php", "jsp"],
-                        "url_white": [],
-                        "url_rule": [],
-                        "url_tell": [],
-                        "disable_rule": {
-                            "url": [],
-                            "post": [],
-                            "args": [],
-                            "cookie": [],
-                            "user_agent": []
-                        },
-                        "cc": {
-                            "open": True,
-                            "cycle": 60,
-                            "limit": 1500,
-                            "endtime": 300
-                        },
-                        "get": True,
-                        "post": True,
-                        "cookie": True,
-                        "user-agent": True,
-                        "scan": True,
-                        "drop_abroad": False
-                    }
-                    updated = True
-            if updated:
-                self._fw_tulis('site.json', site)
-                self._fw_reload()
-        except Exception:
-            pass
-
-        daftar = []
-        for nama in sorted(site.keys()):
-            c = site[nama] if isinstance(site[nama], dict) else {}
-            cc = c.get('cc', {}) if isinstance(c.get('cc'), dict) else {}
-            daftar.append({
-                'site': nama,
-                'open': bool(c.get('open', False)),
-                'cc_open': bool(cc.get('open', False)),
-                'cc_limit': cc.get('limit'),
-                'cc_cycle': cc.get('cycle'),
-                'cc_endtime': cc.get('endtime'),
-            })
-        return public.returnMsg(True, daftar)
-
-    def set_fw_site(self, get):
-        """Nyalakan atau matikan WAF untuk satu situs."""
-        site = self._fw_baca('site.json')
-        if site is None:
-            return public.returnMsg(False, 'site.json tidak terbaca')
-        nama = (get.get('site') or '').strip()
-        aksi = (get.get('state') or '').strip()
-        if nama not in site or not isinstance(site[nama], dict):
-            return public.returnMsg(False, 'situs tidak ada di site.json')
-        if aksi not in ('on', 'off'):
-            return public.returnMsg(False, 'state harus on atau off')
-        site[nama]['open'] = (aksi == 'on')
-        if not self._fw_tulis('site.json', site):
-            return public.returnMsg(False, 'gagal menulis site.json')
-        self._fw_reload()
-        return public.returnMsg(True, '%s -> %s' % (nama, aksi))
-
-    def set_fw_site_cc(self, get):
-        """Ubah batas CC satu situs."""
-        site = self._fw_baca('site.json')
-        if site is None:
-            return public.returnMsg(False, 'site.json tidak terbaca')
-        nama = (get.get('site') or '').strip()
-        if nama not in site or not isinstance(site[nama], dict):
-            return public.returnMsg(False, 'situs tidak ada di site.json')
-        try:
-            limit = int(get.get('limit') or 0)
-            cycle = int(get.get('cycle') or 0)
-            endtime = int(get.get('endtime') or 0)
-        except (ValueError, TypeError):
-            return public.returnMsg(False, 'limit, cycle, endtime harus angka')
-        if limit < 1 or cycle < 1 or endtime < 1:
-            return public.returnMsg(False, 'semua nilai minimal 1')
-        if limit > 100000 or cycle > 3600 or endtime > 86400:
-            return public.returnMsg(False, 'nilai di luar batas wajar')
-        cc = site[nama].get('cc')
-        if not isinstance(cc, dict):
-            cc = {}
-            site[nama]['cc'] = cc
-        cc['open'] = True
-        cc['limit'] = limit
-        cc['cycle'] = cycle
-        cc['endtime'] = endtime
-        if not self._fw_tulis('site.json', site):
-            return public.returnMsg(False, 'gagal menulis site.json')
-        self._fw_reload()
-        return public.returnMsg(True, 'CC %s: %d/%ds blokir %ds'
-                                     % (nama, limit, cycle, endtime))
-
-    def get_fw_lists(self, get):
-        """Daftar hitam dan putih IP serta URL."""
-        hasil = {}
-        for nama in ('ip_black', 'ip_white', 'url_black', 'url_white'):
-            v = self._fw_baca('rule/%s.json' % nama)
-            hasil[nama] = v if isinstance(v, list) else []
-        return public.returnMsg(True, hasil)
-
-    def fw_list_add(self, get):
-        """Tambah satu entri ke daftar. Duplikat ditolak."""
-        nama = (get.get('list') or '').strip()
-        nilai = (get.get('value') or '').strip()
-        if nama not in ('ip_black', 'ip_white', 'url_black', 'url_white'):
-            return public.returnMsg(False, 'daftar tidak dikenal')
-        if not nilai or len(nilai) > 500:
-            return public.returnMsg(False, 'nilai tidak valid')
-        v = self._fw_baca('rule/%s.json' % nama)
-        if not isinstance(v, list):
-            v = []
-        if nilai in v:
-            return public.returnMsg(False, 'nilai sudah ada di daftar')
-        v.append(nilai)
-        if not self._fw_tulis('rule/%s.json' % nama, v):
-            return public.returnMsg(False, 'gagal menulis daftar')
-        self._fw_reload()
-        return public.returnMsg(True, '%s masuk %s' % (nilai, nama))
-
-    def fw_list_del(self, get):
-        """Hapus satu entri dari daftar."""
-        nama = (get.get('list') or '').strip()
-        nilai = (get.get('value') or '').strip()
-        if nama not in ('ip_black', 'ip_white', 'url_black', 'url_white'):
-            return public.returnMsg(False, 'daftar tidak dikenal')
-        v = self._fw_baca('rule/%s.json' % nama)
-        if not isinstance(v, list) or nilai not in v:
-            return public.returnMsg(False, 'nilai tidak ada di daftar')
-        v.remove(nilai)
-        if not self._fw_tulis('rule/%s.json' % nama, v):
-            return public.returnMsg(False, 'gagal menulis daftar')
-        self._fw_reload()
-        return public.returnMsg(True, '%s keluar dari %s' % (nilai, nama))
-
-    def freewaf_engine(self, get):
-        """Pasang atau cabut engine free_waf (nginx saja)."""
-        aksi = (get.get('aksi') or get.get('act') or get.get('sub_action') or (get.get('action') if get.get('action') != 'a' else None) or '').strip()
-        if aksi not in ('install', 'remove'):
-            return public.returnMsg(False, 'aksi harus install atau remove')
-        rc, o, e = self._sh(
-            "'%s/bin/sentinel-waf.sh' freewaf-%s" % (self.__PATH, aksi), 120)
+    def _zy_terapkan(self, get, ringkas=''):
+        """Susun ulang konfigurasi lalu reload web server (kecuali reload=0)."""
+        ok, pesan = self._zy_siap()
+        if not ok:
+            return public.returnMsg(False, 'ruleset ZySentinel belum siap: %s' % pesan)
+        rc, o, e = self._waf('zyrules-build')
         if rc != 0:
-            return public.returnMsg(False, 'gagal: %s'
+            return public.returnMsg(False, 'gagal menyusun konfigurasi: %s'
                                     % (e.strip() or o.strip()))
-        return public.returnMsg(True, o.strip() or 'selesai')
+        if str(get.get('reload') or '1') == '0':
+            return public.returnMsg(
+                True, '%s Berlaku setelah web server di-reload.' % ringkas)
+        rc, o, e = self._waf('reload', 'all')
+        if rc != 0:
+            return public.returnMsg(
+                False, '%s Konfigurasi tersimpan tetapi reload GAGAL: %s'
+                       % (ringkas, (e.strip() or o.strip())[-300:]))
+        return public.returnMsg(True, '%s Web server sudah di-reload.' % ringkas)
 
-    def freewaf_info(self, get):
-        """Status kesiapan dan informasi runtime engine FreeWAF / Lua WAF."""
-        rc, o, e = self._sh(
-            "'%s/bin/sentinel-waf.sh' freewaf-status" % self.__PATH, 30)
-        status = {}
+    def get_zyrules(self, get):
+        """Status ruleset: mode, modul, pengaturan, jumlah daftar, grup CRS,
+        engine per web server, dan peninggalan engine Lua (bila ada)."""
+        rc, o, e = self._waf('zyrules-status')
+        try:
+            st = json.loads(o)
+        except Exception:
+            st = {'terpasang': False, 'tersusun': False, 'modul': {},
+                  'pengaturan': {}, 'daftar': {}, 'crs': {'ada': False, 'grup': []},
+                  'mode': 'block'}
+        rc2, o2, e2 = self._waf('engine')
+        eng = {}
+        for baris in o2.strip().splitlines():
+            if '=' in baris:
+                k, v = baris.split('=', 1)
+                eng[k.strip()] = v.strip()
+        rc3, o3, e3 = self._waf('legacy-status')
+        leg = {}
+        for baris in o3.strip().splitlines():
+            if '=' in baris:
+                k, v = baris.split('=', 1)
+                leg[k.strip()] = v.strip()
+        st['engine'] = eng
+        st['legacy'] = leg
+        return public.returnMsg(True, st)
+
+    def set_zy_module(self, get):
+        """Hidupkan atau matikan satu modul ZySentinel."""
+        nama = str(get.get('name') or '').strip()
+        aksi = str(get.get('state') or '').strip()
+        if nama not in self.ZY_MODUL:
+            return public.returnMsg(False, 'modul tidak dikenal: %s' % _aman(nama))
+        if aksi not in ('on', 'off'):
+            return public.returnMsg(False, 'state harus on atau off')
+        ok, pesan = self._zy_siap()
+        if not ok:
+            return public.returnMsg(False, 'ruleset ZySentinel belum siap: %s' % pesan)
+        rc, o, e = self._waf('modul-set', nama, aksi)
+        if rc != 0:
+            return public.returnMsg(False, 'gagal: %s' % (e.strip() or o.strip()))
+        return self._zy_terapkan(get, 'Modul %s %s.' % (nama, aksi))
+
+    def set_zy_setting(self, get):
+        """Ubah pengaturan: bot_level 0-3, strict 0-1, fallback 0-1,
+        paranoia 1-4, threshold 1-100."""
+        k = str(get.get('key') or '').strip()
+        if k not in self.ZY_SETTING:
+            return public.returnMsg(False, 'pengaturan tidak dikenal: %s' % _aman(k))
+        mentah = str(get.get('value') if get.get('value') is not None else '').strip()
+        lo, hi = self.ZY_SETTING[k]
+        if not re.fullmatch(r'[0-9]{1,4}', mentah) or not (lo <= int(mentah) <= hi):
+            return public.returnMsg(False, 'nilai %s harus bilangan bulat %d sampai %d' % (k, lo, hi))
+        ok, pesan = self._zy_siap()
+        if not ok:
+            return public.returnMsg(False, 'ruleset ZySentinel belum siap: %s' % pesan)
+        rc, o, e = self._waf('setting-set', k, str(int(mentah)))
+        if rc != 0:
+            return public.returnMsg(False, 'gagal: %s' % (e.strip() or o.strip()))
+        return self._zy_terapkan(get, 'Pengaturan %s = %d.' % (k, int(mentah)))
+
+    # ---- daftar IP/URL WAF (disimpan sebagai teks, satu entri per baris) ----
+    def _waf_list_baca(self, nama):
+        p = '%s/%s.txt' % (self.WAF_LISTS_DIR, nama)
+        out = []
+        try:
+            with open(p, 'r', encoding='utf-8') as f:
+                for line in f:
+                    t = line.rstrip('\n')
+                    if t.strip() and not t.lstrip().startswith('#'):
+                        out.append(t.strip())
+        except FileNotFoundError:
+            pass
+        return out
+
+    def _waf_list_tulis(self, nama, baris):
+        os.makedirs(self.WAF_LISTS_DIR, exist_ok=True)
+        os.chmod(self.WAF_LISTS_DIR, 0o755)
+        p = '%s/%s.txt' % (self.WAF_LISTS_DIR, nama)
+        tmp = p + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            f.write('\n'.join(baris) + ('\n' if baris else ''))
+            f.flush()
+            fcntl.flock(f, fcntl.LOCK_UN)
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, p)
+
+    def _waf_ip_normal(self, nilai, nama, aman_diri=True):
+        """IP, CIDR (/8..32), atau rentang a-b -> (bentuk baku, (awal, akhir), None)
+        atau (None, None, pesan). Bentuk baku: IP tunggal, CIDR, atau 'a-b'."""
+        tujuan = 'blokir' if nama == 'ip_black' else 'putih'
+        if not isinstance(nilai, str):
+            return None, None, 'nilai harus berupa teks'
+        nilai = nilai.strip()
+        if '-' in nilai:
+            a, b, err = parse_v4_rentang(nilai, tujuan=tujuan)
+            if err:
+                return None, None, err
+            baku = str(a) if a == b else '%s-%s' % (a, b)
+        else:
+            net, err = parse_v4(nilai, cidr=True, min_prefix=8, tujuan=tujuan)
+            if err:
+                return None, None, err
+            a, b = v4_kisaran(net)
+            baku = v4_tampil(net)
+        if aman_diri and nama == 'ip_black':
+            for ip in (self._self_ip(), self._req_ip()):
+                x = v4_alamat(ip)
+                if x is not None and int(a) <= int(x) <= int(b):
+                    return None, None, ('daftar hitam memuat alamat server ini atau '
+                                        'alamat Anda sendiri: %s' % ip)
+        return baku, (int(a), int(b)), None
+
+    def get_waf_lists(self, get):
+        """Daftar hitam dan putih IP serta URL."""
+        return public.returnMsg(True, {n: self._waf_list_baca(n) for n in self.WAF_LISTS})
+
+    def waf_list_add(self, get):
+        """Tambah satu entri. Duplikat dan nilai tak valid ditolak.
+
+        ip_black / ip_white : IPv4, CIDR (/8 sampai /32), atau rentang a-b
+        url_black / url_white : regex yang valid dan tidak cocok dengan semua URL
+        """
+        nama = str(get.get('list') or '').strip()
+        nilai = get.get('value')
+        if nama not in self.WAF_LISTS:
+            return public.returnMsg(False, 'daftar tidak dikenal')
+        if not isinstance(nilai, str):
+            return public.returnMsg(False, 'nilai tidak valid: harus berupa teks')
+        nilai = nilai.strip()
+        if nama.startswith('ip_'):
+            simpan, rentang, err = self._waf_ip_normal(nilai, nama)
+        else:
+            simpan, err = regex_waras(nilai)
+            rentang = None
+        if err:
+            return public.returnMsg(False, 'nilai tidak valid: %s' % err)
+        ada = self._waf_list_baca(nama)
+        if len(ada) >= self.WAF_LIST_MAKS:
+            return public.returnMsg(False, 'daftar penuh (maksimal %d entri)' % self.WAF_LIST_MAKS)
+        for e in ada:
+            if e == simpan:
+                return public.returnMsg(False, 'nilai sudah ada di daftar')
+            if rentang is not None:
+                b2, r2, er2 = self._waf_ip_normal(e, nama, aman_diri=False)
+                if r2 == rentang:
+                    return public.returnMsg(False, 'nilai sudah ada di daftar')
+        ok, pesan = self._zy_siap()
+        if not ok:
+            return public.returnMsg(False, 'ruleset ZySentinel belum siap: %s' % pesan)
+        ada.append(simpan)
+        try:
+            self._waf_list_tulis(nama, ada)
+        except Exception as ex:
+            return public.returnMsg(False, 'gagal menulis daftar: %s' % ex)
+        return self._zy_terapkan(get, '%s masuk %s.' % (simpan, nama))
+
+    def waf_list_del(self, get):
+        """Hapus satu entri dari daftar."""
+        nama = str(get.get('list') or '').strip()
+        nilai = get.get('value')
+        if nama not in self.WAF_LISTS:
+            return public.returnMsg(False, 'daftar tidak dikenal')
+        if not isinstance(nilai, str) or not nilai.strip() or len(nilai) > 500:
+            return public.returnMsg(False, 'nilai tidak valid')
+        nilai = nilai.strip()
+        ada = self._waf_list_baca(nama)
+        target = None
+        if nama.startswith('ip_'):
+            baku, rentang, err = self._waf_ip_normal(nilai, nama, aman_diri=False)
+            if rentang is not None:
+                for e in ada:
+                    if e == baku:
+                        target = e
+                        break
+                    b2, r2, er2 = self._waf_ip_normal(e, nama, aman_diri=False)
+                    if r2 == rentang:
+                        target = e
+                        break
+        if target is None and nilai in ada:
+            target = nilai
+        if target is None:
+            return public.returnMsg(False, 'nilai tidak ada di daftar')
+        ada.remove(target)
+        try:
+            self._waf_list_tulis(nama, ada)
+        except Exception as ex:
+            return public.returnMsg(False, 'gagal menulis daftar: %s' % ex)
+        return self._zy_terapkan(get, '%s keluar dari %s.' % (target, nama))
+
+    # ---- log audit ----
+    def get_waf_logs(self, get):
+        """Kejadian terbaru dari log audit (Coraza dan ModSecurity memakai
+        format JSON berbeda; kolom intinya dibaca dengan toleran)."""
+        batas = self._int(get, 'limit', 50, 1, 200) or 50
+        p = self.WAF_AUDIT_LOG
+        if not os.path.isfile(p):
+            return public.returnMsg(True, {'ada': False, 'kejadian': []})
+        try:
+            ukuran = os.path.getsize(p)
+            with open(p, 'rb') as f:
+                f.seek(max(0, ukuran - 1024 * 1024))
+                data = f.read().decode('utf-8', 'replace')
+        except Exception as ex:
+            return public.returnMsg(False, 'gagal membaca log audit: %s' % ex)
+        hasil = []
+        for baris in reversed(data.splitlines()):
+            if len(hasil) >= batas:
+                break
+            baris = baris.strip()
+            if not baris.startswith('{'):
+                continue
+            try:
+                j = json.loads(baris)
+            except Exception:
+                continue
+            tx = j.get('transaction') or {}
+            req = j.get('request') or tx.get('request') or {}
+            resp = j.get('response') or tx.get('response') or {}
+            uri = req.get('uri')
+            metode = req.get('method')
+            if not uri and req.get('request_line'):
+                bagian = str(req['request_line']).split(' ')
+                metode = bagian[0]
+                uri = bagian[1] if len(bagian) > 1 else ''
+            ids = re.findall(r'\[id \\?"(\d+)\\?"\]', baris)
+            pesan = re.findall(r'\[msg \\?"((?:[^"\\]|\\.)*)\\?"\]', baris)
+            if not pesan:
+                m = re.search(r'Access denied \(phase \d\)\.\s*([^\[\\"]+)', baris)
+                if m:
+                    pesan = [m.group(1).strip()]
+            hasil.append({
+                'waktu': tx.get('timestamp') or tx.get('time') or '',
+                'ip': tx.get('client_ip') or tx.get('remote_address') or '',
+                'metode': metode or '',
+                'uri': (uri or '')[:300],
+                'status': resp.get('status'),
+                'rule_id': ids[0] if ids else '',
+                'pesan': re.split(r'\\+"|"\]', pesan[0] if pesan else '')[0].strip()[:200],
+                'zysentinel': any(i.startswith('8') and len(i) == 7 for i in ids),
+            })
+        return public.returnMsg(True, {'ada': True, 'kejadian': hasil})
+
+    # ---- peninggalan engine Lua ----
+    def get_legacy_waf(self, get):
+        rc, o, e = self._waf('legacy-status')
+        info = {}
         for baris in o.strip().splitlines():
             if '=' in baris:
                 k, v = baris.split('=', 1)
-                status[k.strip()] = v.strip()
+                info[k.strip()] = v.strip()
+        return public.returnMsg(True, info)
 
-        # Deteksi versi Nginx
-        nginx_ver = '-'
-        rc_nv, o_nv, e_nv = self._sh('/www/server/nginx/sbin/nginx -v', 10)
-        nv_out = (o_nv + e_nv).strip()
-        m_nv = re.search(r'nginx/([\d.]+)', nv_out)
-        if m_nv:
-            nginx_ver = m_nv.group(1)
-        elif nv_out:
-            nginx_ver = nv_out
+    def install_zyrules(self, get):
+        """Pasang ruleset ZySentinel dari payload dan susun konfigurasi (latar)."""
+        return self._coraza_job_start('zyinstall')
 
-        # Deteksi status hook Nginx
-        hooked = 'tidak'
-        if status.get('conf') == 'ada' or \
-           os.path.exists('/www/server/panel/vhost/nginx/sentinel_waf.conf') or \
-           os.path.exists('/www/server/panel/vhost/nginx/free_waf.conf'):
-            hooked = 'ya'
-
-        res = {
-            'nginx_ver': nginx_ver,
-            'lua': status.get('lua', 'tidak-ada'),
-            'hooked': hooked,
-            'loaded': status.get('loaded', 'tidak'),
-            'mode': status.get('mode', 'tidak-diketahui'),
-            'home': status.get('home', os.path.join(self.__PATH, 'waf', 'lua_waf')),
-            'engine_file': status.get('engine_file', 'tidak-ada'),
-            'conf': status.get('conf', 'tidak-ada'),
-            'status': status
-        }
-        return public.returnMsg(True, res)
+    def remove_legacy_waf(self, get):
+        """Pindahkan daftar dari engine Lua lama, cabut hook (nginx -t dan reload
+        terverifikasi), arsipkan lalu hapus berkas Lua. Berjalan di latar."""
+        return self._coraza_job_start('legacy')
 
     # ------------------------------------------------------------------ #
     # backend firewall dan WAF                                             #
@@ -2204,8 +2543,10 @@ class sentinel_main(object):
     def _waf(self, *args):
         self._ensure_core_files()
         waf_script = os.path.join(self.__PATH, 'bin', 'sentinel-waf.sh')
-        cmd = ' '.join(["'%s'" % waf_script] +
-                       ["'%s'" % a for a in args])
+        # shlex.quote: argumen berasal dari parameter pengguna; kutip tunggal
+        # di dalamnya tidak boleh lolos dari string shell.
+        cmd = ' '.join([shlex.quote(waf_script)] +
+                       [shlex.quote(str(a)) for a in args])
         return self._sh(cmd, 60)
 
     def get_waf(self, get):
@@ -2262,7 +2603,7 @@ class sentinel_main(object):
         aksi = (get.get('state') or '').strip()
         if ws not in ('nginx', 'apache', 'openlitespeed'):
             return public.returnMsg(False, 'webserver tidak dikenal')
-        if not site or '/' in site or site.startswith('.'):
+        if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,119}', site):
             return public.returnMsg(False, 'nama situs tidak valid')
         if aksi not in ('on', 'off'):
             return public.returnMsg(False, 'state harus on atau off')
@@ -2272,24 +2613,38 @@ class sentinel_main(object):
         # kegagalan: snippet memang sengaja tidak ditulis. Bedakan pesannya
         # supaya operator tidak mengira perintahnya gagal total.
         if rc == 2:
-            return public.returnMsg(
-                True, 'disimpan sebagai keinginan (engine belum ada). '
-                       'Akan dipasang otomatis setelah konektor WAF dipasang. '
-                       'Rincian: %s' % (o.strip() or e.strip()))
+            # Jangan teruskan stderr skrip mentah (berlabel GALAT): itu
+            # jalur normal, bukan galat. Kembalikan pesan bersih + status.
+            en = (get.get('lang') or '') == 'en'
+            if en:
+                pesan = ('Saved as a preference for %s, but the WAF is NOT active yet: '
+                         'nginx has no WAF connector (ModSecurity/Coraza). No config was '
+                         'changed and nginx was not reloaded. It will be applied '
+                         'automatically once the connector is installed.' % site)
+            else:
+                pesan = ('Pilihan untuk %s disimpan, tetapi WAF BELUM aktif: nginx belum '
+                         'punya konektor WAF (ModSecurity/Coraza). Konfigurasi tidak '
+                         'diubah dan nginx tidak direload. Akan dipasang otomatis setelah '
+                         'konektor terpasang.' % site)
+            return public.returnMsg(True, {'tertunda': True, 'pesan': pesan})
         if rc != 0:
             return public.returnMsg(False, 'gagal: %s'
                                     % (e.strip() or o.strip()))
-        # nginx butuh reload agar snippet berlaku. Tanpa reload, berkas
-        # sudah tertulis tetapi tidak dibaca worker yang sedang jalan.
-        if ws == 'nginx' and aksi == 'on':
-            self._sh('/etc/init.d/nginx reload', 60)
+        # Web server membaca snippet hanya saat reload; reload diverifikasi
+        # (PID worker berubah), bukan percaya output init.d.
+        if str(get.get('reload') or '1') != '0':
+            rc2, o2, e2 = self._waf('reload', ws)
+            if rc2 != 0:
+                return public.returnMsg(
+                    False, 'snippet tertulis tetapi reload %s GAGAL: %s'
+                           % (ws, (e2.strip() or o2.strip())[-300:]))
         return public.returnMsg(True, o.strip() or 'selesai')
 
     def set_waf_rule(self, get):
         """Aktifkan atau nonaktifkan satu rule group OWASP."""
         nama = (get.get('rule') or '').strip()
         aksi = (get.get('state') or '').strip()
-        if not nama or '/' in nama or ' ' in nama:
+        if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,79}', nama):
             return public.returnMsg(False, 'nama rule tidak valid')
         if aksi not in ('on', 'off'):
             return public.returnMsg(False, 'state harus on atau off')
@@ -2297,30 +2652,24 @@ class sentinel_main(object):
         if rc != 0:
             return public.returnMsg(False, 'gagal: %s'
                                     % (e.strip() or o.strip()))
-        # owasp.conf dibaca ulang nginx saat reload. Reload hanya perlu
-        # bila ada vhost nginx yang WAF-nya aktif; kalau tidak ada,
-        # reload hanya mengganggu tanpa guna.
-        rc2, o2, e2 = self._sh(
-            "ls /www/server/panel/vhost/nginx/extension/*/sentinel-waf.conf "
-            "2>/dev/null | head -1", 15)
-        if rc2 == 0 and o2.strip():
-            self._sh('/etc/init.d/nginx reload', 60)
-            return public.returnMsg(
-                True, '%s. nginx direload agar rule baru berlaku'
-                      % (o.strip() or 'selesai'))
+        if str(get.get('reload') or '1') == '0':
+            return public.returnMsg(True, o.strip() or 'selesai')
+        # Reload hanya perlu bila ada vhost yang WAF-nya aktif.
+        rc1, o1, e1 = self._waf('vhosts')
+        aktif = any(b.endswith('|on') for b in o1.splitlines())
+        if aktif:
+            rc2, o2, e2 = self._waf('reload', 'all')
+            if rc2 != 0:
+                return public.returnMsg(False, '%s. Reload GAGAL: %s' % (o.strip(), (e2.strip() or o2.strip())[-300:]))
+            return public.returnMsg(True, '%s. Web server di-reload agar rule berlaku' % (o.strip() or 'selesai'))
         return public.returnMsg(True, o.strip() or 'selesai')
 
     # ------------------------------------------------------------------ #
-    # pemilihan engine WAF dan switch mode                                #
+    # status engine WAF dan switch mode                                   #
     #                                                                     #
-    # Dua engine bisa dipilih:                                            #
-    #   - free_waf : WAF Lua, hanya nginx yang bisa, SUDAH jalan.         #
-    #   - coraza   : Coraza + OWASP CRS. Belum bisa jalan di mesin ini    #
-    #                karena nginx tidak dibangun dengan --with-compat,    #
-    #                jadi konektornya tidak bisa dimuat. Asetnya bisa     #
-    #                disiapkan (unduh otomatis), tapi statusnya "siap,    #
-    #                butuh konektor" sampai nginx dibangun ulang.         #
-    # Pilihan engine disimpan di waf.conf (kunci engine).                 #
+    # Satu engine per web server, satu ruleset: Coraza (nginx), ModSecurity#
+    # v2 (Apache, OpenLiteSpeed). Mode (block/monitor/disable) berlaku ke  #
+    # semuanya dan disimpan di waf.conf (kunci mode).                      #
     # ------------------------------------------------------------------ #
     WAF_BASE = '/www/server/sentinel/waf'
     CORAZA_DIR = '/www/server/sentinel/waf/coraza'
@@ -2342,47 +2691,20 @@ class sentinel_main(object):
         return isi
 
     def get_waf_engine(self, get):
-        """Engine WAF yang tersedia dan mana yang dipilih.
-
-        Menggabungkan tiga sumber: konektor yang BENAR-BENAR ada di
-        nginx (dari sentinel-waf.sh engine), keadaan free_waf, dan
-        aset coraza di disk. UI memakai ini untuk menampilkan dua kartu
-        pilihan tanpa menebak.
-        """
-        rc, o, e = self._sh(
-            "'%s/bin/sentinel-waf.sh' engine" % self.__PATH, 30)
+        """Engine WAF per web server, aset Coraza/CRS di disk, dan ruleset."""
+        rc, o, e = self._waf('engine')
         engine = {}
         if rc == 0:
             for baris in o.strip().splitlines():
                 if '=' in baris:
                     k, v = baris.split('=', 1)
                     engine[k.strip()] = v.strip()
-
-        rc2, o2, e2 = self._sh(
-            "'%s/bin/sentinel-waf.sh' freewaf-status" % self.__PATH, 30)
-        fw = {}
-        if rc2 == 0:
-            for baris in o2.strip().splitlines():
-                if '=' in baris:
-                    k, v = baris.split('=', 1)
-                    fw[k.strip()] = v.strip()
-
-        conf = self._waf_conf_baca()
-        pilih = conf.get('engine', 'free_waf')
-        if pilih not in ('free_waf', 'coraza'):
-            pilih = 'free_waf'
-
-        coraza = self._coraza_info()
         return public.returnMsg(True, {
-            'pilih': pilih,
             'nginx_connector': engine.get('nginx', 'none'),
-            'free_waf': {
-                'lua': fw.get('lua', 'tidak-ada'),
-                'loaded': fw.get('loaded', 'tidak'),
-                'mode': fw.get('mode', 'tidak-diketahui'),
-                'siap': fw.get('lua') == 'ada',
-            },
-            'coraza': coraza,
+            'apache': engine.get('apache', 'tidak-terpasang'),
+            'openlitespeed': engine.get('openlitespeed', 'tidak-terpasang'),
+            'zyrules': engine.get('zyrules', 'hilang') == 'ada',
+            'coraza': self._coraza_info(),
         })
 
     def _coraza_info(self):
@@ -2415,34 +2737,15 @@ class sentinel_main(object):
                 konektor = 'source-ada'
         rc, o, e = self._sh(
             "'%s/bin/sentinel-waf.sh' engine" % self.__PATH, 20)
-        if rc == 0 and 'nginx=coraza' in o:
-            konektor = 'terpasang'
+        modul = 'tidak-ada'
+        if rc == 0:
+            if 'nginx=coraza' in o:
+                konektor = 'terpasang'
+            for baris in o.splitlines():
+                if baris.startswith('coraza_modul='):
+                    modul = baris.split('=', 1)[1].strip()
         return {'aset': ada, 'versi': versi, 'aturan': aturan,
-                'konektor': konektor}
-
-    def set_waf_engine(self, get):
-        """Pilih engine WAF aktif: free_waf atau coraza.
-
-        Memilih coraza TIDAK memaksa rebuild nginx. Bila konektornya
-        belum ada, pilihan tetap tersimpan dan engine aktif dilaporkan
-        apa adanya. Ini menghindari kesan "sudah aktif" padahal belum.
-        """
-        eng = (get.get('engine') or '').strip()
-        if eng not in ('free_waf', 'coraza'):
-            return public.returnMsg(False, 'engine harus free_waf atau coraza')
-        rc, o, e = self._waf('engine-set', eng)
-        if rc != 0:
-            return public.returnMsg(False, 'gagal menyimpan pilihan: %s'
-                                    % (e.strip() or o.strip()))
-        if eng == 'coraza':
-            info = self._coraza_info()
-            if info['konektor'] != 'terpasang':
-                return public.returnMsg(
-                    True, 'Coraza dipilih. Aset %s, tetapi konektor nginx '
-                          'belum terpasang sehingga engine belum berjalan. '
-                          'Aktifkan setelah konektor dipasang.'
-                          % ('siap' if info['aset'] else 'BELUM diunduh'))
-        return public.returnMsg(True, 'engine %s dipilih' % eng)
+                'konektor': konektor, 'modul': modul}
 
     def set_waf_mode(self, get):
         """Switch Monitor | Block | Disable untuk engine yang aktif."""
@@ -2450,11 +2753,14 @@ class sentinel_main(object):
         if mode not in ('monitor', 'block', 'disable'):
             return public.returnMsg(False, 'mode harus monitor, block, atau '
                                            'disable')
+        ok, pesan = self._zy_siap()
+        if not ok:
+            return public.returnMsg(False, 'ruleset ZySentinel belum siap: %s' % pesan)
         rc, o, e = self._waf('mode-set', mode)
         if rc != 0:
             return public.returnMsg(False, 'gagal menyetel mode: %s'
                                     % (e.strip() or o.strip()))
-        return public.returnMsg(True, o.strip() or ('mode %s' % mode))
+        return self._zy_terapkan(get, 'Mode WAF: %s.' % mode)
 
     def get_waf_mode(self, get):
         rc, o, e = self._waf('mode-get')
@@ -2468,18 +2774,137 @@ class sentinel_main(object):
                 info[k.strip()] = v.strip()
         return public.returnMsg(True, info)
 
-    def download_coraza(self, get):
-        """Unduh aset Coraza + OWASP CRS bila belum ada.
+    CORAZA_JOB_DIR = '/www/server/panel/logs/zysentinel/coraza'
+    # job latar yang boleh dijalankan -> argumen sentinel-waf.sh
+    CORAZA_JOBS = {
+        'download': ['coraza-download'],
+        'build': ['coraza-build'],
+        'install': ['coraza-install'],
+        'uninstall': ['coraza-uninstall'],
+        'legacy': ['legacy-remove'],
+        'zyinstall': ['zyrules-install'],
+    }
 
-        Idempoten: bila aset sudah lengkap dan versi diminta sama,
-        tidak mengunduh ulang. Tahan offline: kegagalan jaringan
-        dilaporkan apa adanya, tidak menandai aset siap.
+    def _coraza_job_pid(self, job='download'):
+        """PID job Coraza bila masih berjalan, selain itu 0."""
+        try:
+            with open(os.path.join(self.CORAZA_JOB_DIR, job + '.pid')) as f:
+                pid = int(f.read().strip())
+            with open('/proc/%d/stat' % pid) as f:
+                if f.read().rsplit(')', 1)[1].split()[0] == 'Z':
+                    return 0
+            with open('/proc/%d/cmdline' % pid, 'rb') as f:
+                if b'sentinel-waf.sh' not in f.read():
+                    return 0
+            return pid
+        except Exception:
+            return 0
+
+    def _coraza_job_start(self, job, extra=None):
+        """Mulai job latar. Hanya satu job Coraza berjalan pada satu waktu,
+        karena semuanya memakai cache dan direktori build yang sama."""
+        for j in self.CORAZA_JOBS:
+            pid = self._coraza_job_pid(j)
+            if pid:
+                return public.returnMsg(True, {
+                    'started': False, 'running': True, 'pid': pid, 'job': j})
+        self._ensure_core_files()
+        skrip = os.path.join(self.__PATH, 'bin', 'sentinel-waf.sh')
+        if not os.path.isfile(skrip):
+            return public.returnMsg(False, 'sentinel-waf.sh tidak ditemukan')
+        os.makedirs(self.CORAZA_JOB_DIR, exist_ok=True)
+        log_f = os.path.join(self.CORAZA_JOB_DIR, job + '.log')
+        rc_f = os.path.join(self.CORAZA_JOB_DIR, job + '.rc')
+        pid_f = os.path.join(self.CORAZA_JOB_DIR, job + '.pid')
+        if os.path.exists(rc_f):
+            os.remove(rc_f)
+        with open(log_f, 'w') as f:
+            f.write('')
+        args = ' '.join("'%s'" % a for a in self.CORAZA_JOBS[job] + (extra or []))
+        # PID ditulis oleh proses itu sendiri ($$); setsid -f melepasnya
+        # dari worker panel sehingga tidak ikut mati saat panel restart.
+        cmd = "echo $$ > '%s'; '%s' %s > '%s' 2>&1; echo $? > '%s'" % (
+            pid_f, skrip, args, log_f, rc_f)
+        subprocess.Popen(['setsid', '-f', 'bash', '-c', cmd],
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, close_fds=True).wait()
+        for _ in range(20):
+            if self._coraza_job_pid(job) or os.path.exists(rc_f):
+                break
+            time.sleep(0.1)
+        return public.returnMsg(True, {'started': True, 'running': True,
+                                       'job': job})
+
+    def download_coraza(self, get):
+        """Mulai unduhan aset Coraza + OWASP CRS di latar belakang.
+
+        Idempoten: bila aset sudah lengkap dan versi sama, skrip tidak
+        mengunduh ulang. Berjalan di latar karena unduhan bisa melewati
+        batas AJAX panel 60 detik; kemajuannya dibaca lewat get_coraza_job.
         """
-        rc, o, e = self._waf('coraza-download')
-        if rc != 0:
-            return public.returnMsg(False, 'unduhan gagal: %s'
-                                    % (e.strip() or o.strip()))
-        return public.returnMsg(True, o.strip() or 'aset Coraza siap')
+        return self._coraza_job_start('download')
+
+    def build_coraza(self, get):
+        """Compile modul dinamis Coraza untuk nginx aktif di latar belakang.
+
+        Bila cache di folder plugin cocok dengan versi dan argumen configure
+        nginx aktif, tidak ada compile ulang. force=1 memaksa compile ulang
+        dari bahan di cache. Biner nginx tidak diubah.
+        """
+        extra = ['--force'] if (get.get('force') or '') in ('1', 'true') else []
+        return self._coraza_job_start('build', extra)
+
+    def install_coraza_module(self, get):
+        """Muat modul Coraza ke nginx aktif (uji, load_module, nginx -t,
+        reload, bukti worker). Ini mengubah nginx produksi; UI wajib
+        meminta konfirmasi lebih dulu."""
+        return self._coraza_job_start('install')
+
+    def uninstall_coraza_module(self, get):
+        """Cabut load_module Coraza dari nginx aktif."""
+        return self._coraza_job_start('uninstall')
+
+    def get_coraza_job(self, get):
+        """Kemajuan job Coraza: tahap n/m, status, rc, dan ekor log."""
+        job = (get.get('job') or 'download')
+        if job not in self.CORAZA_JOBS:
+            return public.returnMsg(False, 'job tidak dikenal')
+        log_f = os.path.join(self.CORAZA_JOB_DIR, job + '.log')
+        rc_f = os.path.join(self.CORAZA_JOB_DIR, job + '.rc')
+        running = bool(self._coraza_job_pid(job))
+        rc = None
+        if not running and os.path.exists(rc_f):
+            try:
+                with open(rc_f) as f:
+                    rc = int(f.read().strip() or 1)
+            except Exception:
+                rc = 1
+        baris = []
+        if os.path.exists(log_f):
+            with open(log_f, 'r', encoding='utf-8', errors='replace') as f:
+                baris = f.read().splitlines()
+        tahap, total, etap = 0, 0, ''
+        for b in baris:
+            m = re.search(r'^\[sentinel-waf\]\s*\[(\d+)/(\d+)\]\s*(.*)$', b)
+            if m:
+                tahap, total, etap = int(m.group(1)), int(m.group(2)), m.group(3)
+        # Job yang mati tanpa rc (mis. dibunuh) tidak boleh terlihat
+        # "berjalan" selamanya di UI.
+        if not running and rc is None:
+            rc = 1
+        return public.returnMsg(True, {
+            'job': job, 'running': running, 'rc': rc, 'tahap': tahap,
+            'total': total, 'etap': etap, 'log': '\n'.join(baris[-80:])})
+
+    def get_coraza_cache(self, get):
+        """Status cache modul Coraza terhadap nginx aktif (key=value)."""
+        rc, o, e = self._waf('coraza-cache')
+        info = {}
+        for baris in o.strip().splitlines():
+            if '=' in baris:
+                k, v = baris.split('=', 1)
+                info[k.strip()] = v.strip()
+        return public.returnMsg(True, info)
 
     def coraza_download(self, get):
         """Unduh aset Coraza + OWASP CRS (alias untuk download_coraza)."""
@@ -2823,13 +3248,13 @@ class sentinel_main(object):
         mode = (get.get('mode') or 'block').strip().lower()
         if mode not in ('block', 'allow'):
             return public.returnMsg(False, 'mode harus block atau allow')
-        negara = (get.get('negara') or '').upper().replace(' ', '')
+        negara = str(get.get('negara') or '').upper().replace(' ', '')
         kode_valid = self._geo_kode_valid()
         daftar = [x for x in negara.split(',') if x]
         if not daftar:
             return public.returnMsg(False, 'pilih minimal satu negara')
         for k in daftar:
-            if len(k) != 2 or (kode_valid and k not in kode_valid):
+            if not re.fullmatch(r'[A-Z]{2}', k) or (kode_valid and k not in kode_valid):
                 return public.returnMsg(
                     False, 'kode negara tidak dikenal: %s (contoh sah: '
                            'CN, RU, US)' % k)
@@ -2961,9 +3386,10 @@ class sentinel_main(object):
 
     def review_decide(self, get):
         """Operator memutuskan satu IP: disetujui (diblokir) atau ditolak."""
-        ip = (get.get('ip') or '').strip()
-        if not ip or self._ipnum(ip) == 0:
-            return public.returnMsg(False, 'alamat IP tidak valid')
+        net, err = parse_v4(get.get('ip'), cidr=False, tujuan='blokir')
+        if err:
+            return public.returnMsg(False, 'alamat IP tidak valid: %s' % err)
+        ip = str(net.network_address)
         aksi = (get.get('aksi') or get.get('act') or get.get('sub_action') or (get.get('action') if get.get('action') != 'a' else None) or '').strip()
         if aksi not in ('setuju', 'tolak'):
             return public.returnMsg(
@@ -2973,8 +3399,13 @@ class sentinel_main(object):
         if aksi == 'setuju':
             # Diperlakukan sebagai ban biasa lewat guardctl supaya ia
             # supaya masuk ipset dan ikut aturan kernel seperti ban manual lain.
+            # Pagar anti-lockout yang sama dengan ban_ip: jangan memutus diri sendiri.
+            if ip in (self._self_ip(), self._req_ip()):
+                return public.returnMsg(
+                    False, 'tidak boleh memblokir alamat server ini atau alamat '
+                           'Anda yang sedang mengakses panel: %s' % ip)
             rc, o, e = self._sh(
-                "'%s/bin/guardctl' ban '%s'" % (self.__PATH, ip), 20)
+                '%s ban %s' % (shlex.quote('%s/bin/guardctl' % self.__PATH), shlex.quote(ip)), 20)
             if rc != 0 or '"ok":true' not in o:
                 return public.returnMsg(
                     False, 'gagal memblokir: %s' % (o.strip() or e.strip()))
@@ -3029,20 +3460,30 @@ class sentinel_main(object):
     def _notify_conf_path(self):
         return os.path.join(self.__PATH, 'etc', 'notify.conf')
 
-    def get_notif_conf(self, get):
-        """Status notifikasi tanpa membocorkan token ke layar."""
-        jalan = self._notify_conf_path()
+    def _notif_baca(self):
+        """Isi notify.conf sebagai dict, dibaca dengan shlex (tanpa menjalankan shell).
+        Mengerti nilai bertanda kutip tunggal (format baru) maupun ganda (format lama)."""
         isi = {}
         try:
-            with open(jalan, 'r') as f:
+            with open(self._notify_conf_path(), 'r') as f:
                 for baris in f:
                     b = baris.strip()
                     if not b or b.startswith('#') or '=' not in b:
                         continue
                     k, v = b.split('=', 1)
-                    isi[k.strip()] = v.strip().strip('"')
+                    try:
+                        parts = shlex.split(v.strip())
+                        isi[k.strip()] = parts[0] if parts else ''
+                    except ValueError:
+                        isi[k.strip()] = v.strip().strip('"\'')
         except Exception:
             pass
+        return isi
+
+    def get_notif_conf(self, get):
+        """Status notifikasi tanpa membocorkan token ke layar."""
+        jalan = self._notify_conf_path()
+        isi = self._notif_baca()
 
         url = isi.get('NOTIFY_URL', '')
         token = isi.get('NOTIFY_TOKEN', '')
@@ -3097,6 +3538,15 @@ class sentinel_main(object):
                 False, 'URL harus diawali http:// atau https://')
         if len(url) > 500:
             return public.returnMsg(False, 'URL terlalu panjang')
+        # Berkas notify.conf di-source oleh shell root dan nilainya masuk ke
+        # sed di guardctl: hanya karakter URL biasa yang boleh lewat.
+        if url and not re.fullmatch(r"[A-Za-z0-9._~:/?#@&=%+,;!*-]+", url):
+            return public.returnMsg(
+                False, 'URL memuat karakter yang tidak diizinkan (hanya huruf, angka, dan . _ ~ : / ? # @ & = % + , ; ! * -)')
+        if token is not None and str(token) != '' \
+                and not re.fullmatch(r"[A-Za-z0-9._~:/+=@,-]{1,300}", str(token)):
+            return public.returnMsg(
+                False, 'token memuat karakter yang tidak diizinkan atau terlalu panjang')
 
         maks = self._int(get, 'maks', 5, 1, 20)
         batch = self._int(get, 'batch', 20, 1, 200)
@@ -3116,18 +3566,19 @@ class sentinel_main(object):
             '# Ditulis ulang dari panel. Nilai token TIDAK ditampilkan',
             '# di layar, tapi tetap ada di berkas ini.',
             '',
-            'NOTIFY_URL="%s"' % url.replace('"', ''),
+            'NOTIFY_URL=%s' % shlex.quote(url),
         ]
         # Token hanya ditulis kalau operator mengirimnya. Kalau tidak,
         # token yang sudah ada dibiarkan supaya tidak terhapus tidak
         # sengaja setiap kali URL diubah.
         if token is not None and str(token) != '':
-            isi.append('NOTIFY_TOKEN="%s"' % str(token).replace('"', ''))
+            isi.append('NOTIFY_TOKEN=%s' % shlex.quote(str(token)))
         elif token_lama:
-            isi.append('NOTIFY_TOKEN=""')
+            # nilai lama dipertahankan (berkas ditulis ulang utuh)
+            isi.append('NOTIFY_TOKEN=%s' % shlex.quote(self._notif_nilai('NOTIFY_TOKEN')))
 
         isi += [
-            'NOTIFY_KIND="%s"' % self._only(get, 'kind', 'semua', 20),
+            'NOTIFY_KIND=%s' % shlex.quote(re.sub(r'[^A-Za-z0-9_,-]', '', self._only(get, 'kind', 'semua', 20)) or 'semua'),
             'SENTINEL_NOTIF_MAX="%d"' % maks,
             'SENTINEL_NOTIF_BATCH="%d"' % batch,
             'SENTINEL_NOTIF_TIMEOUT="%d"' % timeout,
@@ -3143,23 +3594,19 @@ class sentinel_main(object):
 
         # Daemon harus tahu URL barunya supaya dia menulis antrean.
         if url:
-            self._sh("'%s/bin/guardctl' set notify_url '%s'" % (self.__PATH, url.replace("'", "")), 20)
+            self._sh('%s set notify_url %s' % (
+                shlex.quote(os.path.join(self.__PATH, 'bin', 'guardctl')), shlex.quote(url)), 20)
         self.service_action({'action': 'restart'})
         if self._is_systemd():
             self._sh('systemctl restart sentinel-notify.timer', 30)
         return public.returnMsg(True, 'tujuan notifikasi disimpan')
 
+    def _notif_nilai(self, kunci):
+        """Nilai tersimpan satu kunci di notify.conf."""
+        return self._notif_baca().get(kunci, '')
+
     def _notif_ada(self, kunci):
-        try:
-            with open(self._notify_conf_path(), 'r') as f:
-                for baris in f:
-                    b = baris.strip()
-                    if b.startswith(kunci + '='):
-                        v = b.split('=', 1)[1].strip().strip('"')
-                        return bool(v)
-        except Exception:
-            pass
-        return False
+        return bool(self._notif_baca().get(kunci, ''))
 
     def test_notif(self, get):
         """Kirim satu notifikasi uji dan laporkan hasilnya apa adanya."""
@@ -3444,6 +3891,56 @@ class sentinel_main(object):
     # ------------------------------------------------------------------ #
     # Antivirus (ClamAV) & Integritas File                               #
     # ------------------------------------------------------------------ #
+    AV_ENGINES = ('clamav', 'rkhunter', 'both', 'all', 'judol', 'ransomware',
+                  'mining', 'sage', 'ai', 'scan-ai')
+    QUAR_DIR = '/www/server/sentinel/av/quarantine'
+
+    @staticmethod
+    def _av_label(label, path):
+        """Label hanya [A-Za-z0-9._-]; selalu disaring, termasuk target sistem."""
+        if not label:
+            label = os.path.basename(str(path).rstrip('/')) or 'root'
+        label = ''.join(c for c in label if c.isalnum() or c in '._-')
+        return label[:64] or 'target'
+
+    @staticmethod
+    def _av_path(raw, harus_dir=True):
+        """Path pemindaian: tanpa karakter kontrol/NUL, di-realpath, harus ada.
+        (path, None) atau (None, pesan)."""
+        if not isinstance(raw, str) or not raw.strip():
+            return None, 'Path target pemindaian wajib diisi'
+        raw = raw.strip()
+        if len(raw) > 1024 or re.search(r'[\x00-\x1f\x7f]', raw):
+            return None, 'Path memuat karakter tidak valid atau terlalu panjang'
+        real = os.path.realpath(raw)
+        if harus_dir:
+            if not os.path.isdir(real):
+                return None, 'Direktori tidak valid atau tidak ditemukan: %s' % _aman(raw, 80)
+        elif not (os.path.isdir(real) or os.path.isfile(real)):
+            return None, 'Path target pemindaian tidak ditemukan: %s' % _aman(raw, 80)
+        return real, None
+
+    def _av_engine(self, get):
+        eng = str(get.get('engine', 'both')).strip().lower() or 'both'
+        if eng not in self.AV_ENGINES:
+            return None, 'Engine tidak dikenal: %s (pilih: %s)' % (
+                _aman(eng, 20), ', '.join(self.AV_ENGINES))
+        return eng, None
+
+    @staticmethod
+    def _vhost_valid(v):
+        return bool(re.fullmatch(r'[A-Za-z0-9._-]{1,120}', v)) and '..' not in v
+
+    def _quar_meta_valid(self, meta):
+        """Berkas .meta harus benar-benar di dalam direktori karantina setelah
+        realpath. Pemeriksaan awalan teks saja bisa dilewati dengan '../'."""
+        if not isinstance(meta, str) or re.search(r'[\x00-\x1f\x7f]', meta):
+            return None
+        real = os.path.realpath(meta.strip())
+        if not real.endswith('.meta') or not real.startswith(self.QUAR_DIR + '/'):
+            return None
+        return real if os.path.isfile(real) else None
+
     def _av(self, subcommand, *args):
         """Panggil skrip pengelola Antivirus (sentinel-av.sh)."""
         skrip = self._p('bin', 'sentinel-av.sh')
@@ -3595,17 +4092,13 @@ class sentinel_main(object):
 
     def av_scan(self, get):
         """Mulai pemindaian antivirus untuk satu direktori / vhost."""
-        path = str(get.get('path', '')).strip()
-        label = self._only(get, 'label', '')
-        engine = str(get.get('engine', 'both')).strip().lower()
-        if engine not in ('clamav', 'rkhunter', 'both', 'all', 'judol', 'ransomware', 'mining', 'sage', 'ai', 'scan-ai'):
-            engine = 'both'
-
-        if not path or not os.path.isdir(path):
-            return public.returnMsg(False, 'Direktori vhost tidak valid atau tidak ditemukan: %s' % path)
-        if not label:
-            label = os.path.basename(path.rstrip('/'))
-        label = ''.join(c for c in label if c.isalnum() or c in '._-')
+        engine, err = self._av_engine(get)
+        if err:
+            return public.returnMsg(False, err)
+        path, err = self._av_path(get.get('path', ''))
+        if err:
+            return public.returnMsg(False, err)
+        label = self._av_label(self._only(get, 'label', ''), path)
 
         sync = str(get.get('sync', '0')) == '1'
         if sync:
@@ -3635,9 +4128,9 @@ class sentinel_main(object):
 
     def av_scan_start(self, get):
         """Mulai pemindaian realtime streaming (ClamAV, Rkhunter, Ransomware, Judol, Mining, SAGE AI Safety, atau All-in-One)."""
-        engine = str(get.get('engine', 'both')).strip().lower()
-        if engine not in ('clamav', 'rkhunter', 'both', 'all', 'judol', 'ransomware', 'mining', 'sage', 'ai', 'scan-ai'):
-            engine = 'both'
+        engine, err = self._av_engine(get)
+        if err:
+            return public.returnMsg(False, err)
 
         target_type = str(get.get('target_type', 'vhost')).strip().lower()
         path = str(get.get('path', '')).strip()
@@ -3646,14 +4139,12 @@ class sentinel_main(object):
         if target_type == 'system' or path in ('system', '/'):
             target_type = 'system'
             path = '/'
-            if not label:
-                label = 'system'
+            label = self._av_label(label or 'system', path)
         else:
-            if not path or (not os.path.isdir(path) and not os.path.isfile(path)):
-                return public.returnMsg(False, 'Path direktori atau target pemindaian tidak valid: %s' % path)
-            if not label:
-                label = os.path.basename(path.rstrip('/'))
-            label = ''.join(c for c in label if c.isalnum() or c in '._-')
+            path, err = self._av_path(path, harus_dir=False)
+            if err:
+                return public.returnMsg(False, err)
+            label = self._av_label(label, path)
 
         # Cek apakah ada proses pemindaian yang masih aktif
         pid_f = self._p('run', 'active_scan.pid')
@@ -3678,8 +4169,11 @@ class sentinel_main(object):
         except Exception:
             pass
 
-        cmd = "nohup '%s' scan-stream '%s' '%s' '%s' >> '%s' 2>&1 &" % (
-            skrip, engine, path, label, log_f
+        # shlex.quote: path dan label berasal dari masukan pengguna; kutip
+        # tunggal di dalamnya tidak boleh bisa keluar dari argumen.
+        cmd = "nohup %s scan-stream %s %s %s >> %s 2>&1 &" % (
+            shlex.quote(skrip), shlex.quote(engine), shlex.quote(path),
+            shlex.quote(label), shlex.quote(log_f)
         )
         os.system(cmd)
         return public.returnMsg(True, 'Pemindaian realtime untuk %s (%s) berhasil dimulai' % (label, engine))
@@ -3740,6 +4234,15 @@ class sentinel_main(object):
             try:
                 with open(pid_f, 'r') as f:
                     p = int(f.read().strip())
+                # PID dari berkas bisa basi atau diubah pihak lain: hanya proses
+                # pemindaian milik plugin ini yang boleh dihentikan.
+                try:
+                    with open('/proc/%d/cmdline' % p, 'rb') as cf:
+                        cmd = cf.read().replace(b'\x00', b' ').decode('utf-8', 'replace')
+                except Exception:
+                    cmd = ''
+                if p > 1 and not re.search(r'clamscan|clamdscan|sentinel-av|sentinel-upload-scan', cmd):
+                    p = 0
                 if p > 0:
                     try:
                         os.kill(p, 15)
@@ -3775,6 +4278,99 @@ class sentinel_main(object):
                 pass
 
         return public.returnMsg(True, 'Pemindaian berhasil dihentikan.')
+
+    # ------------------------------------------------------------------ #
+    # pembaruan basis data keamanan sebagai job latar dengan kemajuan      #
+    # ------------------------------------------------------------------ #
+    AVUPD_DIR = '/www/server/panel/logs/zysentinel/avupdate'
+    AVUPD_TASKS = ('db-update', 'rkhunter-propupd', 'rkhunter-update')
+
+    def _avupd_pid(self):
+        try:
+            with open(os.path.join(self.AVUPD_DIR, 'job.pid')) as f:
+                pid = int(f.read().strip())
+            with open('/proc/%d/stat' % pid) as f:
+                if f.read().rsplit(')', 1)[1].split()[0] == 'Z':
+                    return 0
+            with open('/proc/%d/cmdline' % pid, 'rb') as f:
+                if b'sentinel-av.sh' not in f.read():
+                    return 0
+            return pid
+        except Exception:
+            return 0
+
+    def av_update_start(self, get):
+        """Mulai satu atau beberapa tugas pembaruan di latar (tasks=db-update,rkhunter-propupd,...).
+        Berjalan di latar karena freshclam dan rkhunter bisa melewati batas AJAX 60 detik."""
+        mentah = (get.get('tasks') or '').strip()
+        tasks = []
+        for t in mentah.split(','):
+            t = t.strip()
+            if t and t not in tasks:
+                if t not in self.AVUPD_TASKS:
+                    return public.returnMsg(False, 'tugas tidak dikenal: %s' % t[:30])
+                tasks.append(t)
+        if not tasks:
+            return public.returnMsg(False, 'pilih minimal satu tugas pembaruan')
+        pid = self._avupd_pid()
+        if pid:
+            return public.returnMsg(True, {'started': False, 'running': True, 'pid': pid})
+        self._ensure_core_files()
+        skrip = os.path.join(self.__PATH, 'bin', 'sentinel-av.sh')
+        if not os.path.isfile(skrip):
+            return public.returnMsg(False, 'sentinel-av.sh tidak ditemukan')
+        os.makedirs(self.AVUPD_DIR, exist_ok=True)
+        log_f = os.path.join(self.AVUPD_DIR, 'job.log')
+        rc_f = os.path.join(self.AVUPD_DIR, 'job.rc')
+        pid_f = os.path.join(self.AVUPD_DIR, 'job.pid')
+        if os.path.exists(rc_f):
+            os.remove(rc_f)
+        with open(log_f, 'w') as f:
+            f.write('')
+        cmd = "echo $$ > %s; %s update-batch %s > %s 2>&1; echo $? > %s" % (
+            shlex.quote(pid_f), shlex.quote(skrip), ' '.join(shlex.quote(t) for t in tasks),
+            shlex.quote(log_f), shlex.quote(rc_f))
+        subprocess.Popen(['setsid', '-f', 'bash', '-c', cmd], stdin=subprocess.DEVNULL,
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, close_fds=True).wait()
+        for _ in range(20):
+            if self._avupd_pid() or os.path.exists(rc_f):
+                break
+            time.sleep(0.1)
+        return public.returnMsg(True, {'started': True, 'running': True, 'tasks': tasks})
+
+    def get_av_update_job(self, get):
+        """Kemajuan job pembaruan: tahap n/m, hasil per tugas, status, dan ekor log."""
+        log_f = os.path.join(self.AVUPD_DIR, 'job.log')
+        rc_f = os.path.join(self.AVUPD_DIR, 'job.rc')
+        running = bool(self._avupd_pid())
+        rc = None
+        if not running and os.path.exists(rc_f):
+            try:
+                with open(rc_f) as f:
+                    rc = int(f.read().strip() or 1)
+            except Exception:
+                rc = 1
+        baris = []
+        if os.path.exists(log_f):
+            with open(log_f, 'r', encoding='utf-8', errors='replace') as f:
+                baris = f.read().splitlines()
+        tahap, total, etap = 0, 0, ''
+        hasil = {}
+        for b in baris:
+            m = re.search(r'^\[sentinel-av\]\s*\[(\d+)/(\d+)\]\s*(.*)$', b)
+            if not m:
+                continue
+            n, total = int(m.group(1)), int(m.group(2))
+            mm = re.match(r'^selesai rc=(\d+) \((\d+) dtk\)$', m.group(3))
+            if mm:
+                hasil[n] = {'rc': int(mm.group(1)), 'dtk': int(mm.group(2))}
+            else:
+                tahap, etap = n, m.group(3)
+        if not running and rc is None:
+            rc = 1
+        return public.returnMsg(True, {
+            'running': running, 'rc': rc, 'tahap': tahap, 'total': total, 'etap': etap,
+            'hasil': hasil, 'log': '\n'.join(baris[-80:])})
 
     def rkhunter_propupd(self, get):
         """Perbarui database file properties hash Rkhunter."""
@@ -3855,10 +4451,11 @@ class sentinel_main(object):
 
     def av_restore(self, get):
         """Kembalikan berkas dari karantina ke lokasi asalnya."""
-        qid = self._only(get, 'id', '')
+        qid = str(get.get('id') or '').strip()
         if not qid:
             return public.returnMsg(False, 'ID karantina tidak boleh kosong')
-        qid = ''.join(c for c in qid if c.isalnum() or c in '._-')
+        if not re.fullmatch(r'[A-Za-z0-9._-]{1,120}', qid) or '..' in qid:
+            return public.returnMsg(False, 'Format ID karantina tidak valid')
         rc, o, e = self._av('quarantine-restore', qid)
         if rc == 0:
             return public.returnMsg(True, o.strip() or 'Berkas berhasil dikembalikan dari karantina')
@@ -3866,10 +4463,11 @@ class sentinel_main(object):
 
     def av_delete(self, get):
         """Hapus satu berkas karantina secara permanen."""
-        qid = self._only(get, 'id', '')
+        qid = str(get.get('id') or '').strip()
         if not qid:
             return public.returnMsg(False, 'ID karantina tidak boleh kosong')
-        qid = ''.join(c for c in qid if c.isalnum() or c in '._-')
+        if not re.fullmatch(r'[A-Za-z0-9._-]{1,120}', qid) or '..' in qid:
+            return public.returnMsg(False, 'Format ID karantina tidak valid')
         rc, o, e = self._av('quarantine-delete', qid)
         if rc == 0:
             return public.returnMsg(True, o.strip() or 'Berkas karantina berhasil dihapus permanen')
@@ -3888,13 +4486,10 @@ class sentinel_main(object):
 
     def av_baseline(self, get):
         """Rekam baseline integritas SHA-256 untuk berkas web pada vhost."""
-        path = str(get.get('path', '')).strip()
-        label = self._only(get, 'label', '')
-        if not path or not os.path.isdir(path):
-            return public.returnMsg(False, 'Direktori vhost tidak valid atau tidak ditemukan: %s' % path)
-        if not label:
-            label = os.path.basename(path.rstrip('/'))
-        label = ''.join(c for c in label if c.isalnum() or c in '._-')
+        path, err = self._av_path(get.get('path', ''))
+        if err:
+            return public.returnMsg(False, err)
+        label = self._av_label(self._only(get, 'label', ''), path)
         rc, o, e = self._av('baseline', path, label)
         if rc == 0:
             return public.returnMsg(True, o.strip() or 'Baseline integritas berhasil direkam')
@@ -3902,13 +4497,10 @@ class sentinel_main(object):
 
     def av_check(self, get):
         """Periksa integritas berkas terhadap baseline yang tersimpan."""
-        path = str(get.get('path', '')).strip()
-        label = self._only(get, 'label', '')
-        if not path or not os.path.isdir(path):
-            return public.returnMsg(False, 'Direktori vhost tidak valid atau tidak ditemukan: %s' % path)
-        if not label:
-            label = os.path.basename(path.rstrip('/'))
-        label = ''.join(c for c in label if c.isalnum() or c in '._-')
+        path, err = self._av_path(get.get('path', ''))
+        if err:
+            return public.returnMsg(False, err)
+        label = self._av_label(self._only(get, 'label', ''), path)
         rc, o, e = self._av('check', path, label)
         if rc == 0:
             return public.returnMsg(True, o.strip() or 'Pemeriksaan integritas selesai')
@@ -4022,12 +4614,7 @@ class sentinel_main(object):
             except Exception:
                 pass
                 
-        waf_engine = 'free_waf'
-        try:
-            c = self._waf_conf_baca()
-            waf_engine = c.get('engine', 'free_waf')
-        except Exception:
-            pass
+        waf_engine = 'coraza'
             
         ban_count = 0
         try:
@@ -4217,26 +4804,52 @@ class sentinel_main(object):
             return public.returnMsg(False, 'Gagal membaca whitelist: %s' % str(e))
 
     def add_proc_whitelist(self, get):
-        """Tambah aturan whitelist proses baru."""
-        name = str(get.get('name', '')).strip()
+        """Tambah aturan whitelist proses baru. Masukan divalidasi ketat."""
+        name, err = teks_aman(str(get.get('name', '')), 80, 'Nama', boleh_kosong=True)
+        if err:
+            return public.returnMsg(False, err)
         w_type = str(get.get('type', 'cmdline_match')).strip().lower()
-        pattern = str(get.get('pattern', '')).strip()
-        remark = str(get.get('remark', '')).strip()
+        if w_type not in ('cmdline_match', 'exe_exact', 'basename', 'cwd_match'):
+            return public.returnMsg(
+                False, 'Tipe harus cmdline_match, exe_exact, basename, atau cwd_match')
+        pattern, err = teks_aman(str(get.get('pattern', '')), 300, 'Pola pencocokan (pattern)')
+        if err:
+            return public.returnMsg(False, err)
+        remark, err = teks_aman(str(get.get('remark', '')), 200, 'Catatan', boleh_kosong=True)
+        if err:
+            return public.returnMsg(False, err)
 
-        if not pattern:
-            return public.returnMsg(False, 'Pola pencocokan (pattern) wajib diisi')
+        # Pola yang terlalu longgar mematikan EDR: cmdline_match adalah
+        # substring, jadi pola 1-2 huruf meloloskan hampir semua proses.
+        if w_type in ('cmdline_match', 'basename') and len(pattern) < 3:
+            return public.returnMsg(False, 'Pola terlalu pendek (minimal 3 karakter)')
+        if w_type == 'basename' and ('/' in pattern or re.search(r'\s', pattern)):
+            return public.returnMsg(False, 'basename tidak boleh memuat "/" atau spasi')
+        if w_type in ('exe_exact', 'cwd_match'):
+            if '..' in pattern.split('/'):
+                return public.returnMsg(False, 'Path tidak boleh memuat ".."')
+            if re.search(r'\s', pattern):
+                return public.returnMsg(False, 'Path tidak boleh memuat spasi')
+        if w_type == 'cwd_match':
+            if not pattern.startswith('/') or len([x for x in pattern.split('/') if x]) < 2:
+                return public.returnMsg(
+                    False, 'cwd_match harus path absolut minimal dua tingkat '
+                           '(contoh /www/wwwroot/situs); "/" meloloskan semua proses')
+        if w_type == 'exe_exact' and not pattern.startswith('/') and '/' in pattern:
+            return public.returnMsg(False, 'exe_exact: pakai path absolut atau nama biner saja')
         if not name:
             name = 'Whitelist ' + pattern[:30]
-        if w_type not in ('cmdline_match', 'exe_exact', 'basename', 'cwd_match'):
-            w_type = 'cmdline_match'
 
         try:
             rules = []
             if os.path.isfile(self.PROC_WHITELIST_CONF):
                 with open(self.PROC_WHITELIST_CONF, 'r', encoding='utf-8', errors='ignore') as f:
                     rules = json.load(f)
+            for r in rules:
+                if r.get('type') == w_type and r.get('pattern') == pattern:
+                    return public.returnMsg(False, 'Aturan yang sama sudah ada (%s)' % r.get('id'))
 
-            rule_id = 'wl-%d' % int(time.time())
+            rule_id = 'wl-%d-%s' % (int(time.time()), uuid.uuid4().hex[:4])
             new_rule = {
                 'id': rule_id,
                 'name': name,
@@ -4260,6 +4873,8 @@ class sentinel_main(object):
         rule_id = str(get.get('id', '')).strip()
         if not rule_id:
             return public.returnMsg(False, 'ID aturan wajib diisi')
+        if not id_valid(rule_id):
+            return public.returnMsg(False, 'Format ID aturan tidak valid')
 
         try:
             if not os.path.isfile(self.PROC_WHITELIST_CONF):
@@ -4283,6 +4898,8 @@ class sentinel_main(object):
         rule_id = str(get.get('id', '')).strip()
         if not rule_id:
             return public.returnMsg(False, 'ID aturan wajib diisi')
+        if not id_valid(rule_id):
+            return public.returnMsg(False, 'Format ID aturan tidak valid')
 
         try:
             if not os.path.isfile(self.PROC_WHITELIST_CONF):
@@ -4320,7 +4937,7 @@ class sentinel_main(object):
         if not os.path.exists(py_bin):
             py_bin = 'python3'
         cmd = [py_bin, script] + list(args)
-        cmd_str = ' '.join(["'%s'" % c for c in cmd])
+        cmd_str = ' '.join(shlex.quote(str(c)) for c in cmd)
         return self._sh(cmd_str, 30)
 
     def get_vhost_upload_scan(self, get):
@@ -4346,7 +4963,7 @@ class sentinel_main(object):
     def toggle_vhost_upload_scan(self, get):
         """Aktifkan atau nonaktifkan pemindaian upload realtime untuk satu vhost."""
         vhost = str(get.get('vhost', '')).strip()
-        if not vhost or '/' in vhost or '..' in vhost:
+        if not self._vhost_valid(vhost):
             return public.returnMsg(False, 'Nama vhost tidak valid')
         rc, o, e = self._upload_scan_cli('toggle-vhost', vhost)
         if rc != 0:
@@ -4362,7 +4979,7 @@ class sentinel_main(object):
         """Setel status upload scan untuk satu vhost (on / off)."""
         vhost = str(get.get('vhost', '')).strip()
         state = str(get.get('state', '')).strip().lower()
-        if not vhost or '/' in vhost or '..' in vhost:
+        if not self._vhost_valid(vhost):
             return public.returnMsg(False, 'Nama vhost tidak valid')
         val = 'on' if state in ['1', 'true', 'on', 'yes'] else 'off'
         rc, o, e = self._upload_scan_cli('set-vhost', vhost, val)
@@ -4377,7 +4994,7 @@ class sentinel_main(object):
     def get_vhost_quarantine(self, get):
         """Daftar berkas karantina per vhost (atau seluruh vhost jika vhost kosong)."""
         vhost = str(get.get('vhost', '')).strip()
-        if vhost and ('/' in vhost or '..' in vhost):
+        if vhost and not self._vhost_valid(vhost):
             return public.returnMsg(False, 'Nama vhost tidak valid')
         args = ['quarantine-list']
         if vhost:
@@ -4393,8 +5010,8 @@ class sentinel_main(object):
 
     def restore_vhost_quarantine(self, get):
         """Pulihkan berkas karantina ke lokasi aslinya dan kembalikan hak akses."""
-        meta = str(get.get('meta', '')).strip()
-        if not meta or not meta.endswith('.meta') or not meta.startswith('/www/server/sentinel/av/quarantine/'):
+        meta = self._quar_meta_valid(str(get.get('meta', '')))
+        if not meta:
             return public.returnMsg(False, 'Berkas metadata karantina tidak valid')
         rc, o, e = self._upload_scan_cli('quarantine-restore', meta)
         if rc != 0:
@@ -4410,8 +5027,8 @@ class sentinel_main(object):
 
     def delete_vhost_quarantine(self, get):
         """Hapus permanen berkas karantina dan metadata-nya."""
-        meta = str(get.get('meta', '')).strip()
-        if not meta or not meta.endswith('.meta') or not meta.startswith('/www/server/sentinel/av/quarantine/'):
+        meta = self._quar_meta_valid(str(get.get('meta', '')))
+        if not meta:
             return public.returnMsg(False, 'Berkas metadata karantina tidak valid')
         rc, o, e = self._upload_scan_cli('quarantine-delete', meta)
         if rc != 0:
@@ -4873,52 +5490,114 @@ class sentinel_main(object):
             'download_url': download_url
         })
 
+    def _update_checksum(self, download_url):
+        """SHA-256 resmi untuk berkas rilis: dari `digest` aset GitHub atau dari
+        aset SHA256SUMS.txt pada rilis yang sama. Mengembalikan '' bila tak ada."""
+        try:
+            req = urllib.request.Request(
+                'https://api.github.com/repos/omysurya/zysentinel/releases/latest',
+                headers={'User-Agent': 'ZySentinel-Updater', 'Accept': 'application/vnd.github.v3+json'})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                rel = json.loads(resp.read().decode('utf-8'))
+        except Exception:
+            return ''
+        nama = ''
+        sums = ''
+        for a in rel.get('assets', []):
+            if a.get('browser_download_url') == download_url:
+                nama = a.get('name', '')
+                dg = str(a.get('digest') or '')
+                if dg.startswith('sha256:') and re.fullmatch(r'[0-9a-f]{64}', dg[7:]):
+                    return dg[7:]
+            if a.get('name') == 'SHA256SUMS.txt':
+                sums = a.get('browser_download_url', '')
+        if sums and nama and sums.startswith('https://github.com/omysurya/zysentinel/'):
+            try:
+                with urllib.request.urlopen(urllib.request.Request(sums, headers={'User-Agent': 'ZySentinel-Updater'}), timeout=10) as r2:
+                    for ln in r2.read(65536).decode('utf-8', 'replace').splitlines():
+                        m = re.match(r'^([0-9a-f]{64})\s+\*?(\S+)$', ln.strip())
+                        if m and m.group(2) == nama:
+                            return m.group(1)
+            except Exception:
+                return ''
+        return ''
+
     def perform_github_update(self, get):
-        """Unduh paket rilis/patch dari GitHub dan jalankan update mandiri."""
+        """Unduh paket rilis dari GitHub, VERIFIKASI SHA-256, lalu jalankan update mandiri.
+
+        Paket yang tidak bisa diverifikasi ditolak: install.sh di dalamnya berjalan
+        sebagai root, jadi menerima paket tanpa pemeriksaan sama dengan memberi
+        akses root kepada siapa pun yang mengendalikan sumber unduhan."""
+        import tempfile
         chk = self.check_github_update(get)
         data = chk.get('msg', {})
-        download_url = data.get('download_url')
-        latest_ver = self._normalize_version(data.get('latest_version', 'v1.6.2'))
-
-        staging_zip = '/tmp/sentinel_update.zip'
-        staging_dir = '/tmp/sentinel_update_staging'
-
+        download_url = data.get('download_url') or ''
+        work = None
         try:
-            if download_url and download_url.startswith('http'):
+            work = tempfile.mkdtemp(prefix='sentinel_update.')   # milik root, 0700
+            staging_zip = os.path.join(work, 'paket.zip')
+            staging_dir = os.path.join(work, 'isi')
+            dari_lokal = False
+
+            if download_url.startswith('https://github.com/omysurya/zysentinel/'):
                 try:
-                    headers = {'User-Agent': 'ZySentinel-Updater/1.6.2'}
-                    req = urllib.request.Request(download_url, headers=headers)
-                    with urllib.request.urlopen(req, timeout=30) as resp, open(staging_zip, 'wb') as out_f:
-                        out_f.write(resp.read())
-                except Exception:
-                    pass
+                    req = urllib.request.Request(download_url, headers={'User-Agent': 'ZySentinel-Updater'})
+                    with urllib.request.urlopen(req, timeout=60) as resp, open(staging_zip, 'wb') as out_f:
+                        total = 0
+                        while True:
+                            blok = resp.read(1 << 20)
+                            if not blok:
+                                break
+                            total += len(blok)
+                            if total > 64 * 1024 * 1024:
+                                raise ValueError('paket terlalu besar')
+                            out_f.write(blok)
+                except Exception as ex:
+                    return public.returnMsg(False, 'Gagal mengunduh paket pembaruan: %s' % str(ex)[:120])
+            else:
+                return public.returnMsg(False, 'Sumber unduhan tidak dikenali; pembaruan dibatalkan.')
 
-            if not os.path.exists(staging_zip) or os.path.getsize(staging_zip) < 1000:
-                if os.path.exists('/www/backup/sentinel.zip'):
-                    self._sh("cp -f /www/backup/sentinel.zip %s" % staging_zip, 5)
+            ref = self._update_checksum(download_url)
+            if not ref:
+                return public.returnMsg(
+                    False, 'Pembaruan dibatalkan: rilis ini tidak menyediakan checksum SHA-256 (digest atau SHA256SUMS.txt) sehingga paket tidak bisa diverifikasi. Pasang manual setelah memeriksa paketnya.')
+            h = hashlib.sha256()
+            with open(staging_zip, 'rb') as f:
+                for blok in iter(lambda: f.read(1 << 20), b''):
+                    h.update(blok)
+            if h.hexdigest() != ref:
+                return public.returnMsg(
+                    False, 'Pembaruan dibatalkan: SHA-256 paket (%s...) tidak cocok dengan checksum rilis (%s...).' % (h.hexdigest()[:12], ref[:12]))
 
-            if not os.path.exists(staging_zip):
-                return public.returnMsg(False, 'Paket pembaruan tidak ditemukan untuk diunduh.')
-
-            self._sh("rm -rf %s && mkdir -p %s" % (staging_dir, staging_dir), 5)
-            self._sh("unzip -o -q %s -d %s" % (staging_zip, staging_dir), 15)
+            # Isi zip diperiksa sebelum diekstrak: tanpa path absolut, '..', atau symlink.
+            import zipfile
+            with zipfile.ZipFile(staging_zip) as z:
+                for zi in z.infolist():
+                    n = zi.filename
+                    if n.startswith('/') or '..' in n.split('/') or ((zi.external_attr >> 16) & 0o170000) == 0o120000:
+                        return public.returnMsg(False, 'Pembaruan dibatalkan: paket memuat path tidak aman (%s).' % n[:60])
+                os.makedirs(staging_dir)
+                z.extractall(staging_dir)
 
             src_plugin = staging_dir
             for root, dirs, files in os.walk(staging_dir):
                 if 'install.sh' in files and 'sentinel_main.py' in files:
                     src_plugin = root
                     break
+            if not os.path.isfile(os.path.join(src_plugin, 'install.sh')):
+                return public.returnMsg(False, 'Pembaruan dibatalkan: paket tidak berisi install.sh plugin.')
 
             plug_dir = os.path.dirname(__file__)
-            self._sh("cp -af %s/* %s/" % (src_plugin, plug_dir), 15)
-
-            self._sh("rm -rf %s %s" % (staging_zip, staging_dir), 5)
+            self._sh("cp -rf --no-dereference %s/. %s/" % (shlex.quote(src_plugin), shlex.quote(plug_dir)), 30)
             # install.sh update memeriksa & memasang prasyarat; jalankan di
             # latar seperti fresh/repair agar tidak terputus timeout AJAX.
             return self._mulai_lifecycle('update', os.path.join(plug_dir, 'install.sh'))
         except Exception as ex:
             self._send_telemetry('error_event', {'error': str(ex)[:50], 'context': 'update'})
             return public.returnMsg(False, 'Gagal mengunduh dan menerapkan update: %s' % str(ex))
+        finally:
+            if work and os.path.isdir(work) and os.path.basename(work).startswith('sentinel_update.'):
+                shutil.rmtree(work, ignore_errors=True)
 
     # -------------------------------------------------------------------------
     # FITUR FEEDBACK & BUGS REPORT (SUBJEK: Feedback | Bugsreport [Topic] [hostname])

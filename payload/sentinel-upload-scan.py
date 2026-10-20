@@ -276,7 +276,13 @@ def scan_file_stream(filepath):
                                 if sres.get('status') == 'INFECTED':
                                     th = sres.get('threats', [{}])[0]
                                     rule_id = th.get('rule_id', 'SAGE.PromptInjection.Detected')
-                                    return 'INFECTED', f"AI.{rule_id}"
+                                    # Heuristik teks (prompt injection) bukan malware: berkas sah
+                                    # (artikel, JSON, JS) bisa memuat frasa itu, dan karantina
+                                    # (chmod 000) membuat situs error. Default HANYA dicatat;
+                                    # karantina otomatis bila operator membuat etc/sage_quarantine.enabled.
+                                    if os.path.exists('/www/server/sentinel/etc/sage_quarantine.enabled'):
+                                        return 'INFECTED', f"AI.{rule_id}"
+                                    log(f"SAGE (hanya dicatat, tidak dikarantina): {filepath} -> {rule_id}")
                             except Exception:
                                 pass
             except Exception as e_sage:
@@ -400,6 +406,29 @@ def record_quarantine_db(vhost, orig_path, q_path, sig, sha, sz):
     except Exception as e:
         log(f"Gagal mencatat karantina ke SQLite: {e}")
 
+RESTORE_ROOTS = ('/www/wwwroot/', '/home/', '/var/www/', '/srv/', '/opt/', '/tmp/')
+
+
+def _restore_aman(orig):
+    """Tujuan pemulihan harus berada di area situs, tanpa symlink, dan tidak menimpa berkas.
+    Pemulihan berjalan sebagai root: tanpa ini penyerang yang menguasai vhost bisa
+    menukar folder asal dengan symlink lalu 'memulihkan' berkasnya ke direktori sistem."""
+    if not orig or not orig.startswith('/') or '\x00' in orig or '..' in orig.split('/'):
+        return False, 'path asal tidak valid'
+    d = os.path.dirname(orig)
+    cur = '/'
+    for part in [x for x in d.split('/') if x]:
+        cur = os.path.join(cur, part)
+        if os.path.islink(cur):
+            return False, 'path asal memuat symlink: %s' % cur
+    real = os.path.realpath(d)
+    if not any((real + '/').startswith(r) for r in RESTORE_ROOTS):
+        return False, 'tujuan di luar area situs: %s' % real
+    if os.path.lexists(orig):
+        return False, 'berkas tujuan sudah ada dan tidak ditimpa: %s' % orig
+    return True, ''
+
+
 def restore_vhost_quarantine(meta_file):
     if not os.path.isfile(meta_file):
         return False, "Berkas metadata tidak ditemukan"
@@ -420,10 +449,15 @@ def restore_vhost_quarantine(meta_file):
         if not orig or not qpath or not os.path.exists(qpath):
             return False, "Berkas fisik karantina tidak ditemukan"
 
+        ok, why = _restore_aman(orig)
+        if not ok:
+            return False, why
         os.makedirs(os.path.dirname(orig), exist_ok=True)
+        if os.path.islink(qpath):
+            return False, 'berkas karantina adalah symlink; dibatalkan'
         os.chmod(qpath, mode)
         os.replace(qpath, orig)
-        os.chown(orig, uid, gid)
+        os.lchown(orig, uid, gid)
         os.chmod(orig, mode)
         os.remove(meta_file)
         log(f"Berkas dipulihkan: {qpath} -> {orig}")

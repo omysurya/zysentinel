@@ -1,0 +1,63 @@
+# ============================================================
+# ZySentinel Rules: konfigurasi dasar mesin (dibuat oleh sentinel-waf.sh)
+# Direktif dipilih dari irisan yang sama di Coraza (nginx) dan ModSecurity v2
+# (Apache, OpenLiteSpeed).
+# ============================================================
+SecRuleEngine @MODE@
+SecRequestBodyAccess On
+SecRequestBodyLimit @BODY_TOTAL@
+SecRequestBodyNoFilesLimit @BODY_NOFILES@
+SecRequestBodyInMemoryLimit 131072
+SecArgumentsLimit 3000
+SecRequestBodyLimitAction Reject
+SecResponseBodyAccess Off
+SecArgumentSeparator &
+SecCookieFormat 0
+
+SecRule REQUEST_HEADERS:Content-Type "@rx ^(?:application(?:/soap\+|/)|text/)xml" \
+    "id:8000200,phase:1,pass,nolog,t:none,t:lowercase,ctl:requestBodyProcessor=XML"
+SecRule REQUEST_HEADERS:Content-Type "@rx ^application/(?:[a-z0-9.+-]+\+)?json" \
+    "id:8000201,phase:1,pass,nolog,t:none,t:lowercase,ctl:requestBodyProcessor=JSON"
+SecRule REQUEST_HEADERS:Content-Type "@rx ^application/x-www-form-urlencoded" \
+    "id:8000202,phase:1,pass,nolog,t:none,t:lowercase,ctl:requestBodyProcessor=URLENCODED"
+
+# Badan permintaan yang gagal diurai tidak boleh lolos tanpa diperiksa (penyerang
+# memakai itu untuk menyelundupkan payload). Variabel-variabel ini ada di Coraza
+# dan ModSecurity v2/v3.
+SecRule REQBODY_ERROR "!@eq 0" \
+    "id:8000210,phase:2,deny,status:400,log,auditlog,t:none,\
+    msg:'ZySentinel: badan permintaan tidak bisa diurai',tag:'zysentinel',tag:'attack-protocol',severity:'CRITICAL'"
+SecRule MULTIPART_STRICT_ERROR "!@eq 0" \
+    "id:8000211,phase:2,deny,status:400,log,auditlog,t:none,\
+    msg:'ZySentinel: multipart tidak sah',tag:'zysentinel',tag:'attack-protocol',severity:'CRITICAL'"
+SecRule MULTIPART_UNMATCHED_BOUNDARY "@eq 1" \
+    "id:8000212,phase:2,deny,status:400,log,auditlog,t:none,\
+    msg:'ZySentinel: batas multipart tidak cocok',tag:'zysentinel',tag:'attack-protocol',severity:'CRITICAL'"
+# Argumen di atas batas dibuang diam-diam oleh Coraza (payload di argumen ke-3001
+# tidak diperiksa). Dengan batas 3000, jumlah >= 3000 berarti ada yang terbuang.
+SecRule &ARGS "@ge 3000" \
+    "id:8000213,phase:2,deny,status:400,log,auditlog,t:none,\
+    msg:'ZySentinel: jumlah argumen melebihi batas',tag:'zysentinel',tag:'attack-protocol',severity:'CRITICAL'"
+
+# Batas badan tanpa berkas. Coraza mengabaikan SecRequestBodyNoFilesLimit, padahal biaya CPU CRS
+# naik linear dengan ukuran badan (satu argumen 1 MB menahan satu worker sekitar 30 detik).
+# Dua aturan menegakkannya: fase 1 dari Content-Length (ditolak sebelum badan dibaca) dan fase 2
+# dari panjang badan sebenarnya (permintaan chunked). Unggahan multipart tidak terkena
+# (isi berkas tidak diperiksa dan dibatasi oleh SecRequestBodyLimit).
+SecRule REQUEST_HEADERS:Content-Length "@gt @BODY_NOFILES@" \
+    "id:8000214,phase:1,deny,status:413,log,auditlog,t:none,\
+    msg:'ZySentinel: badan permintaan (bukan unggahan berkas) melebihi batas',tag:'zysentinel',tag:'attack-protocol',severity:'WARNING',chain"
+    SecRule REQUEST_HEADERS:Content-Type "!@rx ^multipart/form-data" "t:none,t:lowercase"
+SecRule REQUEST_BODY_LENGTH "@gt @BODY_NOFILES@" \
+    "id:8000215,phase:2,deny,status:413,log,auditlog,t:none,\
+    msg:'ZySentinel: badan permintaan (bukan unggahan berkas) melebihi batas',tag:'zysentinel',tag:'attack-protocol',severity:'WARNING',chain"
+    SecRule REQUEST_HEADERS:Content-Type "!@rx ^multipart/form-data" "t:none,t:lowercase"
+
+# Log: hanya permintaan relevan (kena aturan), format JSON
+SecAuditEngine RelevantOnly
+# 4xx kecuali 404, dan semua 5xx (tanpa lookahead: Coraza memakai RE2)
+SecAuditLogRelevantStatus "^(?:5[0-9][0-9]|4(?:0[0-35-9]|[1-9][0-9]))$"
+SecAuditLogParts ABFHZ
+SecAuditLogType Serial
+SecAuditLogFormat JSON
+SecAuditLog @AUDIT_LOG@

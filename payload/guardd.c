@@ -1009,7 +1009,8 @@ static int tailer_open(const char *path, const char *src)
     t->in_use = 1;
     g_tail_n++;
 
-    int fd = open(path, O_RDONLY);
+    /* O_NONBLOCK: FIFO yang ditanam pemilik log tidak boleh membekukan loop utama */
+    int fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
     if (fd < 0) {
         logmsg("gagal buka %s (%s), akan dicoba lagi tiap detik", path, strerror(errno));
         t->degraded = 1;
@@ -2046,13 +2047,15 @@ static void write_status(time_t t)
     size_t o = 0;
     o += (size_t)snprintf(hostbuf + o, sizeof(hostbuf) - o, "[");
     int shown = 0;
-    for (int i = 0; i < g_nhost && o + 400 < sizeof(hostbuf); i++) {
+    for (int i = 0; i < g_nhost && o + 700 < sizeof(hostbuf); i++) {
         agg_t *a = &g_host[i];
         if (!a->req && !a->bytes) continue;
+        char hn[256];   /* nama host berasal dari nama berkas log: wajib di-escape */
+        json_escape(hn, sizeof(hn), g_hostname[i], strlen(g_hostname[i]));
         o += (size_t)snprintf(hostbuf + o, sizeof(hostbuf) - o,
             "%s{\"host\":\"%s\",\"req\":%llu,\"bytes\":%llu,\"s2\":%llu,\"s3\":%llu,"
             "\"s4\":%llu,\"s5\":%llu,\"s429\":%llu}",
-            shown ? "," : "", g_hostname[i],
+            shown ? "," : "", hn,
             (unsigned long long)a->req, (unsigned long long)a->bytes,
             (unsigned long long)a->s2, (unsigned long long)a->s3,
             (unsigned long long)a->s4, (unsigned long long)a->s5,
@@ -2066,7 +2069,7 @@ static void write_status(time_t t)
     int bn = 0;
     bo += (size_t)snprintf(banbuf + bo, sizeof(banbuf) - bo, "[");
     int n_aktif = 0;
-    for (int i = 0; i < g_ban_n && bn < 60; i++) {
+    for (int i = 0; i < g_ban_n && bn < 60 && bo + 400 < sizeof(banbuf); i++) {
         if (!g_ban[i].active || g_ban[i].until <= t) continue;
         n_aktif++;
         char b[32]; u2ip(g_ban[i].ip, b, sizeof(b));
@@ -2093,15 +2096,21 @@ static void write_status(time_t t)
     char top[4096];
     top_ips(top, sizeof(top), 20);
 
-    char logs[4096];
+    char logs[16384];
     size_t lo = 0;
     int ln = 0;
     lo += (size_t)snprintf(logs + lo, sizeof(logs) - lo, "[");
-    for (int i = 0; i < g_tail_n; i++) {
+    /* Batas ukuran diperiksa SEBELUM menulis tiap entri: o += snprintf() melewati
+     * ukuran buffer membuat (sizeof - o) menjadi size_t raksasa dan menulis di luar
+     * buffer (stack overflow yang bisa dipicu penyerang lewat banyak berkas log). */
+    for (int i = 0; i < g_tail_n && lo + 1500 < sizeof(logs); i++) {
         if (!g_tail[i].in_use) continue;
+        char ep[512], eh[256];
+        json_escape(ep, sizeof(ep), g_tail[i].path, strlen(g_tail[i].path));
+        json_escape(eh, sizeof(eh), g_tail[i].host, strlen(g_tail[i].host));
         lo += (size_t)snprintf(logs + lo, sizeof(logs) - lo,
             "%s{\"path\":\"%s\",\"host\":\"%s\",\"lines\":%llu}",
-            ln ? "," : "", g_tail[i].path, g_tail[i].host,
+            ln ? "," : "", ep, eh,
             (unsigned long long)g_tail[i].lines);
         ln++;
     }
@@ -2764,7 +2773,7 @@ int main(int argc, char **argv)
     char lockpath[PATH_MAX];
     snprintf(pidpath, PATH_MAX, "%s/guardd.pid", cfg.run_dir);
     snprintf(lockpath, PATH_MAX, "%s/.guardd.lock", cfg.run_dir);
-    int lockfd = open(lockpath, O_RDWR | O_CREAT, 0640);
+    int lockfd = open(lockpath, O_RDWR | O_CREAT | O_CLOEXEC, 0640);
     if (lockfd >= 0 && flock(lockfd, LOCK_EX | LOCK_NB) != 0)
         die("guardd sudah berjalan (kunci_instans dipegang: %s)", lockpath);
 
@@ -2915,10 +2924,10 @@ int main(int argc, char **argv)
             if (stat(t->path, &pst) != 0) { t->degraded = 1; continue; }
             if (pst.st_ino != t->ino || pst.st_dev != t->dev) {
                 close(t->fd);
-                int nfd = open(t->path, O_RDONLY);
+                int nfd = open(t->path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
                 if (nfd < 0) { t->degraded = 1; continue; }
                 struct stat nst;
-                if (fstat(nfd, &nst) != 0) { close(nfd); t->degraded = 1; continue; }
+                if (fstat(nfd, &nst) != 0 || !S_ISREG(nst.st_mode)) { close(nfd); t->degraded = 1; continue; }
                 t->fd = nfd;
                 t->ino = nst.st_ino;
                 t->dev = nst.st_dev;

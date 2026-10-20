@@ -1,0 +1,17 @@
+# Tingkat 3: pustaka HTTP generik. Dapat mengganggu API dan monitoring.
+curl/
+wget/
+python-requests
+python-urllib
+python-httpx
+go-http-client
+okhttp
+scrapy
+aiohttp
+node-fetch
+axios/
+guzzlehttp
+java/
+jakarta commons
+php/
+libwww

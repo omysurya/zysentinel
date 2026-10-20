@@ -364,7 +364,11 @@ def scan_once(target_uid=DEFAULT_WEB_UID, mode="enforce"):
         # Aturan Proteksi Benteng Anti-Tamper:
         # Berlaku untuk SEMUA user non-root (UID != 0)!
         # Melarang keras modifikasi, uninstall, penghapusan, atau penghentian Sentinel & plugin panel.
-        if not is_git_cmd and cmdline and any(p in cmdline for p in (
+        # Hanya untuk user web server: shell webshell yang menyentuh plugin. Dulu berlaku
+        # untuk SEMUA user non-root, sehingga admin non-root yang cuma membaca log
+        # (tail /www/server/sentinel/log/...) atau aplikasi bernama "sentinel-xxx" ikut
+        # di-SIGKILL.
+        if is_web_user and not is_git_cmd and cmdline and any(p in cmdline for p in (
             "/www/server/sentinel", "/www/server/panel/plugin",
             "/etc/systemd/system/sentinel", "sentinel.service", "sentinel-",
             "guardd", "guardctl", "uninstall.lock"

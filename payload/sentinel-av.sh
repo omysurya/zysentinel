@@ -179,10 +179,23 @@ cv_restore_fallback() {
   gid=$(grep '^gid=' "$meta" | cut -d= -f2-)
   mode=$(grep '^mode=' "$meta" | cut -d= -f2-)
 
-  [ -f "$qpath" ] || { err "berkas karantina hilang: $qpath"; return 1; }
-  mkdir -p "$(dirname "$orig")" 2>/dev/null
-  mv -f "$qpath" "$orig" || return 1
-  chown "${uid:-0}:${gid:-0}" "$orig" 2>/dev/null
+  [ -f "$qpath" ] && [ ! -L "$qpath" ] || { err "berkas karantina hilang atau symlink: $qpath"; return 1; }
+  # Pemulihan berjalan sebagai root: tujuan harus absolut, tanpa '..' dan tanpa
+  # symlink, berada di area situs, dan tidak boleh menimpa berkas yang ada.
+  case "$orig" in /*) ;; *) err "path asal tidak valid"; return 1 ;; esac
+  case "/$orig/" in */../*) err "path asal memuat .."; return 1 ;; esac
+  local odir; odir="$(dirname "$orig")"
+  if [ "$(realpath -m "$odir")" != "$(realpath -sm "$odir")" ]; then
+    err "path asal memuat symlink: $odir"; return 1
+  fi
+  case "$(realpath -m "$odir")/" in
+    /www/wwwroot/*|/home/*|/var/www/*|/srv/*|/opt/*|/tmp/*) ;;
+    *) err "tujuan di luar area situs: $odir"; return 1 ;;
+  esac
+  [ -e "$orig" ] || [ -L "$orig" ] && { err "berkas tujuan sudah ada, tidak ditimpa: $orig"; return 1; }
+  mkdir -p "$odir" 2>/dev/null
+  mv -n "$qpath" "$orig" || return 1
+  chown -h "${uid:-0}:${gid:-0}" "$orig" 2>/dev/null
   chmod "${mode:-644}" "$orig" 2>/dev/null
   rm -f "$meta"
   echo "RESTORED: $orig"
@@ -293,7 +306,8 @@ scan_satu() {
       [ -z "$line" ] && continue
       case "$line" in
         *": "*" FOUND")
-          local f="${line%%: *}" sig="${line#*: }"; sig="${sig% FOUND}"
+          local lx="${line% FOUND}"; local f="${lx%: *}" sig="${lx##*: }"
+          [ -f "$f" ] || continue
           found=$((found+1))
           if [ "${ACTION_ON_DETECT:-quarantine}" = "quarantine" ]; then
             if [ "$CV_OK" = 1 ] && type cv_quarantine >/dev/null 2>&1; then
@@ -518,7 +532,11 @@ do_check_sys() {
 # ==================================================================
 do_db_update() {
   command -v freshclam >/dev/null 2>&1 || { err "freshclam tidak ada"; return 1; }
-  nice -n 10 freshclam 2>&1 | tail -5
+  # Kode keluar freshclam dipertahankan (dulu '| tail' menelan kegagalan).
+  local out rc
+  out="$(nice -n 10 freshclam 2>&1)"; rc=$?
+  printf '%s\n' "$out" | tail -5
+  return $rc
 }
 
 # ==================================================================
@@ -534,6 +552,33 @@ do_rkhunter_update() {
   rkhunter_ada || { err "rkhunter tidak terpasang"; return 1; }
   say "Memeriksa pembaruan database signature rkhunter..."
   "$RKHUNTER_BIN" --update --dbdir "$RKHUNTER_DB" --tmpdir "$RKHUNTER_TMP" --logfile "$RKHUNTER_LOG"
+}
+
+# Beberapa tugas pembaruan berurutan dengan penanda [n/m] per tugas, supaya panel bisa
+# menampilkan kemajuan dan hasil tiap tugas. rkhunter --update mengembalikan 2 bila
+# "tidak ada pembaruan": itu bukan kegagalan.
+do_update_batch() {
+  local total=$# n=0 gagal=0 t rc t0 judul
+  [ "$total" -gt 0 ] || { err "tidak ada tugas"; return 2; }
+  for t in "$@"; do
+    n=$((n + 1))
+    case "$t" in
+      db-update)        judul="Memperbarui basis data virus ClamAV (freshclam)" ;;
+      rkhunter-propupd) judul="Merekam hash biner sistem (rkhunter --propupd)" ;;
+      rkhunter-update)  judul="Memperbarui signature rkhunter (--update)" ;;
+      *) say "[$n/$total] tugas tidak dikenal: $t"; say "[$n/$total] selesai rc=64 (0 dtk)"; gagal=$((gagal + 1)); continue ;;
+    esac
+    say "[$n/$total] $judul"
+    t0=$(date +%s)
+    case "$t" in
+      db-update)        do_db_update; rc=$? ;;
+      rkhunter-propupd) do_rkhunter_propupd; rc=$? ;;
+      rkhunter-update)  do_rkhunter_update; rc=$?; [ "$rc" = "2" ] && { say "rkhunter: tidak ada pembaruan tersedia"; rc=0; } ;;
+    esac
+    say "[$n/$total] selesai rc=$rc ($(( $(date +%s) - t0 )) dtk)"
+    [ "$rc" = "0" ] || gagal=$((gagal + 1))
+  done
+  [ "$gagal" -eq 0 ]
 }
 
 # ==================================================================
@@ -630,7 +675,8 @@ EOF
             [ -z "$line" ] && continue
             case "$line" in
               *": "*" FOUND")
-                local f="${line%%: *}" sig="${line#*: }"; sig="${sig% FOUND}"
+                local lx="${line% FOUND}"; local f="${lx%: *}" sig="${lx##*: }"
+                [ -f "$f" ] || continue
                 found_malware=$((found_malware + 1))
                 echo "[!] ANCAMAN TERDETEKSI: $f [Signature: $sig]"
                 if [ "${ACTION_ON_DETECT:-quarantine}" = "quarantine" ]; then
@@ -1029,5 +1075,6 @@ case "${1:-status}" in
   db-update)          do_db_update ;;
   rkhunter-propupd)   do_rkhunter_propupd ;;
   rkhunter-update)    do_rkhunter_update ;;
+  update-batch)       shift; do_update_batch "$@" ;;
   *) echo "Usage: $0 {status|scan <path> [label]|scan-stream <engine> <path> [label]|scan-ai <path> [label]|scan-all|quarantine-list|quarantine-restore <id>|quarantine-delete <id>|quarantine-purge|baseline <path> [label]|baseline-sys|check <path> [label]|check-sys|integ-list [label]|db-update|rkhunter-propupd|rkhunter-update}"; exit 1 ;;
 esac

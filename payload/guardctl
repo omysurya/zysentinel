@@ -275,10 +275,18 @@ case "${1:-}" in
       if [ "$(get_lang)" = "id" ]; then err "config tidak ditemukan: $CONF"; else err "config not found: $CONF"; fi
       exit 1
     fi
+    # Kunci dan nilai masuk ke sed dan ke berkas konfigurasi yang dibaca daemon
+    # sebagai root: tolak apa pun yang bisa menyuntikkan perintah sed ('e'),
+    # baris baru, atau kunci palsu.
+    case "$key" in *[!A-Za-z0-9_]*) err "key tidak valid: hanya huruf, angka, dan _"; exit 1 ;; esac
+    case "$val" in *$'\n'*|*$'\r'*) err "nilai tidak boleh memuat baris baru"; exit 1 ;; esac
     before="$CONF.$(date +%Y%m%d%H%M%S).bak"
     cp -p "$CONF" "$before"
+    # simpan paling banyak 5 cadangan terbaru (hanya milik berkas ini)
+    ls -1t "$CONF".*.bak 2>/dev/null | tail -n +6 | while IFS= read -r old; do rm -f -- "$old"; done
+    esc=$(printf '%s' "$val" | sed -e 's/[\\|&]/\\&/g')
     if grep -qE "^[[:space:]]*$key[[:space:]]*=" "$CONF"; then
-      sed -i -E "s|^[[:space:]]*$key[[:space:]]*=.*|$key = $val|" "$CONF"
+      sed -i -E "s|^[[:space:]]*$key[[:space:]]*=.*|$key = $esc|" "$CONF"
     else
       printf '%s = %s\n' "$key" "$val" >> "$CONF"
     fi

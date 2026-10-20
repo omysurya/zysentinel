@@ -16,11 +16,19 @@ echo "===================================================================="
 echo " [ZySentinel] Membangun Paket Distribusi Bersih (Versi: v${VERSION})"
 echo "===================================================================="
 
-# 1. Pastikan biner precompiled guardd tersedia di payload
-if [ -f "/www/server/sentinel/bin/guardd" ] && [ ! -f "$SCRIPT_DIR/payload/guardd" ]; then
-    echo "[*] Menyinkronkan biner guardd ke payload/..."
-    cp -p "/www/server/sentinel/bin/guardd" "$SCRIPT_DIR/payload/guardd"
+# 1. Biner guardd dikompilasi dari SUMBER (hardening) dan diberi stempel hash sumber.
+#    Dulu biner payload hanya disalin dari server yang sedang berjalan sehingga
+#    rilis bisa membawa biner basi tanpa perbaikan keamanan terbaru.
+SRC_C="$SCRIPT_DIR/payload/guardd.c"
+if command -v gcc >/dev/null 2>&1 && [ -f /usr/include/sqlite3.h ]; then
+    echo "[*] Mengompilasi payload/guardd dari guardd.c (canary, PIE, RELRO)..."
+    gcc -O2 -Wall -Wextra -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -pie -Wl,-z,relro,-z,now \
+        -o "$SCRIPT_DIR/payload/guardd" "$SRC_C" -lsqlite3 -lm
     chmod 755 "$SCRIPT_DIR/payload/guardd"
+    sha256sum "$SRC_C" | awk '{print $1}' > "$SCRIPT_DIR/payload/guardd.srchash"
+elif [ "$(sha256sum "$SRC_C" | awk '{print $1}')" != "$(cat "$SCRIPT_DIR/payload/guardd.srchash" 2>/dev/null)" ]; then
+    echo "[!] gcc/sqlite3.h tidak ada dan payload/guardd tidak cocok dengan guardd.c; rilis dibatalkan" >&2
+    exit 1
 fi
 
 # 1b. Penjaga: update_zip aaPanel memilih folder TERAKHIR (urutan os.walk)
@@ -43,6 +51,7 @@ rsync -rltD --exclude='.git' \
             --exclude='*.bak' \
             --exclude='__pycache__' \
             --exclude='*.pyc' \
+            --exclude='coraza-cache' \
             --exclude='build-release.sh' \
             --exclude='tests' \
             "$SCRIPT_DIR/" "$STAGE_DIR/sentinel/"
@@ -53,8 +62,6 @@ chmod 755 "$STAGE_DIR/sentinel/payload"/*.sh \
           "$STAGE_DIR/sentinel/payload"/*.py \
           "$STAGE_DIR/sentinel/payload"/guardctl 2>/dev/null || true
 [ -f "$STAGE_DIR/sentinel/payload/guardd" ] && chmod 755 "$STAGE_DIR/sentinel/payload/guardd" || true
-[ -f "$STAGE_DIR/sentinel/payload/waf/lua_waf/cjson.so" ] && chmod 755 "$STAGE_DIR/sentinel/payload/waf/lua_waf/cjson.so" || true
-[ -f "$STAGE_DIR/sentinel/payload/lua_waf/cjson.so" ] && chmod 755 "$STAGE_DIR/sentinel/payload/lua_waf/cjson.so" || true
 find "$STAGE_DIR/sentinel/payload/systemd" -type f -exec chmod 644 {} + 2>/dev/null || true
 [ -f "$STAGE_DIR/sentinel/payload/init.d/sentinel" ] && chmod 755 "$STAGE_DIR/sentinel/payload/init.d/sentinel" || true
 

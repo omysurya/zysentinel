@@ -479,7 +479,7 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 									<option value="72" data-i18n="opt_last_3d">Last 3 days</option>
 									<option value="168" data-i18n="opt_last_7d">Last 7 days</option>
 								</select>
-								<span class="sn-btn" onclick="snGrafik()" data-i18n="btn_refresh" data-i18n-title="tip_refresh_chart" title="Refresh Request Trend Chart">Refresh</span>
+								<span class="sn-btn" onclick="snGrafik(true)" data-i18n="btn_refresh" data-i18n-title="tip_refresh_chart" title="Refresh Request Trend Chart">Refresh</span>
 							</span>
 						</h3>
 						<div id="grafikKosong" class="sn-empty" style="display:none" data-i18n="grafik_kosong">No data in this timeframe. ZySentinel began collecting statistics when started.</div>
@@ -603,6 +603,8 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 						<div class="sn-fl" style="margin:12px 0">
 							<input id="notifUrl" class="sn-inp" style="width:420px"
 								data-i18n-placeholder="ph_notif_url" placeholder="https://... webhook URL">
+							<input id="notifToken" type="password" autocomplete="new-password" class="sn-inp" style="width:240px"
+								data-i18n-placeholder="ph_notif_token" placeholder="Bearer token (optional, blank = unchanged)">
 							<span class="sn-btn pri" onclick="snNotifSimpan()" data-i18n="btn_save" data-i18n-title="tip_save_notif" title="Save Notification Webhook Configuration">Save</span>
 							<span class="sn-btn" onclick="snNotifUji()" data-i18n="btn_send_test" data-i18n-title="tip_send_test" title="Send Test Message to Webhook">Send Test</span>
 						</div>
@@ -985,7 +987,7 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 				<div class="sn-card">
 					<div class="sn-tabs">
 						<span class="on" onclick="snWafTab('coraza',this)" data-i18n="sub_waf_coraza" data-i18n-title="tip_waf_coraza" title="Nginx Integrated Coraza WAF Engine">Coraza</span>
-						<span onclick="snWafTab('lua',this)" data-i18n="sub_waf_lua" data-i18n-title="tip_waf_lua" title="Lightweight Nginx Lua-Based WAF Engine">Lua WAF</span>
+						<span onclick="snWafTab('zy',this)" data-i18n="sub_waf_zy" data-i18n-title="tip_waf_zy" title="ZySentinel ruleset: sensitive files, scanners, bots, webshells and your IP/URL lists (nginx, Apache, OpenLiteSpeed)">ZySentinel Rules</span>
 						<span onclick="snWafTab('upload',this)" data-i18n="sub_waf_upload" data-i18n-title="tip_waf_upload" title="Real-Time File Upload Protection (Imunify360 Style)">Real-Time Upload Protection</span>
 					</div>
 
@@ -999,6 +1001,8 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 								<span class="sn-fl">
 									<span class="sn-badge sn-off" id="corazaBadge">loading</span>
 									<span class="sn-btn pri" onclick="snCorazaUnduh()" data-i18n="btn_download" data-i18n-title="tip_coraza_download" title="Download Coraza Module & OWASP CRS">Download</span>
+									<span class="sn-btn pri" onclick="snCorazaBuild()" data-i18n="btn_coraza_build" data-i18n-title="tip_coraza_build" title="Compile the Coraza connector module for the active nginx (cached)">Compile Connector</span>
+									<span class="sn-btn" id="btnCzLoad" onclick="snCorazaPasang()" data-i18n="btn_coraza_load" data-i18n-title="tip_coraza_load" title="Load the compiled module into the active nginx (reloads nginx)">Load to nginx</span>
 								</span>
 							</h3>
 							<div class="sn-sys" id="corazaInfo"></div>
@@ -1030,84 +1034,60 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 						</div>
 					</div>
 
-					<!-- ==================== WAF: LUA (free_waf) ==================== -->
-					<div class="sn-subpage" id="w-lua">
-						<div class="sn-eng" id="snLuaHeroCard" style="margin-bottom:14px">
-							<div class="sn-empty">loading</div>
-						</div>
-						<div class="sn-note" id="nwNote">loading</div>
-						<div class="sn-fl" style="margin:0 0 12px">
-							<span class="sn-btn pri" onclick="snNwInstall()" data-i18n="btn_install_engine" data-i18n-title="tip_install_lua_waf" title="Install Lua WAF Module into Nginx">Install Engine</span>
-							<span class="sn-btn dgr" onclick="snNwRemove()" data-i18n="btn_remove_engine" data-i18n-title="tip_remove_lua_waf" title="Remove Lua WAF Module from Nginx">Remove Engine</span>
-							<span class="sn-btn" onclick="snNwMuat()" data-i18n="btn_check_status" data-i18n-title="tip_check_lua_waf" title="Check Lua WAF Engine Readiness">Check Status</span>
-							<span style="font-weight:600;margin-left:12px" data-i18n="waf_eng_detail">Engine Detail</span>
-							<span id="nwBadge" class="sn-badge" style="margin-left:8px"></span>
-						</div>
-						<pre class="sn-pre" id="nwDetail" style="margin-bottom:14px">loading</pre>
-
+					<!-- ==================== WAF: ZYSENTINEL RULES ==================== -->
+					<div class="sn-subpage" id="w-zy">
+						<div class="sn-note" id="zyLegacy" style="display:none;margin-bottom:12px;border:1px solid rgba(245,158,11,.5)"></div>
 						<div class="sn-card">
-							<h3 data-i18n="waf_eng_status">Engine Status</h3>
-							<div class="sn-sys" id="fwEngine"></div>
-						</div>
-
-						<div class="sn-card">
-							<h3>Global Switch
+							<h3 data-i18n="zy_title">ZySentinel Rules
 								<span class="sn-fl">
-									<span class="sn-btn pri" id="btnFwOpen" onclick="snFwOpen()" data-i18n="btn_enable_waf" data-i18n-title="tip_enable_lua_waf" title="Enable Lua WAF Globally">Enable WAF</span>
-									<span class="sn-btn" id="btnFwMonitor" onclick="snFwMonitor()" data-i18n="btn_mode_monitor" data-i18n-title="tip_monitor_lua_waf" title="Switch Lua WAF to Monitor Mode">Mode: monitor</span>
+									<span class="sn-badge sn-off" id="zyBadge">loading</span>
+									<span class="sn-btn" onclick="snZyMuat()" data-i18n="btn_refresh" data-i18n-title="tip_refresh_zy" title="Reload ruleset status">Refresh</span>
 								</span>
 							</h3>
-							<div class="sn-note" id="fwGlobalNote">loading</div>
+							<div class="sn-note" data-i18n="zy_note">
+								One SecLang ruleset for nginx (Coraza), Apache and OpenLiteSpeed (ModSecurity): OWASP CRS plus ZySentinel rules for sensitive files, scanners, bots, webshells and your IP/URL lists. Blocked requests get the ZySentinel block page. Changes take effect after the web server reload, which the panel runs for you.
+							</div>
+							<div class="sn-sys" id="zyInfo" style="margin-top:10px"></div>
 						</div>
-
-				<div class="sn-grid2" style="margin-bottom:12px">
-					<div class="sn-card">
-						<h3 data-i18n="waf_prot_mods">Protection Modules</h3>
-						<table class="sn-tb" id="tbFwModul"></table>
-					</div>
-					<div class="sn-card">
-						<h3 data-i18n="waf_global_cc">Global CC Limit</h3>
-						<div class="sn-fl" style="margin-bottom:10px">
-							<input id="fwCcLimit" class="sn-inp" style="width:110px" data-i18n-placeholder="ph_cc_limit" placeholder="limit">
-							<span class="sn-refresh" data-i18n="waf_req_per">requests per</span>
-							<input id="fwCcCycle" class="sn-inp" style="width:90px" data-i18n-placeholder="ph_cc_cycle" placeholder="cycle (s)">
-							<span class="sn-refresh" data-i18n="waf_block_lbl">block</span>
-							<input id="fwCcEnd" class="sn-inp" style="width:90px" data-i18n-placeholder="ph_cc_end" placeholder="end (s)">
-							<span class="sn-btn pri" onclick="snFwCc()" data-i18n="btn_save" data-i18n-title="tip_save_cc_limit" title="Save Challenge Collapsar (CC) Limit">Save</span>
+						<div class="sn-grid2" style="margin-bottom:12px">
+							<div class="sn-card">
+								<h3 data-i18n="zy_modules">Protection Modules</h3>
+								<table class="sn-tb">
+									<thead><tr><th data-i18n="th_zy_mod">Module</th><th data-i18n="th_zy_status">Status</th><th></th></tr></thead>
+									<tbody id="tbZyModul"><tr><td colspan="3" class="sn-empty">loading</td></tr></tbody>
+								</table>
+							</div>
+							<div class="sn-card">
+								<h3 data-i18n="zy_settings">Settings</h3>
+								<table class="sn-tb"><tbody id="tbZySet"><tr><td class="sn-empty">loading</td></tr></tbody></table>
+							</div>
 						</div>
-						<div class="sn-refresh" id="fwCcNow">-</div>
-						<div class="sn-note" style="margin-top:11px">
-							Setiap perubahan konfigurasi diikuti reload nginx otomatis agar worker
-							membaca ulang <span class="sn-mono">config.json</span>. Engine Lua membaca
-							berkas itu sekali saat start, bukan per request.
+						<div class="sn-card">
+							<h3 data-i18n="zy_lists">IP and URL Lists</h3>
+							<div class="sn-tabs" id="zyListTabs">
+								<span class="on" onclick="snZyListTab('ip_black',this)" data-i18n="waf_tab_ip_black" data-i18n-title="tip_waf_ip_black" title="WAF IP Blacklist">IP Blacklist</span>
+								<span onclick="snZyListTab('ip_white',this)" data-i18n="waf_tab_ip_white" data-i18n-title="tip_waf_ip_white" title="WAF IP Whitelist">IP Whitelist</span>
+								<span onclick="snZyListTab('url_black',this)" data-i18n="waf_tab_url_black" data-i18n-title="tip_waf_url_black" title="WAF URL Pattern Blacklist">URL Blacklist</span>
+								<span onclick="snZyListTab('url_white',this)" data-i18n="waf_tab_url_white" data-i18n-title="tip_waf_url_white" title="WAF URL Pattern Whitelist">URL Whitelist</span>
+							</div>
+							<div class="sn-fl" style="margin:11px 0">
+								<input id="zyListVal" class="sn-inp" style="width:320px" data-i18n-placeholder="ph_waf_list_val" placeholder="IPv4, CIDR (e.g. 192.0.2.0/24), range, or URL regex">
+								<span class="sn-btn pri" onclick="snZyListAdd()" data-i18n="btn_add" data-i18n-title="tip_waf_list_add" title="Add IP or URL Pattern to List">Add</span>
+							</div>
+							<table class="sn-tb">
+								<thead><tr><th data-i18n="th_fwlist_val">Value</th><th></th></tr></thead>
+								<tbody id="tbZyList"><tr><td colspan="2" class="sn-empty">loading</td></tr></tbody>
+							</table>
 						</div>
-					</div>
-				</div>
-
-				<div class="sn-card">
-					<h3 data-i18n="waf_prot_sites">Protected Sites</h3>
-					<table class="sn-tb">
-						<thead><tr><th data-i18n="th_fwsite_name">Site</th><th data-i18n="th_fwsite_status">Status</th><th data-i18n="th_fwsite_cc">CC</th><th data-i18n="th_fwsite_limit">Limit</th><th></th></tr></thead>
-						<tbody id="tbFwSites"><tr><td colspan="5" class="sn-empty">loading</td></tr></tbody>
-					</table>
-				</div>
-
-				<div class="sn-card">
-					<div class="sn-tabs">
-						<span class="on" onclick="snFwTab('ip_black',this)" data-i18n="waf_tab_ip_black" data-i18n-title="tip_waf_ip_black" title="WAF IP Blacklist">IP Blacklist</span>
-						<span onclick="snFwTab('ip_white',this)" data-i18n="waf_tab_ip_white" data-i18n-title="tip_waf_ip_white" title="WAF IP Whitelist">IP Whitelist</span>
-						<span onclick="snFwTab('url_black',this)" data-i18n="waf_tab_url_black" data-i18n-title="tip_waf_url_black" title="WAF URL Pattern Blacklist">URL Blacklist</span>
-						<span onclick="snFwTab('url_white',this)" data-i18n="waf_tab_url_white" data-i18n-title="tip_waf_url_white" title="WAF URL Pattern Whitelist">URL Whitelist</span>
-					</div>
-					<div class="sn-fl" style="margin:11px 0">
-						<input id="fwListVal" class="sn-inp" style="width:260px" data-i18n-placeholder="ph_waf_list_val" placeholder="IP address or URL pattern">
-						<span class="sn-btn pri" onclick="snFwListAdd()" data-i18n="btn_add" data-i18n-title="tip_waf_list_add" title="Add IP or URL Pattern to List">Add</span>
-					</div>
-					<table class="sn-tb">
-						<thead><tr><th data-i18n="th_fwlist_val">Value</th><th></th></tr></thead>
-						<tbody id="tbFwList"><tr><td colspan="2" class="sn-empty">loading</td></tr></tbody>
-					</table>
-				</div>
+						<div class="sn-card">
+							<h3 data-i18n="zy_events">Recent WAF Events
+								<span class="sn-fl"><span class="sn-btn" onclick="snZyLog()" data-i18n="btn_refresh" data-i18n-title="tip_refresh_zy" title="Reload ruleset status">Refresh</span></span>
+							</h3>
+							<table class="sn-tb">
+								<thead><tr><th data-i18n="th_zy_time">Time</th><th data-i18n="th_zy_ip">IP</th><th data-i18n="th_zy_req">Request</th><th data-i18n="th_zy_code">Status</th><th data-i18n="th_zy_msg">Rule</th></tr></thead>
+								<tbody id="tbZyLog"><tr><td colspan="5" class="sn-empty">loading</td></tr></tbody>
+							</table>
+						</div>
 					</div>
 
 					<!-- ==================== WAF: REAL-TIME UPLOAD PROTECTION (Imunify360 Style) ==================== -->
@@ -1296,7 +1276,7 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 					<h3>Managed Rules
 						<span class="sn-fl">
 							<input id="fwrVal" class="sn-inp" style="width:200px" data-i18n-placeholder="ph_fwr_val" placeholder="IP or CIDR">
-							<span class="sn-btn dgr" onclick="snFwrBan()" data-i18n="btn_ban" data-i18n-title="tip_ban_ip" title="Temporarily Block IP Address or Subnet">Ban</span>
+							<span class="sn-btn dgr" onclick="snFwrBan()" data-i18n="btn_ban" data-i18n-title="tip_ban_ip" title="Temporarily Block a single IPv4 address (CIDR is not supported for blocking)">Ban</span>
 							<span class="sn-btn pri" onclick="snFwrAllow()" data-i18n="btn_allow" data-i18n-title="tip_allow_ip" title="Permanently Allow IP Address or Subnet">Allow</span>
 							<span class="sn-btn" onclick="snFwrGeoForm()" data-i18n="btn_block_country" data-i18n-title="tip_block_country" title="Block IP Addresses by Country">Block Country</span>
 							<span class="sn-btn" onclick="snFwrMuat(this)" data-i18n="btn_refresh" data-i18n-title="tip_refresh_fwr" title="Refresh Managed Rules Table"><i class="layui-icon layui-icon-refresh"></i> Refresh</span>
@@ -1666,6 +1646,10 @@ var SN_I18N = {
 		btn_save: 'Save',
 		btn_add: '+ Add',
 		btn_download: 'Download',
+		btn_coraza_build: 'Compile Connector',
+		tip_coraza_build: 'Compile the Coraza connector module for the active nginx version. Reuses the cached build when the nginx version and configure arguments are unchanged.',
+		btn_coraza_load: 'Load to nginx',
+		tip_coraza_load: 'Load the compiled Coraza module into the active nginx (edits nginx.conf with backup, runs nginx -t, reloads nginx)',
 		btn_sync: 'Sync',
 		tip_refresh: 'Refresh Security Posture & Defense Indicators',
 		tip_panic_lockdown: 'Activate Panic Mode (Close Web Ports)',
@@ -1673,7 +1657,6 @@ var SN_I18N = {
 		tip_sub_laju: 'Open Rate Limits Subtab',
 		tip_sub_panic: 'Open Panic Button Subtab',
 		tip_sub_maint: 'Open Maintenance & Lifecycle Subtab',
-		tip_check_lua_waf: 'Check Nginx Free WAF Integration Status',
 		tip_check_fim: 'Run File Integrity & Critical Binary Verification',
 		opt_last_1h: 'Last 1 hour',
 		opt_last_6h: 'Last 6 hours',
@@ -1786,17 +1769,6 @@ var SN_I18N = {
 		waf_owasp_groups: 'OWASP Rule Groups',
 		th_waf_grp: 'Rule Group',
 		th_waf_grp_st: 'Status',
-		waf_eng_detail: 'Engine Detail',
-		waf_eng_status: 'Engine Status',
-		waf_prot_mods: 'Protection Modules',
-		waf_global_cc: 'Global CC Limit',
-		waf_req_per: 'requests per',
-		waf_block_lbl: 'block',
-		waf_prot_sites: 'Protected Sites',
-		th_fwsite_name: 'Site',
-		th_fwsite_status: 'Status',
-		th_fwsite_cc: 'CC',
-		th_fwsite_limit: 'Limit',
 		th_fwlist_val: 'Value',
 		th_up_vhost: 'Vhost / Domain',
 		th_up_docroot: 'Document Root',
@@ -1850,13 +1822,11 @@ var SN_I18N = {
 		tbl_loading_packets: 'Loading packet counters...',
 		tbl_loading_inspection: 'Loading kernel inspection rules...',
 		ph_notif_url: "https://... webhook URL",
+		ph_notif_token: "Bearer token (optional, blank = unchanged)",
 		ph_notif_max: "max retries",
-		ph_cc_limit: "request limit",
-		ph_cc_cycle: "cycle (s)",
-		ph_cc_end: "block duration (s)",
-		ph_waf_list_val: "IP address or URL pattern",
+		ph_waf_list_val: "IPv4, CIDR (e.g. 192.0.2.0/24), range, or URL regex",
 		ph_fwr_val: "IP or CIDR",
-		ph_allow_ip: "IP address or CIDR",
+		ph_allow_ip: "IPv4 or CIDR, e.g. 203.0.113.5 or 192.0.2.0/24",
 		tip_brand_logo: "ZySentinel CyberMatrix Defense Logo",
 		tip_tg_egress: "Web Worker Outbound Connection Restrictor (Prevent Reverse Shell)",
 		tip_tg_proc: "Unauthorized Process Execution Watchdog (EDR)",
@@ -1999,10 +1969,24 @@ var SN_I18N = {
 		tip_mode_disable: "Disable WAF Engine Completely",
 		waf_note: "<b>Monitor</b> logs only. <b>Block</b> actively blocks according to rules. <b>Disable</b> turns off the engine. The switch applies to the active engine across all protected vhosts.",
 		sub_waf_coraza: "Coraza",
-		sub_waf_lua: "Lua WAF",
+		sub_waf_zy: "ZySentinel Rules",
+		tip_waf_zy: "ZySentinel ruleset: sensitive files, scanners, bots, webshells and your IP/URL lists (nginx, Apache, OpenLiteSpeed)",
+		zy_title: "ZySentinel Rules",
+		zy_note: "One SecLang ruleset for nginx (Coraza), Apache and OpenLiteSpeed (ModSecurity): OWASP CRS plus ZySentinel rules for sensitive files, scanners, bots, webshells and your IP/URL lists. Blocked requests get the ZySentinel block page. Changes take effect after the web server reload, which the panel runs for you.",
+		zy_modules: "Protection Modules",
+		zy_settings: "Settings",
+		zy_lists: "IP and URL Lists",
+		zy_events: "Recent WAF Events",
+		th_zy_mod: "Module",
+		th_zy_status: "Status",
+		th_zy_time: "Time",
+		th_zy_ip: "IP",
+		th_zy_req: "Request",
+		th_zy_code: "Status",
+		th_zy_msg: "Rule",
+		tip_refresh_zy: "Reload ruleset status",
 		sub_waf_upload: "Real-Time Upload Protection",
 		tip_waf_coraza: "Nginx Integrated Coraza WAF Engine",
-		tip_waf_lua: "Lightweight Nginx Lua-Based WAF Engine",
 		tip_waf_upload: "Real-Time File Upload Protection (Imunify360 Style)",
 		fw_port_ctrl_title: "Port Control",
 		tip_toggle_port_fw: "Click to toggle global port firewall status",
@@ -2191,15 +2175,6 @@ var SN_I18N = {
 		btn_refresh_log: "Refresh Log",
 		tip_refresh_scan_logs: "Refresh Scan Log Output",
 		tip_coraza_download: "Download Coraza Module & OWASP CRS",
-		btn_install_engine: "Install Engine",
-		tip_install_lua_waf: "Install Lua WAF Module into Nginx",
-		btn_remove_engine: "Remove Engine",
-		tip_remove_lua_waf: "Remove Lua WAF Module from Nginx",
-		btn_enable_waf: "Enable WAF",
-		tip_enable_lua_waf: "Enable Lua WAF Globally",
-		btn_mode_monitor: "Mode: monitor",
-		tip_monitor_lua_waf: "Switch Lua WAF to Monitor Mode",
-		tip_save_cc_limit: "Save Challenge Collapsar (CC) Limit",
 		waf_tab_ip_black: "IP Blacklist",
 		tip_waf_ip_black: "WAF IP Blacklist",
 		waf_tab_ip_white: "IP Whitelist",
@@ -2220,7 +2195,7 @@ var SN_I18N = {
 		btn_remove_rules: "Remove Rules",
 		tip_remove_fw: "Remove SENTINEL chain from Linux netfilter kernel",
 		btn_ban_ip: "Ban IP",
-		tip_ban_ip: "Temporarily Block IP Address or Subnet",
+		tip_ban_ip: "Temporarily Block a single IPv4 address (CIDR is not supported for blocking)",
 		btn_allow_ip: "Allow IP",
 		tip_allow_ip: "Permanently Allow IP Address or Subnet",
 		btn_block_country: "Block Country",
@@ -2268,6 +2243,10 @@ var SN_I18N = {
 		btn_save: 'Simpan',
 		btn_add: '+ Tambah',
 		btn_download: 'Unduh',
+		btn_coraza_build: 'Compile Konektor',
+		tip_coraza_build: 'Compile modul konektor Coraza untuk versi nginx aktif. Memakai cache bila versi nginx dan argumen configure tidak berubah.',
+		btn_coraza_load: 'Pasang ke nginx',
+		tip_coraza_load: 'Muat modul Coraza hasil compile ke nginx aktif (mengubah nginx.conf dengan backup, menjalankan nginx -t, me-reload nginx)',
 		btn_sync: 'Sinkronkan',
 		tip_refresh: 'Muat Ulang Metrik Postur Keamanan & Indikator Pertahanan',
 		tip_panic_lockdown: 'Aktifkan Mode Panik (Matikan Port Web)',
@@ -2275,7 +2254,6 @@ var SN_I18N = {
 		tip_sub_laju: 'Buka Subtab Batas Laju',
 		tip_sub_panic: 'Buka Subtab Tombol Panik',
 		tip_sub_maint: 'Buka Subtab Pemeliharaan & Siklus Hidup',
-		tip_check_lua_waf: 'Periksa Status Integrasi Nginx Free WAF',
 		tip_check_fim: 'Jalankan Verifikasi Integritas File & Binari Kritis',
 		opt_last_1h: '1 Jam Terakhir',
 		opt_last_6h: '6 Jam Terakhir',
@@ -2388,17 +2366,6 @@ var SN_I18N = {
 		waf_owasp_groups: 'Grup Aturan OWASP',
 		th_waf_grp: 'Grup Aturan',
 		th_waf_grp_st: 'Status',
-		waf_eng_detail: 'Detail Engine',
-		waf_eng_status: 'Status Engine',
-		waf_prot_mods: 'Modul Proteksi',
-		waf_global_cc: 'Batas CC Global',
-		waf_req_per: 'permintaan per',
-		waf_block_lbl: 'blokir',
-		waf_prot_sites: 'Situs Terlindungi',
-		th_fwsite_name: 'Situs',
-		th_fwsite_status: 'Status',
-		th_fwsite_cc: 'CC',
-		th_fwsite_limit: 'Batas',
 		th_fwlist_val: 'Nilai',
 		th_up_vhost: 'Vhost / Domain',
 		th_up_docroot: 'Root Dokumen',
@@ -2452,13 +2419,11 @@ var SN_I18N = {
 		tbl_loading_packets: 'Memuat penghitung paket...',
 		tbl_loading_inspection: 'Memuat aturan inspeksi kernel...',
 		ph_notif_url: "https://... URL webhook",
+		ph_notif_token: "Token Bearer (opsional, kosong = tidak diubah)",
 		ph_notif_max: "maks coba",
-		ph_cc_limit: "batas request",
-		ph_cc_cycle: "siklus (detik)",
-		ph_cc_end: "durasi blokir (detik)",
-		ph_waf_list_val: "Alamat IP atau pola URL",
+		ph_waf_list_val: "IPv4, CIDR (mis. 192.0.2.0/24), rentang, atau regex URL",
 		ph_fwr_val: "IP atau CIDR",
-		ph_allow_ip: "Alamat IP atau CIDR",
+		ph_allow_ip: "IPv4 atau CIDR, misal 203.0.113.5 atau 192.0.2.0/24",
 		tip_brand_logo: "Logo Pertahanan Siber ZySentinel CyberMatrix",
 		tip_tg_egress: "Pembatas Koneksi Keluar Web Worker (Mencegah Reverse Shell)",
 		tip_tg_proc: "Pemantau Eksekusi Proses Ilegal (EDR)",
@@ -2601,10 +2566,24 @@ var SN_I18N = {
 		tip_mode_disable: "Nonaktifkan Seluruh Mesin WAF",
 		waf_note: "<b>Monitor</b> mencatat saja. <b>Block</b> aktif memblokir menurut rule. <b>Disable</b> mematikan engine. Switch berlaku untuk engine yang sedang aktif, di semua vhost yang dilindungi.",
 		sub_waf_coraza: "Coraza",
-		sub_waf_lua: "Lua WAF",
+		sub_waf_zy: "Aturan ZySentinel",
+		tip_waf_zy: "Ruleset ZySentinel: berkas sensitif, pemindai, bot, webshell, dan daftar IP/URL Anda (nginx, Apache, OpenLiteSpeed)",
+		zy_title: "Aturan ZySentinel",
+		zy_note: "Satu ruleset SecLang untuk nginx (Coraza), Apache dan OpenLiteSpeed (ModSecurity): OWASP CRS ditambah aturan ZySentinel untuk berkas sensitif, pemindai, bot, webshell, dan daftar IP/URL Anda. Permintaan yang diblokir menampilkan halaman blocker ZySentinel. Perubahan berlaku setelah web server di-reload, yang dijalankan otomatis oleh panel.",
+		zy_modules: "Modul Perlindungan",
+		zy_settings: "Pengaturan",
+		zy_lists: "Daftar IP dan URL",
+		zy_events: "Kejadian WAF Terbaru",
+		th_zy_mod: "Modul",
+		th_zy_status: "Status",
+		th_zy_time: "Waktu",
+		th_zy_ip: "IP",
+		th_zy_req: "Permintaan",
+		th_zy_code: "Status",
+		th_zy_msg: "Aturan",
+		tip_refresh_zy: "Muat ulang status ruleset",
 		sub_waf_upload: "Proteksi Upload Real-Time",
 		tip_waf_coraza: "Mesin WAF Coraza Terintegrasi Nginx",
-		tip_waf_lua: "Mesin WAF Ringan Berbasis Nginx Lua",
 		tip_waf_upload: "Perlindungan Upload Berkas Realtime Ala Imunify360",
 		fw_port_ctrl_title: "Kendali Port",
 		tip_toggle_port_fw: "Klik untuk mengubah status global firewall port",
@@ -2793,15 +2772,6 @@ var SN_I18N = {
 		btn_refresh_log: "Segarkan Log",
 		tip_refresh_scan_logs: "Segarkan Tampilan Log Pemindaian",
 		tip_coraza_download: "Unduh Modul Coraza & Rule Set OWASP CRS",
-		btn_install_engine: "Pasang Engine",
-		tip_install_lua_waf: "Pasang Modul Lua WAF ke Nginx",
-		btn_remove_engine: "Cabut Engine",
-		tip_remove_lua_waf: "Cabut Modul Lua WAF dari Nginx",
-		btn_enable_waf: "Aktifkan WAF",
-		tip_enable_lua_waf: "Aktifkan WAF Nginx LUA Secara Global",
-		btn_mode_monitor: "Mode: monitor",
-		tip_monitor_lua_waf: "Alihkan WAF LUA ke Mode Monitor",
-		tip_save_cc_limit: "Simpan Parameter Batasan Challenge Collapsar (CC)",
 		waf_tab_ip_black: "Daftar Hitam IP",
 		tip_waf_ip_black: "Daftar Hitam Alamat IP WAF",
 		waf_tab_ip_white: "Daftar Putih IP",
@@ -2822,7 +2792,7 @@ var SN_I18N = {
 		btn_remove_rules: "Cabut Aturan",
 		tip_remove_fw: "Cabut Rantai SENTINEL dari Kernel Netfilter Linux",
 		btn_ban_ip: "Blokir IP",
-		tip_ban_ip: "Blokir Sementara Alamat IP atau Subnet",
+		tip_ban_ip: "Blokir sementara satu alamat IPv4 (CIDR tidak didukung untuk blokir)",
 		btn_allow_ip: "Izinkan IP",
 		tip_allow_ip: "Kecualikan Permanen Alamat IP atau Subnet",
 		btn_block_country: "Blokir Negara",
@@ -2944,7 +2914,7 @@ function snApplyLang(refreshData){
 			else if($('#av-quar').is(':visible')) snAvQuarMuat();
 		}
 		else if($('#top-waf').is(':visible')){
-			if($('#w-lua').is(':visible')) snFwSitesMuat();
+			if($('#w-zy').is(':visible')) snZyLog();
 		}
 		else if($('#top-conf').is(':visible')){
 			if($('#c-atur').is(':visible')) snConf();
@@ -2998,9 +2968,7 @@ function snUpdateBadgesAndNotes(m){
 
 	var lWaf = $('#bWaf');
 	var wEng = m.waf_engine || 'off';
-	if(wEng === 'lua_waf' || wEng === 'free_waf'){
-		lWaf.text('🌐 WAF: Lua').attr('class', 'sn-badge sn-ok').attr('title', isEn ? 'Nginx WAF: Embedded Lua WAF active & filtering HTTP traffic' : 'WAF Nginx: Lua WAF mandiri aktif menyaring lalu lintas HTTP');
-	} else if(wEng === 'modsecurity'){
+	if(wEng === 'modsecurity'){
 		lWaf.text('🌐 WAF: ModSec').attr('class', 'sn-badge sn-ok').attr('title', isEn ? 'Nginx WAF: ModSecurity inspecting HTTP traffic' : 'WAF Nginx: ModSecurity aktif memeriksa request HTTP');
 	} else if(wEng === 'coraza'){
 		lWaf.text('🌐 WAF: Coraza').attr('class', 'sn-badge sn-ok').attr('title', isEn ? 'Nginx WAF: Coraza inspecting HTTP traffic' : 'WAF Nginx: Coraza WAF aktif memeriksa request HTTP');
@@ -3306,6 +3274,104 @@ function snStopProgBar(){
 }
 
 /* Endpoint caller dengan pengamanan CSRF token, auto-progress bar cyber, animasi progress tombol, proteksi intercept, auto-close progress layer, dan deteksi kadaluwarsa sesi */
+/* ---------- galat permintaan: selalu ada kabar untuk pengguna ----------
+   Aksi pengguna yang gagal tampil sebagai dialog berisi sebab dan langkah
+   berikutnya. Penyegaran senyap (auto-refresh) tidak boleh menumpuk dialog;
+   kegagalannya dikabarkan lewat spanduk koneksi yang hilang sendiri begitu
+   permintaan berikutnya berhasil. */
+var SN_FAIL_STREAK = 0;
+var SN_ERR_LAYER = null;
+function snEscH(t){
+	return String(t === undefined || t === null ? '' : t).replace(/[&<>"']/g, function(c){
+		return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];
+	});
+}
+function snGalatInfo(method, xhr, status){
+	var isEn = (SN_LANG !== 'id');
+	var kode = (xhr && xhr.status) || 0;
+	var judul, sebab, saran;
+	if(status === 'timeout'){
+		judul = isEn ? 'Server did not answer in time' : 'Server tidak menjawab tepat waktu';
+		sebab = isEn ? 'No reply within 60 seconds.' : 'Tidak ada jawaban dalam 60 detik.';
+		saran = isEn ? 'The operation may still be running on the server. Check the result before repeating it.' : 'Operasi mungkin masih berjalan di server. Periksa hasilnya sebelum mengulang.';
+	} else if(status === 'parsererror'){
+		judul = isEn ? 'Reply is not valid' : 'Balasan server tidak valid';
+		sebab = isEn ? 'The panel returned something that is not JSON (an expired session or a PHP/Python error page).' : 'Panel mengirim balasan yang bukan JSON (sesi habis atau halaman galat PHP/Python).';
+		saran = isEn ? 'Reload the page (Ctrl+F5) and log in again if needed.' : 'Muat ulang halaman (Ctrl+F5) dan login lagi bila perlu.';
+	} else if(kode === 0){
+		judul = isEn ? 'Cannot reach the panel' : 'Panel tidak terjangkau';
+		sebab = isEn ? 'The browser got no reply (network down, panel restarting, or blocked by a firewall).' : 'Peramban tidak mendapat jawaban (jaringan putus, panel sedang restart, atau diblokir firewall).';
+		saran = isEn ? 'Check your connection and the panel service, then try again.' : 'Periksa koneksi dan layanan panel, lalu coba lagi.';
+	} else if(kode >= 500){
+		judul = isEn ? 'Server error (HTTP ' + kode + ')' : 'Galat di server (HTTP ' + kode + ')';
+		sebab = isEn ? 'The panel or plugin failed while handling the request.' : 'Panel atau plugin gagal saat memproses permintaan.';
+		saran = isEn ? 'See /www/server/panel/logs/error.log for details.' : 'Lihat /www/server/panel/logs/error.log untuk rinciannya.';
+	} else {
+		judul = isEn ? 'Request rejected (HTTP ' + kode + ')' : 'Permintaan ditolak (HTTP ' + kode + ')';
+		sebab = (xhr && xhr.statusText) || '';
+		saran = isEn ? 'Reload the page and try again.' : 'Muat ulang halaman lalu coba lagi.';
+	}
+	var detail = '';
+	if(xhr && xhr.responseText){ detail = String(xhr.responseText).replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 240); }
+	return {judul: judul, sebab: sebab, saran: saran, detail: detail, metode: method, kode: kode};
+}
+function snGalatTampil(info, silent, ambang){
+	var isEn = (SN_LANG !== 'id');
+	if(silent){
+		SN_FAIL_STREAK++;
+		if(SN_FAIL_STREAK >= (ambang || 2)){ snKoneksiBanner(true, info); }
+		return;
+	}
+	if(!window.layer || !layer.alert){ alert(info.judul + '\n' + info.sebab); return; }
+	if(SN_ERR_LAYER !== null){ try{ layer.close(SN_ERR_LAYER); }catch(e){} SN_ERR_LAYER = null; }
+	var h = '<div style="padding:4px 2px;font-size:13px;line-height:1.6">'
+		+ '<div style="font-weight:600;margin-bottom:4px">' + snEscH(info.judul) + '</div>'
+		+ (info.sebab ? '<div>' + snEscH(info.sebab) + '</div>' : '')
+		+ (info.saran ? '<div style="margin-top:6px;color:#64748b">' + snEscH(info.saran) + '</div>' : '')
+		+ (info.detail ? '<pre style="margin:8px 0 0;max-height:110px;overflow:auto;white-space:pre-wrap;font-size:11px;background:rgba(127,127,127,.12);padding:6px;border-radius:4px">' + snEscH(info.detail) + '</pre>' : '')
+		+ '<div style="margin-top:6px;font-size:11px;color:#94a3b8">' + (isEn ? 'Action' : 'Aksi') + ': <code>' + snEscH(info.metode) + '</code>' + (info.kode ? ' &middot; HTTP ' + info.kode : '') + '</div></div>';
+	SN_ERR_LAYER = layer.alert(h, {title: isEn ? 'Action failed' : 'Aksi gagal', icon: 2, btn: isEn ? ['Close'] : ['Tutup'], area: ['460px', 'auto'], end: function(){ SN_ERR_LAYER = null; }});
+}
+function snKoneksiBanner(tampil, info){
+	var isEn = (SN_LANG !== 'id');
+	var el = $('#snConnBanner');
+	if(!tampil){ if(el.length){ el.remove(); } return; }
+	if(!el.length){
+		el = $('<div id="snConnBanner" style="background:#b91c1c;color:#fff;padding:7px 14px;font-size:12.5px;display:flex;gap:10px;align-items:center;flex-wrap:wrap"></div>');
+		var host = $('#snProgressBar');
+		if(host.length){ host.after(el); } else { $('#snModal').prepend(el); }
+	}
+	el.html('<b>' + (isEn ? 'Connection problem' : 'Koneksi bermasalah') + '</b> <span>'
+		+ snEscH(info ? info.judul : '') + (isEn ? '. Data on screen may be outdated.' : '. Data di layar mungkin sudah basi.') + '</span>'
+		+ '<span class="sn-btn" style="margin-left:auto;background:#fff;color:#b91c1c" onclick="snKoneksiCoba()">' + (isEn ? 'Retry' : 'Coba lagi') + '</span>');
+}
+function snKoneksiCoba(){
+	snAjax('get_lifecycle_status', {}, function(st){ if(st){ snKoneksiBanner(false); SN_FAIL_STREAK = 0; snTopSegar(); } });
+}
+function snTopSegar(){
+	var t = $('.sn-mtabs span.on');
+	if(t.length){ try{ t[0].click(); }catch(e){} }
+}
+
+/* Progres panjang: waktu berjalan ikut tampil supaya jelas masih bekerja. */
+function snProgresJam(pIdx){
+	if(!pIdx || !window.layer) return null;
+	var isEn = (SN_LANG !== 'id');
+	var t0 = Date.now();
+	var tm = setInterval(function(){
+		var box = $('#layui-layer' + pIdx + ' .layui-layer-content');
+		if(!box.length){ clearInterval(tm); return; }
+		var d = Math.round((Date.now() - t0) / 1000);
+		if(d < 3) return;
+		var tag = box.find('.sn-elapsed');
+		if(!tag.length){ tag = $('<div class="sn-elapsed" style="margin-top:4px;font-size:11.5px;opacity:.8"></div>'); box.append(tag); }
+		tag.text(d + (isEn ? ' s elapsed' : ' dtk berjalan')
+			+ (d >= 20 ? (isEn ? ' - slower than usual, still working, do not close the panel' : ' - lebih lama dari biasanya, masih bekerja, jangan tutup panel') : ''));
+	}, 1000);
+	return tm;
+}
+
+var SN_INFLIGHT = {};
 function snAjax(method, data, cb, pIdx, btnEl, isSilent){
 	var d = data || {};
 	d.method = method;
@@ -3351,14 +3417,80 @@ function snAjax(method, data, cb, pIdx, btnEl, isSilent){
 			resetBtn = snBtnLoading(triggerEl);
 		}
 	}
+	var jam = snProgresJam(pIdx);
 
 	var doneCleanup = function(){
+		if(jam){ clearInterval(jam); jam = null; }
 		if(isUserAction){
 			snStopProgBar();
 			if(resetBtn){ try{ resetBtn(); }catch(e){} }
 			else if(triggerEl){ snBtnReset(triggerEl); }
 		}
 		if(pIdx){ try{ layer.close(pIdx); }catch(e){} }
+	};
+
+	/* Pemanggil cb dilindungi: galat saat menggambar data tidak boleh
+	   berakhir sebagai tulisan "loading" yang diam selamanya. */
+	var panggil = function(nilai){
+		try{ cb(nilai); }
+		catch(e){
+			if(window.console && console.error){ console.error('[sentinel] ' + method, e); }
+			var isEn = (SN_LANG !== 'id');
+			snGalatTampil({judul: isEn ? 'Failed to display the result' : 'Gagal menampilkan hasil',
+				sebab: (e && e.message) || String(e),
+				saran: isEn ? 'The server answered, but the page could not draw it. Reload with Ctrl+F5; report it if it repeats.' : 'Server menjawab, tetapi halaman gagal menggambarnya. Muat ulang dengan Ctrl+F5; laporkan bila berulang.',
+				detail: '', metode: method, kode: 0}, !isUserAction);
+		}
+	};
+
+	var selesaiOk = function(r){
+		SN_FAIL_STREAK = 0; snKoneksiBanner(false);
+		if(r && r.status === true){ panggil(r.msg); return; }
+		var isEn = (SN_LANG !== 'id');
+		var raw = (r && r.msg !== undefined) ? r.msg : null;
+		var msg = (typeof raw === 'string') ? raw : (raw && typeof raw === 'object' ? (raw.pesan || raw.msg || JSON.stringify(raw)) : 'gagal');
+		if(r && (r.status === -1 || msg.indexOf('Login has expired') !== -1 || msg.indexOf('sesi tidak terotentikasi') !== -1 || msg.indexOf('sesi telah kedaluwarsa') !== -1)){
+			layer && layer.msg ? layer.msg(isEn ? 'Session expired. Redirecting to login...' : 'Sesi login telah kedaluwarsa. Mengalihkan ke login...', {time:2000}) : alert(isEn ? 'Session expired' : 'Sesi kedaluwarsa');
+			setTimeout(function(){ window.location.reload(); }, 1500);
+			cb(null);
+			return;
+		}
+		/* penolakan dari server: pengguna harus tahu alasannya */
+		if(isUserAction){
+			snGalatTampil({judul: isEn ? 'Request was refused' : 'Permintaan ditolak oleh server',
+				sebab: msg, saran: '', detail: '', metode: method, kode: 0}, false);
+		} else if(!isSilent && window.layer && layer.msg){
+			layer.msg(msg, {time: 4000});
+		}
+		cb(null);
+	};
+	var selesaiGalat = function(xhr, status){
+		var isEn = (SN_LANG !== 'id');
+		if(xhr && (xhr.status === 401 || xhr.status === 403)){
+			layer && layer.msg ? layer.msg(isEn ? 'Access denied or session expired.' : 'Akses ditolak atau sesi kedaluwarsa.', {time:2500}) : alert(isEn ? 'Access denied' : 'Akses ditolak');
+			setTimeout(function(){ window.location.reload(); }, 1500);
+		} else {
+			snGalatTampil(snGalatInfo(method, xhr, status), !isUserAction, isSilent ? 2 : 1);
+		}
+		cb(null);
+	};
+
+	/* Permintaan baca identik yang sedang berjalan digabung: satu kali ke
+	   server, hasilnya dibagikan ke semua pemanggil. */
+	var kunci = null;
+	if(/^get_/.test(method)){
+		var tmp = $.extend({}, d); delete tmp.lang;
+		try{ kunci = method + '|' + JSON.stringify(tmp); }catch(e){ kunci = null; }
+	}
+	if(kunci && SN_INFLIGHT[kunci]){
+		SN_INFLIGHT[kunci].push({ok: function(r){ doneCleanup(); selesaiOk(r); }, err: function(x, st){ doneCleanup(); selesaiGalat(x, st); }});
+		return;
+	}
+	if(kunci){ SN_INFLIGHT[kunci] = []; }
+	var bagi = function(fn, a, b2){
+		var daftar = kunci ? (SN_INFLIGHT[kunci] || []) : [];
+		if(kunci){ delete SN_INFLIGHT[kunci]; }
+		for(var i = 0; i < daftar.length; i++){ try{ daftar[i][fn](a, b2); }catch(e){} }
 	};
 
 	$.ajax({
@@ -3369,28 +3501,18 @@ function snAjax(method, data, cb, pIdx, btnEl, isSilent){
 		timeout: 60000,
 		success: function(r){
 			doneCleanup();
-			if(r && r.status === true){ cb(r.msg); }
-			else {
-				var msg = (r && r.msg) || 'gagal';
-				var isEn = (SN_LANG !== 'id');
-				if(r && (r.status === -1 || msg.indexOf('Login has expired') !== -1 || msg.indexOf('sesi tidak terotentikasi') !== -1 || msg.indexOf('sesi telah kedaluwarsa') !== -1)){
-					layer && layer.msg ? layer.msg(isEn ? 'Session expired. Redirecting to login...' : 'Sesi login telah kedaluwarsa. Mengalihkan ke login...', {time:2000}) : alert(isEn ? 'Session expired' : 'Sesi kedaluwarsa');
-					setTimeout(function(){ window.location.reload(); }, 1500);
-					cb(null);
-					return;
-				}
-				layer && layer.msg ? layer.msg(msg, {time:3500}) : alert(msg);
-				cb(null);
+			if(r === null || typeof r !== 'object'){
+				selesaiGalat({status: 200, responseText: (typeof r === 'string' ? r : '')}, 'parsererror');
+				bagi('err', {status: 200, responseText: (typeof r === 'string' ? r : '')}, 'parsererror');
+				return;
 			}
+			selesaiOk(r);
+			bagi('ok', r);
 		},
-		error: function(xhr){
+		error: function(xhr, status){
 			doneCleanup();
-			if(xhr && (xhr.status === 401 || xhr.status === 403)){
-				var isEn = (SN_LANG !== 'id');
-				layer && layer.msg ? layer.msg(isEn ? 'Access denied or session expired.' : 'Akses ditolak atau sesi kedaluwarsa.', {time:2500}) : alert(isEn ? 'Access denied' : 'Akses ditolak');
-				setTimeout(function(){ window.location.reload(); }, 1500);
-			}
-			cb(null);
+			selesaiGalat(xhr, status);
+			bagi('err', xhr, status);
 		}
 	});
 }
@@ -3500,8 +3622,10 @@ function snBuka(){
 		snEliteLoad();     /* postur pertahanan & kesiapan DEFCON instan */
 		setTimeout(function(){
 			snGrafik();        /* grafik tren lalu lintas & ancaman */
-			snInitTelemetry(); /* inisialisasi telemetri Google Tag Manager */
 		}, 250);
+		/* Telemetri (skrip pihak ketiga) ditunda sampai tampilan selesai
+		   dan peramban menganggur; bukan bagian dari render awal. */
+		setTimeout(function(){ if($('#snModal').hasClass('on')){ snInitTelemetry(); } }, 4000);
 	}, 30);
 }
 function snTutupLapis(){
@@ -3557,6 +3681,12 @@ function snTutup(){
 	   class, sehingga tidak mungkin tertinggal. */
 	var m = $('#snModal');
 	m.removeClass('on');
+	/* Semua pemantau latar berhenti bersama dialog: tanpa ini polling
+	   pemindaian terus memanggil server padahal tidak ada yang melihat. */
+	['SN_SCAN_CONSOLE_TIMER', 'SN_SCAN_TICKER', 'SN_AV_POLL', 'SN_FW_TIMER'].forEach(function(k){
+		if(window[k]){ clearInterval(window[k]); window[k] = null; }
+	});
+	if(SN_TIMER){ clearInterval(SN_TIMER); SN_TIMER = null; }
 	m.css('display', 'none');
 	/* Bila ada salinan lain akibat plugin terpasang dua kali,
 	   sembunyikan semuanya. */
@@ -3649,19 +3779,17 @@ function snTop(nama, el){
 	}
 }
 function snWafTab(nama, el){
-	$('#top-waf .sn-tabs span').removeClass('on');
+	$('#top-waf > .sn-card > .sn-tabs span').removeClass('on');
 	if(el){
 		$(el).addClass('on');
 	} else {
-		var idx = (nama === 'lua') ? 1 : ((nama === 'upload') ? 2 : 0);
-		$('#top-waf .sn-tabs span').eq(idx).addClass('on');
+		var idx = (nama === 'zy') ? 1 : ((nama === 'upload') ? 2 : 0);
+		$('#top-waf > .sn-card > .sn-tabs span').eq(idx).addClass('on');
 	}
 	$('#top-waf .sn-subpage').removeClass('on');
-	if(nama === 'lua'){
-		$('#w-lua').addClass('on');
-		snEngineMuat();
-		snLuaMuat();
-		snNwMuat();
+	if(nama === 'zy'){
+		$('#w-zy').addClass('on');
+		snZyMuat();
 	}
 	else if(nama === 'upload'){
 		$('#w-upload').addClass('on');
@@ -4011,7 +4139,7 @@ function snShowDefconResultModal(p){
 		+ '</div>'
 
 		+ '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:rgba(0,0,0,0.25);border-radius:6px;font-size:11.5px;color:var(--text-muted,#94a3b8)">'
-			+ '<div>WAF Engine: <b style="color:#fff">' + (p.waf_engine || 'free_waf') + '</b> | ' + (isEn ? 'Active IP Bans: ' : 'IP Terblokir: ') + '<b style="color:#fff">' + (p.bans_active || 0) + '</b></div>'
+			+ '<div>WAF Engine: <b style="color:#fff">' + (p.waf_engine || 'coraza') + '</b> | ' + (isEn ? 'Active IP Bans: ' : 'IP Terblokir: ') + '<b style="color:#fff">' + (p.bans_active || 0) + '</b></div>'
 			+ '<div>' + (isEn ? 'Audited at: ' : 'Waktu audit: ') + '<span style="font-family:var(--mono-font);color:#fff">' + nowTime + '</span></div>'
 		+ '</div>'
 		+ '</div>';
@@ -4040,7 +4168,7 @@ function snToggleEgress(){
 		var pIdx = snProgress(isEn ? 'Updating Egress Guard...' : 'Memperbarui Egress Guard...');
 		snAjax('set_elite_defense', {type: 'egress', mode: next}, function(r){
 			layer.msg(r && r.msg ? r.msg : (isEn ? 'Egress Guard updated successfully' : 'Berhasil memperbarui Egress Guard'));
-			snInitElitePosture();
+			snEliteLoad();
 		}, pIdx);
 	});
 }
@@ -4061,7 +4189,7 @@ function snToggleProc(){
 		var pIdx = snProgress(isEn ? 'Updating Process Watchdog...' : 'Memperbarui Process Watchdog...');
 		snAjax('set_elite_defense', {type: 'proc', mode: next}, function(r){
 			layer.msg(r && r.msg ? r.msg : (isEn ? 'Process Guard updated successfully' : 'Berhasil mengubah mode Process Guard'));
-			snInitElitePosture();
+			snEliteLoad();
 		}, pIdx);
 	});
 }
@@ -4125,8 +4253,8 @@ function snEdrMuat(){
 				+ '<td class="sn-mono">' + a.pid + '</td>'
 				+ '<td class="sn-mono">' + (a.ppid || '-') + '</td>'
 				+ '<td class="sn-mono">' + (a.uid || 1002) + '</td>'
-				+ '<td class="sn-mono sn-clip" title="' + String(a.exe || '').replace(/"/g, '&quot;') + '">' + (a.exe || '-') + '</td>'
-				+ '<td class="sn-mono sn-clip" title="' + String(a.cmdline || '').replace(/"/g, '&quot;') + '">' + (a.cmdline || '-') + '</td>'
+				+ '<td class="sn-mono sn-clip" title="' + snEsc(a.exe) + '">' + snEsc(a.exe || '-') + '</td>'
+				+ '<td class="sn-mono sn-clip" title="' + snEsc(a.cmdline) + '">' + snEsc(a.cmdline || '-') + '</td>'
 				+ '<td><span class="sn-badge sn-off" style="font-weight:600">' + (a.rule || '-') + '</span></td>'
 				+ '<td class="r">' + actBadge + '</td>'
 				+ '<td class="r">' + aksiCol + '</td>'
@@ -4235,10 +4363,10 @@ function snProcWlManageModal(){
 
 			rows += '<tr>'
 				+ '<td class="sn-mono" style="color:var(--muted)">' + (i + 1) + '</td>'
-				+ '<td><b>' + (r.name || '-') + '</b></td>'
+				+ '<td><b>' + snEsc(r.name || '-') + '</b></td>'
 				+ '<td>' + typeBadge + '</td>'
 				+ '<td class="sn-mono sn-clip" title="' + String(r.pattern||'').replace(/"/g,'&quot;') + '"><span class="sn-ell">' + (r.pattern || '-') + '</span></td>'
-				+ '<td class="sn-clip" title="' + String(r.remark||'').replace(/"/g,'&quot;') + '"><span class="sn-ell">' + (r.remark || '-') + '</span></td>'
+				+ '<td class="sn-clip" title="' + snEsc(r.remark) + '"><span class="sn-ell">' + snEsc(r.remark || '-') + '</span></td>'
 				+ '<td class="r">' + statusBadge + '</td>'
 				+ '<td class="r">' + delBtn + '</td>'
 				+ '</tr>';
@@ -4466,7 +4594,9 @@ function snLoadEcharts(cb){
 	};
 	s.onerror = function(){
 		window.SN_ECH_LOADING = false;
-		$('#grafikKosong').text('pustaka grafik tidak termuat').show();
+		var isEn = (SN_LANG !== 'id');
+		$('#grafikKosong').text(isEn ? 'chart library failed to load' : 'pustaka grafik tidak termuat').show();
+		if(window.layer && layer.msg){ layer.msg(isEn ? 'Chart library could not be loaded (/static/js/echarts.min.js). Check the panel static files.' : 'Pustaka grafik tidak bisa dimuat (/static/js/echarts.min.js). Periksa berkas statis panel.', {time: 5000, icon: 2}); }
 	};
 	document.head.appendChild(s);
 }
@@ -4478,6 +4608,7 @@ function snGrafik(force){
 	var now = Date.now();
 	if(!force && (now - SN_LAST_CHART_T < 8000)){ return; }
 	if(typeof echarts === 'undefined'){
+		if(force && window.layer && layer.msg){ layer.msg((SN_LANG !== 'id') ? 'Loading chart library...' : 'Memuat pustaka grafik...', {time: 1500}); }
 		snLoadEcharts(function(){ snGrafik(force); });
 		return;
 	}
@@ -4603,8 +4734,8 @@ function snSitus(btn, isSilent){
 		for(var i = 0; i < m.situs.length; i++){
 			var s = m.situs[i];
 			var st = s.status == '1' ? (isEn ? 'active' : 'aktif') : (isEn ? 'stopped' : 'terhenti');
-			b += '<tr><td>' + s.name + '</td>'
-				+ '<td class="sn-mono sn-clip"><span class="sn-ell">' + s.path + '</span></td>'
+			b += '<tr><td>' + snEsc(s.name) + '</td>'
+				+ '<td class="sn-mono sn-clip"><span class="sn-ell">' + snEsc(s.path) + '</span></td>'
 				+ '<td>' + st + '</td>'
 				+ '<td>' + (s.dipantau ? '<span class="sn-badge sn-ok">' + (isEn ? 'yes' : 'ya') + '</span>' : '<span class="sn-badge sn-off">' + (isEn ? 'no' : 'tidak') + '</span>') + '</td>'
 				+ '<td class="r">' + s.baris + '</td></tr>';
@@ -4967,6 +5098,15 @@ function snPanic(){
 			}
 		});
 	});
+}
+/* Tombol PANIC di header: kondisi sebenarnya dibaca dari server dulu, lalu
+   mengarah ke alur nyalakan (dengan konfirmasi ketik PANIC) atau matikan. */
+function snPanicKancing(){
+	var isEn = (SN_LANG !== 'id');
+	snAjax('get_panic', {}, function(m){
+		if(!m) return;
+		if(m.aktif){ snUnpanic(); } else { snPanic(); }
+	}, null, '#btnPanicToggle');
 }
 function snUnpanic(){
 	var isEn = (SN_LANG !== 'id');
@@ -5378,7 +5518,7 @@ function snPortRender(direction){
 			+ '<td>' + portText + '</td>'
 			+ '<td>' + actBadge + '</td>'
 			+ '<td>' + targetDisplay + '</td>'
-			+ '<td><b>' + (r.remark || '-') + '</b>' + systemTag + '</td>'
+			+ '<td><b>' + snEsc(r.remark || '-') + '</b>' + systemTag + '</td>'
 			+ '<td class="r">' + statusBadge + '</td>'
 			+ '<td class="r">' + aksiBtn + '</td>'
 			+ '</tr>';
@@ -5686,7 +5826,7 @@ function snFwrMuat(btn, isSilent){
 			b += '<tr><td class="sn-mono">' + r.rule + '</td>'
 				+ '<td><span class="sn-badge ' + warna + '">' + r.type + '</span></td>'
 				+ '<td>' + (r.scope || '-') + '</td>'
-				+ '<td class="sn-clip"><span class="sn-ell">' + (r.reason || '-') + '</span></td>'
+				+ '<td class="sn-clip"><span class="sn-ell">' + snEsc(r.reason || '-') + '</span></td>'
 				+ '<td class="r sn-mono">' + sisa + '</td>'
 				+ '<td>' + (r.sumber || '-') + '</td>'
 				+ '<td>' + hapus + '</td></tr>';
@@ -5830,19 +5970,18 @@ function snWafLencana(){
 		if(!m) return;
 		var isEn = (SN_LANG !== 'id');
 		var l = $('#bWaf');
-		var e = (m.engine && m.engine.nginx) || '?';
-		if(e === 'lua_waf' || e === 'free_waf'){
-			l.text('🌐 WAF: Lua'); l.attr('class', 'sn-badge sn-ok');
-			l.attr('title', isEn ? 'Nginx WAF: Embedded Lua WAF actively inspecting HTTP requests' : 'WAF Nginx: Lua WAF mandiri aktif memeriksa request HTTP');
-		} else if(e === 'modsecurity'){
-			l.text('🌐 WAF: ModSec'); l.attr('class', 'sn-badge sn-ok');
-			l.attr('title', isEn ? 'Nginx WAF: ModSecurity actively inspecting HTTP requests' : 'WAF Nginx: ModSecurity aktif memeriksa request HTTP');
-		} else if(e === 'coraza'){
+		var eng = m.engine || {};
+		var e = eng.nginx || '?';
+		var lain = (eng.apache === 'modsecurity' || eng.openlitespeed === 'modsecurity');
+		if(e === 'coraza'){
 			l.text('🌐 WAF: Coraza'); l.attr('class', 'sn-badge sn-ok');
-			l.attr('title', isEn ? 'Nginx WAF: Coraza WAF actively inspecting HTTP requests' : 'WAF Nginx: Coraza WAF aktif memeriksa request HTTP');
+			l.attr('title', isEn ? 'Coraza WAF (OWASP CRS + ZySentinel rules) inspecting HTTP requests' : 'WAF Coraza (OWASP CRS + aturan ZySentinel) aktif memeriksa request HTTP');
+		} else if(lain){
+			l.text('🌐 WAF: ModSec'); l.attr('class', 'sn-badge sn-ok');
+			l.attr('title', isEn ? 'ModSecurity (OWASP CRS + ZySentinel rules) inspecting HTTP requests' : 'ModSecurity (OWASP CRS + aturan ZySentinel) aktif memeriksa request HTTP');
 		} else {
-			l.text(isEn ? '🌐 WAF: Off' : '🌐 WAF: Off'); l.attr('class', 'sn-badge sn-off');
-			l.attr('title', isEn ? 'Web Application Firewall inactive. Nginx runs without WAF filter.' : 'Web Application Firewall nonaktif. Nginx berjalan tanpa filter WAF.');
+			l.text('🌐 WAF: Off'); l.attr('class', 'sn-badge sn-off');
+			l.attr('title', isEn ? 'Web Application Firewall inactive: no WAF module is loaded in the web server.' : 'Web Application Firewall nonaktif: belum ada modul WAF yang dimuat di web server.');
 		}
 	});
 }
@@ -5920,7 +6059,14 @@ function snWafVhost(ws, site, state){
 	var isEn = (SN_LANG !== 'id');
 	var pIdx = snProgress(isEn ? ('Setting WAF for ' + site + '...') : ('Mengatur WAF untuk ' + site + '...'));
 	snAjax('set_waf_vhost', {ws: ws, site: site, state: state}, function(m){
-		if(m){ layer.msg(m, {time:4000}); snWafMuat(); snWafLencana(); }
+		if(m){
+			if(typeof m === 'object' && m.tertunda){
+				layer.alert(snCzEsc(m.pesan), {icon: 0, title: isEn ? 'Saved, WAF not active yet' : 'Tersimpan, WAF belum aktif', btn: isEn ? ['OK'] : ['Mengerti']});
+			} else {
+				layer.msg(m, {time:4000});
+			}
+			snWafMuat(); snWafLencana();
+		}
 	}, pIdx);
 }
 function snWafRule(nama, state){
@@ -5931,11 +6077,10 @@ function snWafRule(nama, state){
 	}, pIdx);
 }
 
-/* ---------- Engine Choice + WAF Control (Config > Engine) ---------- */
-/* Satu sumber data: get_waf_engine. Kartu dipilih dengan klik, tapi
-   penerapan tetap di server. Status "siap" TIDAK sama dengan "berjalan":
-   Coraza bisa "siap" (aset lengkap) sambil engine belum jalan. Itu
-   ditampilkan apa adanya supaya tidak menyesatkan. */
+/* ---------- Status engine WAF (Config > WAF) ----------
+   Satu sumber data: get_waf_engine. Status "siap" TIDAK sama dengan
+   "berjalan": aset Coraza bisa lengkap sementara modul belum dimuat ke
+   nginx. Itu ditampilkan apa adanya supaya tidak menyesatkan. */
 var SN_ENG = {};
 
 function snEngineMuat(){
@@ -5943,115 +6088,53 @@ function snEngineMuat(){
 		if(!m) return;
 		SN_ENG = m;
 		var isEn = (SN_LANG !== 'id');
-		var fw = m.free_waf || {}, cz = m.coraza || {};
+		var cz = m.coraza || {};
 		var nginx = m.nginx_connector || 'none';
 
-		// --- status free_waf ---
-		var fwSt = fw.lua === 'ada'
-			? ('<span class="sn-badge sn-ok">' + (isEn ? 'ready' : 'siap') + '</span>')
-			: ('<span class="sn-badge sn-bad">' + (isEn ? 'nginx without Lua' : 'nginx tanpa Lua') + '</span>');
-		var fwJalan = fw.loaded === 'ya'
-			? ('<span class="sn-badge sn-ok">' + (isEn ? 'running' : 'berjalan') + '</span>')
-			: ('<span class="sn-badge sn-off">' + (isEn ? 'not loaded' : 'tidak termuat') + '</span>');
+		var czSt = !cz.aset
+			? '<span class="sn-badge sn-off">' + (isEn ? 'not downloaded' : 'belum diunduh') + '</span>'
+			: '<span class="sn-badge sn-warn">' + (isEn ? 'assets ready' : 'aset siap') + '</span>';
+		var czJalan = (nginx === 'coraza')
+			? '<span class="sn-badge sn-ok">' + (isEn ? 'module loaded' : 'modul termuat') + '</span>'
+			: '<span class="sn-badge sn-off">' + (isEn ? 'module not loaded' : 'modul belum dimuat') + '</span>';
+		var lain = '';
+		if(m.apache === 'modsecurity'){ lain += '<span class="sn-badge sn-ok">Apache ModSecurity</span>'; }
+		if(m.openlitespeed === 'modsecurity'){ lain += '<span class="sn-badge sn-ok">OpenLiteSpeed ModSecurity</span>'; }
 
-		// --- status coraza ---
-		var czSt, czJalan;
-		if(!cz.aset){
-			czSt = '<span class="sn-badge sn-off">' + (isEn ? 'not downloaded' : 'belum diunduh') + '</span>';
-		} else {
-			czSt = '<span class="sn-badge sn-warn">' + (isEn ? 'assets ready' : 'aset siap') + '</span>';
-		}
-		czJalan = (nginx === 'coraza' || nginx === 'modsecurity')
-			? ('<span class="sn-badge sn-ok">' + (isEn ? 'connector installed' : 'konektor terpasang') + '</span>')
-			: ('<span class="sn-badge sn-off">' + (isEn ? 'connector missing' : 'konektor belum ada') + '</span>');
-
-		// 1. Hero Card Coraza (khusus untuk subpage Coraza #w-eng)
-		var isCzActive = (m.pilih === 'coraza');
-		var czBtn = isCzActive
-			? ('<span class="sn-badge sn-ok" style="font-size:12px;padding:3px 10px">' + (isEn ? '✓ Active (Primary Engine)' : '✓ Aktif (Engine Utama)') + '</span>')
-			: ('<span class="sn-btn pri" onclick="snEnginePilih(\'coraza\');event.stopPropagation();" title="' + (isEn ? 'Select and apply Coraza WAF Engine' : 'Pilih dan Terapkan Engine Coraza WAF') + '">' + (isEn ? 'Use Coraza' : 'Gunakan Coraza') + '</span>');
-
-		var czDesc = isEn
-			? 'OWASP Coraza engine with comprehensive CRS rules. Inspects SQL injection, XSS, RCE, and advanced web protocols. Requires nginx connector module (--with-compat).'
-			: 'Mesin OWASP Coraza dengan rule CRS komprehensif. Memeriksa ancaman injeksi SQL, XSS, RCE, dan protokol web tingkat lanjut. Memerlukan konektor modul nginx (--with-compat).';
-
-		var czHtml = ''
-			+ '<div class="sn-engcard ' + (isCzActive ? 'on' : '') + '" title="' + (isEn ? 'Click to activate Coraza WAF engine' : 'Klik untuk mengaktifkan engine Coraza WAF') + '" onclick="snCardClick(\'coraza\')">'
-			+ '<div class="t">Coraza + OWASP CRS</div>'
-			+ '<div class="d">' + czDesc + '</div>'
-			+ '<div class="st">' + czSt + czJalan
+		var aktif = (nginx === 'coraza');
+		var tombol = aktif
+			? ('<span class="sn-badge sn-ok" style="font-size:12px;padding:3px 10px">' + (isEn ? '✓ Active on nginx' : '✓ Aktif di nginx') + '</span>')
+			: ('<span class="sn-btn pri" onclick="snCorazaPilihAlur();event.stopPropagation();" title="' + (isEn ? 'Download CRS, compile the nginx module and install the ZySentinel ruleset' : 'Unduh CRS, compile modul nginx, dan pasang ruleset ZySentinel') + '">' + (isEn ? 'Set up Coraza' : 'Siapkan Coraza') + '</span>');
+		var desc = isEn
+			? 'Coraza (Go) for nginx, ModSecurity for Apache and OpenLiteSpeed, all running one ruleset: OWASP CRS + ZySentinel rules (SQLi, XSS, traversal, sensitive files, scanners, bots, webshells) with the ZySentinel block page.'
+			: 'Coraza (Go) untuk nginx, ModSecurity untuk Apache dan OpenLiteSpeed, semuanya menjalankan satu ruleset: OWASP CRS + aturan ZySentinel (SQLi, XSS, traversal, berkas sensitif, pemindai, bot, webshell) dengan halaman blocker ZySentinel.';
+		$('#snCorazaHeroCard').html(
+			'<div class="sn-engcard ' + (aktif ? 'on' : '') + '">'
+			+ '<div class="t">Coraza + OWASP CRS + ZySentinel</div>'
+			+ '<div class="d">' + desc + '</div>'
+			+ '<div class="st">' + czSt + czJalan + lain
 			+ (cz.versi && cz.versi !== '-' ? '<span class="sn-badge sn-off">CRS ' + cz.versi + '</span>' : '')
+			+ (m.zyrules ? '<span class="sn-badge sn-ok">ZySentinel Rules</span>' : '<span class="sn-badge sn-off">' + (isEn ? 'ruleset not installed' : 'ruleset belum dipasang') + '</span>')
 			+ '</div>'
-			+ '<div class="pilih">' + czBtn + '</div></div>';
-		$('#snCorazaHeroCard').html(czHtml);
+			+ '<div class="pilih">' + tombol + '</div></div>');
 
-		// 2. Hero Card Lua WAF (khusus untuk subpage LUA #w-lua)
-		var isFwActive = (m.pilih === 'free_waf');
-		var fwBtn = isFwActive
-			? ('<span class="sn-badge sn-ok" style="font-size:12px;padding:3px 10px">' + (isEn ? '✓ Active (Primary Engine)' : '✓ Aktif (Engine Utama)') + '</span>')
-			: ('<span class="sn-btn pri" onclick="snEnginePilih(\'free_waf\');event.stopPropagation();" title="' + (isEn ? 'Select and apply Lua WAF Engine' : 'Pilih dan Terapkan Engine Lua WAF') + '">' + (isEn ? 'Use Lua WAF' : 'Gunakan Lua WAF') + '</span>');
-
-		var fwDesc = isEn
-			? 'Native embedded WAF module inside nginx. Lightweight, fast, inspects web injection attack patterns, and provides per-IP CC protection.'
-			: 'Modul WAF tertanam native di dalam nginx. Ringan, cepat, memeriksa pola serangan injeksi web dan proteksi CC per IP.';
-
-		var fwHtml = ''
-			+ '<div class="sn-engcard ' + (isFwActive ? 'on' : '') + '" title="' + (isEn ? 'Click to activate Lua WAF engine' : 'Klik untuk mengaktifkan engine Lua WAF') + '" onclick="snCardClick(\'free_waf\')">'
-			+ '<div class="t">Lua WAF</div>'
-			+ '<div class="d">' + fwDesc + '</div>'
-			+ '<div class="st">' + fwSt + fwJalan
-			+ '<span class="sn-badge sn-off">Lua: ' + (fw.lua || '-') + '</span></div>'
-			+ '<div class="pilih">' + fwBtn + '</div></div>';
-		$('#snLuaHeroCard').html(fwHtml);
-
-		// --- info aset coraza ---
+		var modul = {dimuat: (isEn ? 'loaded in nginx' : 'dimuat di nginx'), tersimpan: (isEn ? 'built (cached), not loaded' : 'terbangun (cache), belum dimuat'), 'tidak-ada': (isEn ? 'not built' : 'belum dibangun')}[cz.modul] || '-';
 		$('#corazaInfo').html(
 			'<div><span>Assets</span><span>' + (cz.aset ? (isEn ? 'present' : 'ada') : (isEn ? 'not downloaded' : 'belum diunduh')) + '</span></div>'
 			+ '<div><span>CRS Version</span><span>' + (cz.versi || '-') + '</span></div>'
-			+ '<div><span>CRS Source</span><span>' + (cz.crs_source || 'github') + '</span></div>'
+			+ '<div><span>CRS Rule Files</span><span>' + (cz.aturan || 0) + '</span></div>'
 			+ '<div><span>Nginx Connector</span><span>' + nginx + '</span></div>'
-		);
+			+ '<div><span>Connector Module</span><span>' + modul + '</span></div>'
+			+ '<div><span>Apache</span><span>' + (m.apache || '-') + '</span></div>');
+		var btnLoad = $('#btnCzLoad');
+		if(cz.modul === 'dimuat'){ btnLoad.text(isEn ? 'Unload from nginx' : 'Cabut dari nginx').attr('class', 'sn-btn dgr').attr('onclick', 'snCorazaCabut()'); }
+		else { btnLoad.text(isEn ? 'Load to nginx' : 'Pasang ke nginx').attr('class', 'sn-btn').attr('onclick', 'snCorazaPasang()'); }
 		var cb = $('#corazaBadge');
 		cb.text(cz.aset ? (isEn ? 'ready' : 'siap') : (isEn ? 'missing' : 'belum ada'));
 		cb.attr('class', 'sn-badge ' + (cz.aset ? 'sn-ok' : 'sn-off'));
 
 		snModeMuat();
 		snWafLencana();
-	});
-}
-
-function snCardClick(eng){
-	if(!SN_ENG || !SN_ENG.pilih){
-		snEnginePilih(eng);
-		return;
-	}
-	var nama = (eng === 'coraza') ? 'Coraza + OWASP CRS' : 'Lua WAF';
-	if(SN_ENG.pilih === eng){
-		layer.msg('Engine ' + nama + ' saat ini sudah aktif sebagai mesin utama.', {time: 2500});
-	} else {
-		snEnginePilih(eng);
-	}
-}
-
-function snEnginePilih(eng){
-	var isEn = (SN_LANG !== 'id');
-	var nama = (eng === 'coraza') ? 'Coraza + OWASP CRS' : 'Lua WAF';
-	var tanya = (eng === 'coraza')
-		? (isEn ? ('Select and activate ' + nama + ' engine? Assets will be installed if not present.') : ('Pilih dan aktifkan engine ' + nama + '? Aset disiapkan bila belum ada.'))
-		: (isEn ? ('Select and activate ' + nama + ' engine? Lightweight Lua engine will be hooked into Nginx.') : ('Pilih dan aktifkan engine ' + nama + '? Engine Lua ringan di-hook ke Nginx.'));
-	if(SN_WAF_STATUS.engine_aktif === eng){
-		layer.msg(isEn ? ('Engine ' + nama + ' is already active as primary engine.') : ('Engine ' + nama + ' saat ini sudah aktif sebagai mesin utama.'), {time: 2500});
-		return;
-	}
-	layer.confirm(tanya, {
-		title: isEn ? ('Select WAF Engine: ' + nama) : ('Pilih Engine WAF: ' + nama),
-		btn: isEn ? ['Select Engine', 'Cancel'] : ['Pilih Engine', 'Batal']
-	}, function(idx){
-		layer.close(idx);
-		var pIdx = snProgress(isEn ? ('Switching WAF engine to ' + nama + '...') : ('Mengalihkan engine WAF ke ' + nama + '...'));
-		snAjax('set_waf_engine', {engine: eng}, function(m){
-			if(m){ layer.msg(m, {time: 3500}); snWafMuat(); snWafLencana(); }
-		}, pIdx);
 	});
 }
 
@@ -6095,300 +6178,519 @@ function snModeKirim(mode){
 	}, pIdx);
 }
 
+/* ---------- Modal progres Coraza ----------
+   Unduh, compile konektor, dan pasang modul berjalan di latar (job
+   get_coraza_job). Modal ini menampilkan tahap yang sedang dikerjakan, bar
+   kemajuan, waktu berjalan, dan ekor log, supaya pengguna tahu ada progres.
+   Compile hanya membangun modul dinamis; biner nginx tidak diubah dan modul
+   baru dimuat ke nginx lewat langkah "Pasang ke nginx" yang meminta konfirmasi. */
+var SN_CZ_ICON = {wait:'○', run:'⏳', ok:'✔', fail:'✖', skip:'↷', warn:'⚠'};
+var SN_CZ_WARNA = {wait:'#64748b', run:'#38bdf8', ok:'#10b981', fail:'#ef4444', skip:'#94a3b8', warn:'#f59e0b'};
+
+function snCzEsc(t){ return $('<div>').text(t || '').html(); }
+
+function snCzModal(judul, langkah){
+	var isEn = (SN_LANG !== 'id');
+	var daftar = '';
+	for(var i = 0; i < langkah.length; i++){
+		daftar += '<div id="snCzS' + i + '" style="padding:3px 0;font-size:13px;color:' + SN_CZ_WARNA.wait + '">'
+			+ '<span class="ic" style="display:inline-block;width:22px">' + SN_CZ_ICON.wait + '</span>'
+			+ '<span class="tx">' + langkah[i] + '</span><span class="ket" style="margin-left:8px;opacity:.75;font-size:12px"></span></div>';
+	}
+	var html = '<div style="padding:14px 18px">'
+		+ '<div id="snCzStat" style="margin-bottom:6px;font-size:13px;font-weight:600">' + (isEn ? 'Starting...' : 'Memulai...') + '</div>'
+		+ '<div class="sn-bar" style="margin:0 0 10px"><i id="snCzBar" style="width:0%"></i></div>'
+		+ daftar
+		+ '<pre id="snCzLog" class="sn-mono" style="height:150px;overflow:auto;background:#020611;color:#38bdf8;padding:10px;border-radius:6px;font-size:11.5px;white-space:pre-wrap;margin:10px 0 0"></pre>'
+		+ '<div id="snCzNote" style="margin-top:10px;font-size:12.5px;line-height:1.5"></div>'
+		+ '<div id="snCzFoot" style="margin-top:12px;text-align:right;display:none"></div>'
+		+ '</div>';
+	var idx = layer.open({type:1, title:judul, area:['700px','auto'], content:html, closeBtn:0, shade:[0.35,'#000']});
+	var t0 = Date.now();
+	return {
+		idx: idx,
+		set: function(n, state, ket){
+			var $r = $('#snCzS' + n);
+			$r.css('color', SN_CZ_WARNA[state] || SN_CZ_WARNA.wait);
+			$r.find('.ic').text(SN_CZ_ICON[state] || SN_CZ_ICON.wait);
+			$r.find('.ket').text(ket || '');
+		},
+		bar: function(pct){ $('#snCzBar').css('width', Math.max(0, Math.min(100, pct)) + '%'); },
+		stat: function(t){ $('#snCzStat').text(t); },
+		log: function(t){
+			var $l = $('#snCzLog');
+			$l.text(t || '');
+			if($l.length){ $l.scrollTop($l[0].scrollHeight); }
+		},
+		note: function(h){ $('#snCzNote').html(h); },
+		detik: function(){ return Math.round((Date.now() - t0) / 1000); },
+		selesai: function(extraHtml){
+			$('#snCzFoot').show().html((extraHtml || '') + ' <span class="sn-btn pri" onclick="layer.close(' + idx + ')">' + (isEn ? 'Close' : 'Tutup') + '</span>');
+		}
+	};
+}
+
+function snCzLangkahUnduh(){
+	return (SN_LANG !== 'id')
+		? ['Check latest CRS version', 'Download CRS archive', 'Verify archive and install rules', 'Fetch coraza-nginx connector source']
+		: ['Cek versi CRS terbaru', 'Unduh arsip CRS', 'Verifikasi arsip dan pasang aturan', 'Unduh source konektor coraza-nginx'];
+}
+function snCzLangkahBuild(){
+	return (SN_LANG !== 'id')
+		? ['Check active nginx and compile prerequisites', 'Check module cache', 'Prepare sources (libcoraza, coraza-nginx, nginx)', 'Prepare Go SDK (aaPanel Go SDK Manager)', 'Compile libcoraza (Go)', 'Configure dynamic module (same args as active nginx)', 'Compile nginx module', 'Verify binary signature and save to cache']
+		: ['Periksa nginx aktif dan prasyarat compile', 'Periksa cache modul', 'Siapkan bahan (libcoraza, coraza-nginx, nginx)', 'Siapkan Go SDK (aaPanel Go SDK Manager)', 'Compile libcoraza (Go)', 'Configure modul dinamis (argumen sama dengan nginx aktif)', 'Compile modul nginx', 'Verifikasi signature biner dan simpan ke cache'];
+}
+function snCzLangkahPasang(){
+	return (SN_LANG !== 'id')
+		? ['Isolated test (nginx not touched)', 'Copy module and libcoraza', 'Add load_module (nginx.conf backup)', 'nginx -t, reload, verify worker PIDs', 'Proof: workers loaded libcoraza']
+		: ['Uji terisolasi (nginx aktif tidak disentuh)', 'Salin modul dan libcoraza', 'Tambah load_module (backup nginx.conf)', 'nginx -t, reload, verifikasi PID worker', 'Bukti: worker memuat libcoraza'];
+}
+
+/* Pecahan selesai (0..1) dari status job. */
+function snCzFrac(st){
+	var total = st.total || 0, tahap = st.tahap || 0;
+	if(!total) return st.running ? 0.05 : (st.rc === 0 ? 1 : 0);
+	if(!st.running && st.rc === 0) return 1;
+	return Math.max(tahap - 1, 0) / total;
+}
+
+/* Satu baris per tahap n/total: baris offset+n-1. */
+function snCzTickDetail(ui, offset, st){
+	var total = st.total || 0, tahap = st.tahap || 0;
+	for(var n = 1; n <= total; n++){
+		var baris = offset + n - 1;
+		if(!st.running && st.rc === 0) ui.set(baris, 'ok');
+		else if(n < tahap) ui.set(baris, 'ok');
+		else if(n === tahap) ui.set(baris, st.running ? 'run' : 'fail');
+		else ui.set(baris, 'wait');
+	}
+}
+
+/* Satu baris ringkas untuk seluruh job; keterangan = tahap saat ini. */
+function snCzTickCompact(ui, row, st){
+	var isEn = (SN_LANG !== 'id');
+	var ket = (st.total ? (st.tahap + '/' + st.total + ' ') : '') + (st.etap || '');
+	var state = st.running ? 'run' : (st.rc === 0 ? 'ok' : 'fail');
+	if(state === 'ok' && /TIDAK compile ulang|sudah ada di cache|dipakai dari cache/.test(st.log || '')){
+		ket = isEn ? 'cache reused, nothing recompiled' : 'cache dipakai, tidak compile ulang';
+	} else if(state === 'ok'){ ket = ''; }
+	ui.set(row, state, ket);
+}
+
+/* Mulai job lewat method, lalu polling sampai selesai. onTick(st) tiap
+   polling; cb(ok, st) saat selesai. */
+function snCzRun(ui, method, job, onTick, cb){
+	var isEn = (SN_LANG !== 'id');
+	snAjax(method, {}, function(m){
+		if(!m){ cb(false, {rc: 1, log: isEn ? 'The job could not be started.' : 'Job tidak bisa dimulai.'}); return; }
+		if(m.started === false && m.job && m.job !== job){
+			cb(false, {rc: 1, log: (isEn ? 'Another Coraza job is running: ' : 'Job Coraza lain sedang berjalan: ') + m.job});
+			return;
+		}
+		var tick = function(){
+			snAjax('get_coraza_job', {job: job}, function(st){
+				if(!st){ setTimeout(tick, 3000); return; }
+				ui.log(st.log || '');
+				onTick(st);
+				if(st.running){
+					ui.stat((st.etap ? ('[' + st.tahap + '/' + st.total + '] ' + st.etap) : (isEn ? 'Running...' : 'Berjalan...')) + ' · ' + ui.detik() + (isEn ? 's' : ' dtk'));
+					setTimeout(tick, 1000);
+					return;
+				}
+				cb(st.rc === 0, st);
+			}, null, null, true);
+		};
+		setTimeout(tick, 600);
+	}, null, null, true);
+}
+
 function snCorazaUnduh(){
 	var isEn = (SN_LANG !== 'id');
-	layer.confirm(isEn ? 'Download Coraza + OWASP CRS assets from official source? Existing assets will be replaced.' : ('Unduh aset Coraza + OWASP CRS dari sumber resmi? '
+	layer.confirm(isEn ? 'Download Coraza + OWASP CRS assets from official source? If the installed version is already the latest, nothing is re-downloaded.' : ('Unduh aset Coraza + OWASP CRS dari sumber resmi? '
 		+ 'Bila versi sudah terpasang, tidak ada yang diunduh ulang.'), {
 		title: isEn ? 'Download Coraza Assets' : 'Unduh Aset Coraza',
 		btn: isEn ? ['Download', 'Cancel'] : ['Unduh', 'Batal']
 	}, function(idx){
 		layer.close(idx);
-		var pIdx = snProgress(isEn ? 'Downloading Coraza & OWASP CRS assets...' : 'Mengunduh aset Coraza & rules CRS...');
-		snAjax('coraza_download', {}, function(m){
-			if(m){ layer.msg(isEn ? 'Assets downloaded successfully' : 'Aset berhasil diunduh', {time:2500}); }
+		var ui = snCzModal(isEn ? 'Download Coraza Assets' : 'Unduh Aset Coraza', snCzLangkahUnduh());
+		ui.set(0, 'run');
+		snCzRun(ui, 'coraza_download', 'download', function(st){
+			snCzTickDetail(ui, 0, st);
+			ui.bar(100 * snCzFrac(st));
+		}, function(ok, st){
+			if(ok){
+				ui.stat(isEn ? 'Done: Coraza assets are ready' : 'Selesai: aset Coraza siap');
+				ui.bar(100);
+				ui.note('<span style="color:#10b981">' + (isEn ? 'Assets downloaded and verified.' : 'Aset berhasil diunduh dan diverifikasi.') + '</span> '
+					+ (isEn ? 'Next: "Compile Connector" builds the nginx module.' : 'Berikutnya: "Compile Konektor" membangun modul nginx.'));
+			} else {
+				ui.stat(isEn ? 'Download failed' : 'Unduhan gagal');
+				ui.note('<span style="color:#ef4444">' + (isEn ? 'Failed. Existing assets were not modified. See log above.' : 'Gagal. Aset lama tidak diubah. Lihat log di atas.') + '</span>');
+			}
+			ui.selesai();
 			snEngineMuat();
-		}, pIdx);
+		});
 	});
 }
 
-/* ---------- tab WAF (engine free_waf) ---------- */
-var SN_FW_LIST = 'ip_black';
-var SN_FW_MODUL_NAMA = {
-	cc: 'CC Protection', get: 'Pindai Argumen', post: 'Pindai POST',
-	cookie: 'Pindai Cookie', 'user-agent': 'Filter User-Agent',
-	scan: 'Filter Scanner', url_black: 'Daftar URL Hitam',
-	drop_abroad: 'Block Abroad (luar negeri)'
-};
-
-/* Pemuat kartu LUA (engine free_waf). NAMANYA BUKAN snEngineMuat:
-   snEngineMuat dipakai kartu Engine Choice + switch mode. Dua fungsi
-   dengan nama sama akan saling menimpa, dan yang menang fungsi yang
-   terakhir dibaca — akibatnya pemuat engine choice tidak pernah jalan
-   dan badge WAF Control berhenti di "loading". */
-function snLuaMuat(){
-	snAjax('get_freewaf', {}, function(m){
-		if(!m) return;
-		var s = m.status || {};
-		var baris = [
-			['Lua Module', s.lua === 'ada' ? 'available' : 'MISSING'],
-			['Engine Files', s.engine_file === 'ada' ? 'installed' : 'missing'],
-			['Nginx Hook', s.conf === 'ada' ? 'installed' : 'not installed'],
-			['Loaded', s.loaded === 'ya' ? 'yes' : 'no'],
-			['Mode', s.mode || '-'],
-			['Home', s.home || '-']
-		];
-		var h = '';
-		for(var i = 0; i < baris.length; i++){
-			h += '<div><span>' + baris[i][0] + '</span><span>' + baris[i][1] + '</span></div>';
-		}
-		$('#fwEngine').html(h);
-
-		var buka = $('#btnFwOpen');
-		if(m.open){ buka.text('Disable WAF'); buka.attr('class', 'sn-btn dgr'); }
-		else { buka.text('Enable WAF'); buka.attr('class', 'sn-btn pri'); }
-		var mon = $('#btnFwMonitor');
-		if(m.monitor){ mon.text('Mode: monitor'); }
-		else { mon.text('Mode: blocking'); }
-		$('#fwGlobalNote').html(
-			'WAF global <b>' + (m.open ? 'AKTIF' : 'MATI') + '</b>, mode <b>'
-			+ (m.monitor ? 'monitor (hanya mencatat)' : 'blocking (memblokir)') + '</b>. '
-			+ 'CC global: ' + ((m.cc && m.cc.limit) || '-') + ' request per '
-			+ ((m.cc && m.cc.cycle) || '-') + ' detik, blokir '
-			+ ((m.cc && m.cc.endtime) || '-') + ' detik.');
-
-		var mb = '';
-		for(var k in SN_FW_MODUL_NAMA){
-			var nyala = m.modul && m.modul[k];
-			mb += '<tr><td>' + SN_FW_MODUL_NAMA[k] + '</td>'
-				+ '<td>' + (nyala ? '<span class="sn-badge sn-ok">on</span>' : '<span class="sn-badge sn-off">off</span>') + '</td>'
-				+ '<td style="width:96px">' + (nyala
-					? '<span class="sn-btn" onclick="snFwModul(\'' + k + '\',\'off\')" title="Nonaktifkan Modul ' + SN_FW_MODUL_NAMA[k] + '">Off</span>'
-					: '<span class="sn-btn pri" onclick="snFwModul(\'' + k + '\',\'on\')" title="Aktifkan Modul ' + SN_FW_MODUL_NAMA[k] + '">On</span>') + '</td></tr>';
-		}
-		$('#tbFwModul').html(mb || '<tr><td colspan="3" class="sn-empty">no module data</td></tr>');
-
-		if(m.cc){
-			$('#fwCcLimit').val(m.cc.limit || '');
-			$('#fwCcCycle').val(m.cc.cycle || '');
-			$('#fwCcEnd').val(m.cc.endtime || '');
-			$('#fwCcNow').text('Aktif: ' + (m.cc.limit || '-') + ' request per '
-				+ (m.cc.cycle || '-') + ' detik, blokir ' + (m.cc.endtime || '-') + ' detik.');
-		}
-		snFwSitesMuat();
-		snFwListMuat();
-	});
-}
-
-function snFwOpen(){
+function snCorazaBuild(after){
 	var isEn = (SN_LANG !== 'id');
-	var tanya = isEn ? 'Toggle entire Lua WAF engine state? Changes affect all protected virtual hosts.' : ('Nyalakan atau matikan seluruh WAF engine LUA? '
-		+ 'Perubahan berlaku untuk semua vhost yang dilindungi.');
-	layer.confirm(tanya, {
-		title: isEn ? 'Toggle Lua WAF Engine' : 'Sakelar Engine Lua WAF',
-		btn: isEn ? ['Confirm', 'Cancel'] : ['Konfirmasi', 'Batal']
+	layer.confirm(isEn
+		? 'Compile the Coraza connector module for the ACTIVE nginx version? It runs in the background at lowest priority. The nginx binary is NOT modified and nothing is loaded into nginx. The first build can take several minutes (libcoraza is compiled with Go from aaPanel Go SDK Manager). If the cached build still matches the nginx version and configure arguments, nothing is recompiled.'
+		: 'Compile modul konektor Coraza untuk versi nginx AKTIF? Berjalan di latar dengan prioritas terendah. Biner nginx TIDAK diubah dan tidak ada yang dimuat ke nginx. Compile pertama bisa beberapa menit (libcoraza dikompilasi dengan Go dari aaPanel Go SDK Manager). Bila cache masih cocok dengan versi nginx dan argumen configure, tidak ada yang dikompilasi ulang.', {
+		title: isEn ? 'Compile Coraza Connector' : 'Compile Konektor Coraza',
+		btn: isEn ? ['Compile', 'Cancel'] : ['Compile', 'Batal']
 	}, function(idx){
 		layer.close(idx);
-		var pIdx = snProgress(isEn ? 'Updating Lua WAF state...' : 'Mengubah status Lua WAF...');
-		snAjax('get_freewaf', {}, function(m){
-			if(!m){ layer.close(pIdx); return; }
-			var aksi = m.open ? 'off' : 'on';
-			snAjax('set_fw_open', {state: aksi}, function(r){
-				if(r){ layer.msg(r, {time:3000}); snLuaMuat(); snModeMuat(); }
-			}, pIdx);
+		var ui = snCzModal(isEn ? 'Compile Coraza Connector' : 'Compile Konektor Coraza', snCzLangkahBuild());
+		ui.set(0, 'run');
+		snCzRun(ui, 'build_coraza', 'build', function(st){
+			snCzTickDetail(ui, 0, st);
+			ui.bar(100 * snCzFrac(st));
+		}, function(ok, st){
+			if(ok){
+				var cache = /TIDAK compile ulang/.test(st.log || '');
+				ui.stat(isEn ? 'Done: connector module is ready' : 'Selesai: modul konektor siap');
+				ui.bar(100);
+				ui.note('<span style="color:#10b981">' + (cache
+					? (isEn ? 'Cache matched the active nginx; nothing was recompiled.' : 'Cache cocok dengan nginx aktif; tidak ada yang dikompilasi ulang.')
+					: (isEn ? 'Module compiled and saved in the plugin cache folder (coraza-cache).' : 'Modul dikompilasi dan disimpan di folder cache plugin (coraza-cache).')) + '</span> '
+					+ (isEn ? 'It is not loaded yet: use "Load to nginx".' : 'Belum dimuat: gunakan "Pasang ke nginx".'));
+			} else {
+				ui.stat(isEn ? 'Compile failed' : 'Compile gagal');
+				ui.note('<span style="color:#ef4444">' + (isEn ? 'Failed. nginx was not touched. See the log above.' : 'Gagal. nginx tidak disentuh. Lihat log di atas.') + '</span>');
+			}
+			ui.selesai();
+			snEngineMuat();
+			if(typeof after === 'function') after(ok);
 		});
 	});
-}
-function snFwMonitor(){
-	var isEn = (SN_LANG !== 'id');
-	snAjax('get_freewaf', {}, function(m){
-		if(!m) return;
-		var aksi = m.monitor ? 'blocking' : 'monitor';
-		var tanya = aksi === 'blocking'
-			? (isEn ? 'Switch to Blocking mode? WAF will actively drop malicious requests.' : 'Aktifkan mode blocking? WAF akan benar-benar memblokir request.')
-			: (isEn ? 'Switch to Monitor mode? WAF will only log detections without blocking.' : 'Kembali ke mode monitor? WAF hanya mencatat, tidak memblokir.');
-		layer.confirm(tanya, {
-			title: isEn ? 'Lua WAF Mode' : 'Mode Lua WAF',
-			btn: isEn ? ['Confirm', 'Cancel'] : ['Konfirmasi', 'Batal']
-		}, function(idx){
-			layer.close(idx);
-			var pIdx = snProgress(isEn ? 'Updating WAF inspection mode...' : 'Memperbarui mode inspeksi WAF...');
-			snAjax('set_fw_monitor', {state: aksi}, function(r){
-				if(r){ layer.msg(r, {time:3000}); snLuaMuat(); snModeMuat(); }
-			}, pIdx);
-		});
-	});
-}
-function snFwModul(modul, state){
-	var isEn = (SN_LANG !== 'id');
-	var pIdx = snProgress(isEn ? ('Updating module ' + modul + '...') : ('Memperbarui modul ' + modul + '...'));
-	snAjax('set_fw_module', {module: modul, state: state}, function(m){
-		if(m){ layer.msg(m, {time:2500}); snLuaMuat(); }
-	}, pIdx);
-}
-function snFwCc(){
-	var isEn = (SN_LANG !== 'id');
-	var lim = $('#fwCcLimit').val().trim();
-	var cyc = $('#fwCcCycle').val().trim();
-	var end = $('#fwCcEnd').val().trim();
-	var pIdx = snProgress(isEn ? 'Saving CC Protection settings...' : 'Menyimpan setelan Proteksi CC...');
-	snAjax('set_fw_cc', {limit: lim, cycle: cyc, endtime: end}, function(m){
-		if(m){ layer.msg(m, {time:3000}); snLuaMuat(); }
-	}, pIdx);
 }
 
-function snFwSitesMuat(){
+function snCorazaPasang(){
 	var isEn = (SN_LANG !== 'id');
-	snAjax('get_fw_sites', {}, function(m){
-		if(!m) return;
-		var b = '';
-		for(var i = 0; i < m.length; i++){
-			var s = m[i];
-			var st = s.open ? ('<span class="sn-badge sn-ok">' + (isEn ? 'on' : 'aktif') + '</span>') : ('<span class="sn-badge sn-off">' + (isEn ? 'off' : 'nonaktif') + '</span>');
-			var cc = s.cc_open ? (s.cc_limit + '/' + s.cc_cycle + 's ' + (isEn ? 'block ' : 'blokir ') + s.cc_endtime + 's') : '-';
-			var tombol = s.open
-				? ('<span class="sn-btn" onclick="snFwSite(\'' + s.site + '\',\'off\')" title="' + (isEn ? 'Disable WAF for site ' : 'Nonaktifkan WAF Situs ') + s.site + '">Off</span>')
-				: ('<span class="sn-btn pri" onclick="snFwSite(\'' + s.site + '\',\'on\')" title="' + (isEn ? 'Enable WAF for site ' : 'Aktifkan WAF Situs ') + s.site + '">On</span>');
-			b += '<tr><td>' + s.site + '</td><td>' + st + '</td><td class="sn-mono">' + cc + '</td>'
-				+ '<td><span class="sn-btn" onclick="snFwSiteCc(\'' + s.site + '\')" title="' + (isEn ? 'Configure Challenge Collapsar (CC) limit for this site' : 'Atur Batas Challenge Collapsar (CC) Situs Ini') + '">CC</span></td>'
-				+ '<td>' + tombol + '</td></tr>';
+	layer.confirm(isEn
+		? 'Load the Coraza module into the ACTIVE nginx? This edits nginx.conf (automatic .bak backup), runs nginx -t and RELOADS nginx on the production server. An isolated test runs first; if anything fails, nginx.conf is restored. Note: every nginx worker will load libcoraza (Go runtime), which uses extra memory even for sites without Coraza enabled.'
+		: 'Muat modul Coraza ke nginx AKTIF? Ini mengubah nginx.conf (backup .bak otomatis), menjalankan nginx -t dan me-RELOAD nginx di server produksi. Uji terisolasi dijalankan lebih dulu; bila ada yang gagal, nginx.conf dikembalikan. Catatan: setiap worker nginx akan memuat libcoraza (runtime Go) yang memakai memori tambahan, juga untuk situs yang tidak mengaktifkan Coraza.', {
+		title: isEn ? 'Load Coraza into nginx' : 'Pasang Coraza ke nginx',
+		btn: isEn ? ['Load and reload nginx', 'Cancel'] : ['Pasang dan reload nginx', 'Batal'],
+		icon: 3
+	}, function(idx){
+		layer.close(idx);
+		var ui = snCzModal(isEn ? 'Load Coraza into nginx' : 'Pasang Coraza ke nginx', snCzLangkahPasang());
+		ui.set(0, 'run');
+		snCzRun(ui, 'install_coraza_module', 'install', function(st){
+			snCzTickDetail(ui, 0, st);
+			ui.bar(100 * snCzFrac(st));
+		}, function(ok){
+			if(ok){
+				ui.stat(isEn ? 'Done: Coraza module is loaded in nginx' : 'Selesai: modul Coraza termuat di nginx');
+				ui.bar(100);
+				ui.note('<span style="color:#10b981">' + (isEn ? 'nginx reloaded (worker PIDs changed) and workers loaded libcoraza.' : 'nginx direload (PID worker berubah) dan worker memuat libcoraza.') + '</span>');
+			} else {
+				ui.stat(isEn ? 'Failed' : 'Gagal');
+				ui.note('<span style="color:#ef4444">' + (isEn ? 'Failed; nginx.conf was restored if it had been changed. See the log above.' : 'Gagal; nginx.conf dikembalikan bila sempat diubah. Lihat log di atas.') + '</span>');
+			}
+			ui.selesai();
+			snEngineMuat();
+			snWafLencana();
+		});
+	});
+}
+
+function snCorazaCabut(){
+	var isEn = (SN_LANG !== 'id');
+	layer.confirm(isEn
+		? 'Unload the Coraza module from nginx? This removes load_module from nginx.conf (backup) and reloads nginx. It fails safely if a vhost still uses Coraza directives. Files and the build cache are kept.'
+		: 'Cabut modul Coraza dari nginx? Ini menghapus load_module dari nginx.conf (backup) dan me-reload nginx. Gagal dengan aman bila vhost masih memakai directive Coraza. Berkas dan cache build dipertahankan.', {
+		title: isEn ? 'Unload Coraza from nginx' : 'Cabut Coraza dari nginx',
+		btn: isEn ? ['Unload and reload nginx', 'Cancel'] : ['Cabut dan reload nginx', 'Batal'],
+		icon: 3
+	}, function(idx){
+		layer.close(idx);
+		var ui = snCzModal(isEn ? 'Unload Coraza from nginx' : 'Cabut Coraza dari nginx', [isEn ? 'Remove load_module, nginx -t, reload' : 'Hapus load_module, nginx -t, reload']);
+		ui.set(0, 'run');
+		snCzRun(ui, 'uninstall_coraza_module', 'uninstall', function(st){
+			snCzTickCompact(ui, 0, st);
+			ui.bar(st.running ? 50 : 100);
+		}, function(ok){
+			ui.stat(ok ? (isEn ? 'Done: module unloaded' : 'Selesai: modul dicabut') : (isEn ? 'Failed' : 'Gagal'));
+			ui.note(ok ? '' : '<span style="color:#ef4444">' + (isEn ? 'Failed; nginx.conf was restored. See the log above.' : 'Gagal; nginx.conf dikembalikan. Lihat log di atas.') + '</span>');
+			ui.selesai();
+			snEngineMuat();
+			snWafLencana();
+		});
+	});
+}
+
+/* Alur "Siapkan Coraza": (0) periksa, (1) unduh aset bila belum ada,
+   (2) compile konektor bila belum ada di cache, (3) pasang ruleset
+   ZySentinel, (4) periksa status modul di nginx. Memuat modul ke nginx
+   produksi TIDAK otomatis: itu tombol terpisah dengan konfirmasi. */
+function snCorazaPilihAlur(){
+	var isEn = (SN_LANG !== 'id');
+	var cz = (SN_ENG && SN_ENG.coraza) || {};
+	var perluAset = (!cz.aset || !cz.aturan);
+	var perluBuild = (cz.modul !== 'tersimpan' && cz.modul !== 'dimuat');
+	var ui = snCzModal(isEn ? 'Set up Coraza WAF' : 'Siapkan Coraza WAF', [
+		isEn ? 'Check Coraza + CRS assets and connector' : 'Periksa aset Coraza + CRS dan konektor',
+		isEn ? 'Download Coraza + CRS assets' : 'Unduh aset Coraza + CRS',
+		isEn ? 'Compile connector for active nginx' : 'Compile konektor untuk nginx aktif',
+		isEn ? 'Install ZySentinel ruleset' : 'Pasang ruleset ZySentinel',
+		isEn ? 'Check connector in nginx' : 'Periksa konektor di nginx'
+	]);
+	var gagal = function(pesan){
+		ui.stat(isEn ? 'Failed' : 'Gagal');
+		ui.note('<span style="color:#ef4444">' + snCzEsc(pesan) + '</span>');
+		ui.selesai();
+		snEngineMuat();
+	};
+	var akhir = function(){
+		ui.set(4, 'run');
+		snAjax('get_waf_engine', {}, function(e){
+			var modul = (e && e.coraza && e.coraza.modul) || 'tidak-ada';
+			var konektor = (e && e.nginx_connector) || 'none';
+			ui.bar(100);
+			if(konektor === 'coraza'){
+				ui.set(4, 'ok', isEn ? 'loaded in nginx' : 'dimuat di nginx');
+				ui.stat(isEn ? 'Done: Coraza is set up and loaded' : 'Selesai: Coraza siap dan termuat');
+				ui.note('<span style="color:#10b981">' + (isEn ? 'Enable protection per site under "Protected Vhosts".' : 'Aktifkan proteksi per situs di "Vhost Terlindungi".') + '</span>');
+				ui.selesai();
+			} else if(modul === 'tersimpan'){
+				ui.set(4, 'warn', isEn ? 'built, not loaded yet' : 'terbangun, belum dimuat');
+				ui.stat(isEn ? 'Ready, but the module is NOT loaded into nginx yet' : 'Siap, tetapi modul BELUM dimuat ke nginx');
+				ui.note('<span style="color:#f59e0b">' + (isEn
+					? 'The connector module for the active nginx is built (cached) but not loaded. Loading it reloads production nginx, so it needs your confirmation.'
+					: 'Modul konektor untuk nginx aktif sudah dibangun (cache) tetapi belum dimuat. Memuatnya me-reload nginx produksi, jadi perlu konfirmasi Anda.') + '</span>');
+				ui.selesai('<span class="sn-btn" onclick="layer.close(' + ui.idx + ');snCorazaPasang()">' + (isEn ? 'Load to nginx...' : 'Pasang ke nginx...') + '</span>');
+			} else {
+				ui.set(4, 'warn', isEn ? 'connector not built' : 'konektor belum dibangun');
+				ui.stat(isEn ? 'The connector is NOT built yet' : 'Konektor BELUM dibangun');
+				ui.selesai();
+			}
+			snEngineMuat();
+			snWafLencana();
+		}, null, null, true);
+	};
+	var pasangRuleset = function(){
+		ui.set(3, 'run');
+		ui.stat(isEn ? 'Installing the ZySentinel ruleset...' : 'Memasang ruleset ZySentinel...');
+		ui.bar(85);
+		snCzRun(ui, 'install_zyrules', 'zyinstall', function(st){ ui.log(st.log || ''); }, function(ok){
+			if(!ok){ ui.set(3, 'fail'); gagal(isEn ? 'Ruleset installation failed. See the log above.' : 'Pemasangan ruleset gagal. Lihat log di atas.'); return; }
+			ui.set(3, 'ok');
+			akhir();
+		});
+	};
+	var buildLangkah = function(){
+		if(!perluBuild){
+			ui.set(2, 'skip', isEn ? 'module already built (cache)' : 'modul sudah dibangun (cache)');
+			pasangRuleset();
+			return;
 		}
-		if(b){ $('#tbFwSites').html(b); } else { kosong('#tbFwSites', 5, isEn ? 'No site in site.json.' : 'Tidak ada situs di site.json.'); }
+		ui.set(2, 'run');
+		snCzRun(ui, 'build_coraza', 'build', function(st){
+			snCzTickCompact(ui, 2, st);
+			ui.bar(30 + 50 * snCzFrac(st));
+		}, function(ok, st){
+			if(!ok){ ui.set(2, 'fail'); gagal((isEn ? 'Connector compile failed. See the log above.' : 'Compile konektor gagal. Lihat log di atas.')); return; }
+			pasangRuleset();
+		});
+	};
+
+	ui.set(0, 'ok', perluAset
+		? (isEn ? 'assets missing' : 'aset belum ada')
+		: ('CRS ' + (cz.versi || '-') + ', ' + cz.aturan + (isEn ? ' rule files' : ' berkas aturan')));
+	ui.bar(3);
+	if(!perluAset){
+		ui.set(1, 'skip', isEn ? 'already present' : 'sudah ada');
+		buildLangkah();
+		return;
+	}
+	ui.set(1, 'run');
+	snCzRun(ui, 'coraza_download', 'download', function(st){
+		snCzTickCompact(ui, 1, st);
+		ui.bar(5 + 25 * snCzFrac(st));
+	}, function(ok){
+		if(!ok){ ui.set(1, 'fail'); gagal(isEn ? 'Asset download failed. See the log above.' : 'Unduhan aset gagal. Lihat log di atas.'); return; }
+		buildLangkah();
 	});
 }
-function snFwSite(site, state){
-	var isEn = (SN_LANG !== 'id');
-	var pIdx = snProgress(isEn ? ('Updating ' + site + ' protection...') : ('Mengubah proteksi ' + site + '...'));
-	snAjax('set_fw_site', {site: site, state: state}, function(m){
-		if(m){ layer.msg(m, {time:2500}); snFwSitesMuat(); }
-	}, pIdx);
-}
-function snFwSiteCc(site){
-	var isEn = (SN_LANG !== 'id');
-	var lim = prompt(isEn ? ('CC limit for ' + site + ' (requests):') : ('CC limit untuk ' + site + ' (request):'), '');
-	if(lim === null) return;
-	var cyc = prompt(isEn ? 'Cycle (seconds):' : 'Cycle (detik):', '60');
-	if(cyc === null) return;
-	var end = prompt(isEn ? 'Block (seconds):' : 'Blokir (detik):', '300');
-	if(end === null) return;
-	var pIdx = snProgress(isEn ? ('Updating CC limit for ' + site + '...') : ('Menyimpan limit CC untuk ' + site + '...'));
-	snAjax('set_fw_site_cc', {site: site, limit: lim, cycle: cyc, endtime: end}, function(m){
-		if(m){ layer.msg(m, {time:3000}); snFwSitesMuat(); }
-	}, pIdx);
+
+/* ---------- tab WAF: ZySentinel Rules ---------- */
+var SN_ZY_LIST = 'ip_black';
+var SN_ZY_MODUL = {
+	sensitive_files: {id: 'Berkas & folder sensitif (.env, .git, .htpasswd, kunci, API key, cadangan)', en: 'Sensitive files & folders (.env, .git, .htpasswd, keys, API keys, backups)'},
+	webshell:        {id: 'Webshell, jalur eksploit, skrip di folder unggahan', en: 'Webshells, exploit paths, scripts in upload folders'},
+	spam:            {id: 'URL judi online & penambang kripto', en: 'Online gambling spam & crypto-miner URLs'},
+	scanner:         {id: 'Pemindai kerentanan (UA, header, penanda)', en: 'Vulnerability scanners (UA, headers, markers)'},
+	bot:             {id: 'Bot scraper & crawler (tingkat di Pengaturan)', en: 'Scraper bots & crawlers (level in Settings)'},
+	lfi_args:        {id: 'Baca berkas sensitif / traversal lewat parameter', en: 'Sensitive file read / traversal via parameters'}
+};
+
+function snZySelect(kunci, nilai, opsi){
+	var h = '<select class="sn-inp" style="width:auto;min-width:230px" onchange="snZySetting(\'' + kunci + '\', this.value)">';
+	for(var i = 0; i < opsi.length; i++){
+		h += '<option value="' + opsi[i][0] + '"' + (String(opsi[i][0]) === String(nilai) ? ' selected' : '') + '>' + opsi[i][1] + '</option>';
+	}
+	return h + '</select>';
 }
 
-function snFwTab(nama, el){
-	$('#top-waf .sn-tabs span').removeClass('on');
-	$(el).addClass('on');
-	SN_FW_LIST = nama;
-	snFwListMuat();
-}
-function snFwListMuat(){
+function snZyMuat(){
 	var isEn = (SN_LANG !== 'id');
-	snAjax('get_fw_lists', {}, function(m){
+	snAjax('get_zyrules', {}, function(m){
 		if(!m) return;
-		var daftar = m[SN_FW_LIST] || [];
+		var st = m.pengaturan || {}, eng = m.engine || {}, leg = m.legacy || {};
+		var siap = m.terpasang && m.tersusun;
+		var badge = $('#zyBadge');
+		if(!siap){ badge.text(isEn ? 'not installed' : 'belum dipasang').attr('class', 'sn-badge sn-off'); }
+		else if(m.mode === 'block'){ badge.text(isEn ? 'blocking' : 'memblokir').attr('class', 'sn-badge sn-ok'); }
+		else if(m.mode === 'monitor'){ badge.text(isEn ? 'monitor only' : 'hanya mencatat').attr('class', 'sn-badge sn-warn'); }
+		else { badge.text(isEn ? 'disabled' : 'dimatikan').attr('class', 'sn-badge sn-off'); }
+
+		var ws = function(v){ return ({coraza: 'Coraza', modsecurity: 'ModSecurity', none: (isEn ? 'no WAF module' : 'tanpa modul WAF'), 'nginx-tidak-ada': (isEn ? 'not installed' : 'tidak terpasang'), 'terpasang-tanpa-waf': (isEn ? 'installed, no WAF module' : 'terpasang, tanpa modul WAF'), 'tidak-terpasang': (isEn ? 'not installed' : 'tidak terpasang')})[v] || v; };
+		$('#zyInfo').html(
+			'<div><span>nginx</span><span>' + ws(eng.nginx) + '</span></div>'
+			+ '<div><span>Apache</span><span>' + ws(eng.apache) + '</span></div>'
+			+ '<div><span>OpenLiteSpeed</span><span>' + ws(eng.openlitespeed) + '</span></div>'
+			+ '<div><span>OWASP CRS</span><span>' + (eng.owasp === 'ada' ? (isEn ? 'present' : 'ada') : (isEn ? 'not downloaded' : 'belum diunduh')) + '</span></div>'
+			+ '<div><span>' + (isEn ? 'Audit log' : 'Log audit') + '</span><span class="sn-mono">' + snEsc(m.audit_log || '-') + '</span></div>'
+			+ '<div><span>main.conf</span><span class="sn-mono">' + snEsc(m.main || '-') + '</span></div>');
+
+		var mb = '';
+		for(var k in SN_ZY_MODUL){
+			var d = (m.modul || {})[k] || {};
+			var nyala = !!d.aktif;
+			mb += '<tr><td>' + SN_ZY_MODUL[k][isEn ? 'en' : 'id'] + '</td>'
+				+ '<td>' + (nyala ? '<span class="sn-badge sn-ok">on</span>' : '<span class="sn-badge sn-off">off</span>') + '</td>'
+				+ '<td style="width:70px">' + (nyala
+					? '<span class="sn-btn" onclick="snZyModul(\'' + k + '\',\'off\')">Off</span>'
+					: '<span class="sn-btn pri" onclick="snZyModul(\'' + k + '\',\'on\')">On</span>') + '</td></tr>';
+		}
+		$('#tbZyModul').html(mb);
+
+		var sb = ''
+			+ '<tr><td>' + (isEn ? 'Bot protection level' : 'Tingkat proteksi bot') + '</td><td>' + snZySelect('bot_level', st.bot_level, [
+				[0, isEn ? '0 - off' : '0 - mati'],
+				[1, isEn ? '1 - aggressive scrapers (default)' : '1 - scraper agresif (bawaan)'],
+				[2, isEn ? '2 - + SEO/AI crawlers, no User-Agent' : '2 - + crawler SEO/AI, tanpa User-Agent'],
+				[3, isEn ? '3 - + generic HTTP libraries (may break APIs)' : '3 - + pustaka HTTP generik (bisa mengganggu API)']]) + '</td></tr>'
+			+ '<tr><td>' + (isEn ? 'Strict mode (dependency manifests)' : 'Mode ketat (manifest dependensi)') + '</td><td>' + snZySelect('strict', st.strict, [[0, isEn ? 'log only (default)' : 'hanya dicatat (bawaan)'], [1, isEn ? 'block' : 'blokir']]) + '</td></tr>'
+			+ '<tr><td>' + (isEn ? 'Fallback SQLi/XSS rules (only when CRS is absent)' : 'Aturan cadangan SQLi/XSS (hanya bila CRS tidak ada)') + '</td><td>' + snZySelect('fallback', st.fallback, [[1, isEn ? 'automatic (default)' : 'otomatis (bawaan)'], [0, isEn ? 'always off' : 'selalu mati']]) + '</td></tr>'
+			+ '<tr><td>' + (isEn ? 'CRS paranoia level' : 'Paranoia level CRS') + '</td><td>' + snZySelect('paranoia', st.paranoia, [[1, '1 (default)'], [2, '2'], [3, '3'], [4, '4']]) + '</td></tr>'
+			+ '<tr><td>' + (isEn ? 'Max request body without files (larger = rejected 413; CRS cost grows ~27 ms/KB)' : 'Batas body tanpa berkas (lebih besar = ditolak 413; biaya CRS naik ~27 ms/KB)') + '</td><td>' + snZySelect('body_nofiles_kb', st.body_nofiles_kb, [[64, '64 KB'], [128, isEn ? '128 KB (default)' : '128 KB (bawaan)'], [256, '256 KB'], [512, '512 KB'], [1024, '1 MB'], [4096, '4 MB']]) + '</td></tr>'
+			+ '<tr><td>' + (isEn ? 'Max total request body incl. uploads (match nginx client_max_body_size)' : 'Batas total body termasuk unggahan (samakan dengan client_max_body_size nginx)') + '</td><td>' + snZySelect('body_total_mb', st.body_total_mb, [[10, '10 MB'], [25, '25 MB'], [50, isEn ? '50 MB (default)' : '50 MB (bawaan)'], [128, '128 MB'], [512, '512 MB']]) + '</td></tr>';
+		$('#tbZySet').html(sb);
+
+		var lb = $('#zyLegacy');
+		if(leg.legacy === 'ya'){
+			lb.show().html('<b>' + (isEn ? 'Old Lua WAF files detected.' : 'Peninggalan WAF Lua lama terdeteksi.') + '</b> '
+				+ (isEn ? 'The Lua engine is no longer used. Migration converts your IP/URL lists, removes the Lua hook from nginx (nginx -t and a verified reload), archives the Lua files and deletes them. ' : 'Engine Lua tidak dipakai lagi. Pemindahan mengonversi daftar IP/URL, mencabut hook Lua dari nginx (nginx -t dan reload terverifikasi), mengarsipkan lalu menghapus berkas Lua. ')
+				+ '<span class="sn-btn pri" style="margin-left:8px" onclick="snLegacyPindah()">' + (isEn ? 'Migrate now' : 'Pindahkan sekarang') + '</span>');
+		} else { lb.hide().empty(); }
+		snZyListMuat();
+		snZyLog();
+	});
+}
+
+function snZyTerapkanPesan(m){
+	layer.msg(m, {time: 4000});
+	snZyMuat();
+}
+function snZyModul(nama, state){
+	var isEn = (SN_LANG !== 'id');
+	var pIdx = snProgress(isEn ? ('Applying module ' + nama + ' and reloading web server...') : ('Menerapkan modul ' + nama + ' dan me-reload web server...'));
+	snAjax('set_zy_module', {name: nama, state: state}, function(m){ if(m) snZyTerapkanPesan(m); }, pIdx);
+}
+function snZySetting(kunci, nilai){
+	var isEn = (SN_LANG !== 'id');
+	var pIdx = snProgress(isEn ? 'Applying setting and reloading web server...' : 'Menerapkan pengaturan dan me-reload web server...');
+	snAjax('set_zy_setting', {key: kunci, value: nilai}, function(m){ if(m) snZyTerapkanPesan(m); else snZyMuat(); }, pIdx);
+}
+
+function snZyListTab(nama, el){
+	$('#zyListTabs span').removeClass('on');
+	$(el).addClass('on');
+	SN_ZY_LIST = nama;
+	snZyListMuat();
+}
+function snZyListMuat(){
+	var isEn = (SN_LANG !== 'id');
+	snAjax('get_waf_lists', {}, function(m){
+		if(!m) return;
+		var daftar = m[SN_ZY_LIST] || [];
 		var b = '';
 		for(var i = 0; i < daftar.length; i++){
-			var v = String(daftar[i]).replace(/"/g, '');
-			b += '<tr><td class="sn-mono">' + v + '</td>'
-				+ '<td><span class="sn-btn dgr" onclick="snFwListDel(\'' + v.split("'").join('') + '\')" title="' + (isEn ? 'Remove this entry from list' : 'Hapus Entri Ini dari Daftar') + '">' + (isEn ? 'Remove' : 'Hapus') + '</span></td></tr>';
+			var v = String(daftar[i]);
+			b += '<tr><td class="sn-mono">' + snEsc(v) + '</td>'
+				+ '<td><span class="sn-btn dgr" data-v="' + snEsc(v) + '" onclick="snZyListDel(this.getAttribute(\'data-v\'))" title="' + (isEn ? 'Remove this entry from list' : 'Hapus Entri Ini dari Daftar') + '">' + (isEn ? 'Remove' : 'Hapus') + '</span></td></tr>';
 		}
-		if(b){ $('#tbFwList').html(b); }
-		else { kosong('#tbFwList', 2, isEn ? 'List is empty.' : 'Daftar kosong.'); }
-	});
+		if(b){ $('#tbZyList').html(b); }
+		else { kosong('#tbZyList', 2, isEn ? 'List is empty.' : 'Daftar kosong.'); }
+	}, null, null, true);
 }
-function snFwListAdd(){
+function snZyListAdd(){
 	var isEn = (SN_LANG !== 'id');
-	var v = $('#fwListVal').val().trim();
+	var v = $('#zyListVal').val().trim();
 	if(!v){ layer.msg(isEn ? 'Value cannot be empty' : 'Nilai belum diisi', {time:2000}); return; }
-	var pIdx = snProgress(isEn ? 'Adding entry to list...' : 'Menambahkan entri ke daftar...');
-	snAjax('fw_list_add', {list: SN_FW_LIST, value: v}, function(m){
-		if(m){ layer.msg(m, {time:2500}); $('#fwListVal').val(''); snFwListMuat(); }
+	var pIdx = snProgress(isEn ? 'Adding entry and reloading web server...' : 'Menambahkan entri dan me-reload web server...');
+	snAjax('waf_list_add', {list: SN_ZY_LIST, value: v}, function(m){
+		if(m){ layer.msg(m, {time:3500}); $('#zyListVal').val(''); snZyListMuat(); snZyMuat(); }
 	}, pIdx);
 }
-function snFwListDel(v){
+function snZyListDel(v){
 	var isEn = (SN_LANG !== 'id');
-	layer.confirm(isEn ? ('Delete ' + v + ' from ' + SN_FW_LIST + '?') : ('Hapus ' + v + ' dari ' + SN_FW_LIST + '?'), {
+	layer.confirm(isEn ? ('Delete ' + snEsc(v) + ' from ' + SN_ZY_LIST + '?') : ('Hapus ' + snEsc(v) + ' dari ' + SN_ZY_LIST + '?'), {
 		title: isEn ? 'Delete List Entry' : 'Hapus Entri Daftar',
 		btn: isEn ? ['Delete', 'Cancel'] : ['Hapus', 'Batal']
 	}, function(idx){
 		layer.close(idx);
-		var pIdx = snProgress(isEn ? 'Deleting entry from list...' : 'Menghapus entri dari daftar...');
-		snAjax('fw_list_del', {list: SN_FW_LIST, value: v}, function(m){
-			if(m){ layer.msg(m, {time:2500}); snFwListMuat(); }
+		var pIdx = snProgress(isEn ? 'Deleting entry and reloading web server...' : 'Menghapus entri dan me-reload web server...');
+		snAjax('waf_list_del', {list: SN_ZY_LIST, value: v}, function(m){
+			if(m){ layer.msg(m, {time:3500}); snZyListMuat(); snZyMuat(); }
 		}, pIdx);
 	});
 }
 
-/* ---------- Config > Nginx Waf (instalasi engine per webserver) ---------- */
-function snNwMuat(){
-	snAjax('freewaf_info', {}, function(s){
-		if(!s) return;
-		if(s.status && typeof s.status === 'object'){
-			s = Object.assign({}, s.status, s);
-		}
-		var isEn = (SN_LANG !== 'id');
-		var lencana = $('#nwBadge');
-		if(s.loaded === 'ya'){
-			lencana.text(s.mode ? (isEn ? 'ACTIVE (' + s.mode.toUpperCase() + ')' : 'AKTIF (' + s.mode.toUpperCase() + ')') : (isEn ? 'ACTIVE' : 'AKTIF'));
-			lencana.attr('class', 'sn-badge sn-ok');
-		} else if(s.lua !== 'ada'){
-			lencana.text(isEn ? 'NO LUA MODULE' : 'TANPA MODUL LUA');
-			lencana.attr('class', 'sn-badge sn-off');
-		} else {
-			lencana.text(isEn ? 'NOT INSTALLED' : 'BELUM TERPASANG');
-			lencana.attr('class', 'sn-badge sn-warn');
-		}
-		var detail = [
-			'Nginx Version   : ' + (s.nginx_ver || '-'),
-			'Lua Module      : ' + (s.lua || '-'),
-			'Engine Hook     : ' + (s.hooked || '-'),
-			'Loaded          : ' + (s.loaded || '-'),
-			'Mode            : ' + (s.mode || '-'),
-			'Home            : ' + (s.home || '-')
-		];
-		$('#nwDetail').text(detail.join('\n'));
-		var ket = '';
-		if(s.lua !== 'ada'){
-			ket = isEn
-				? 'Nginx on this server does NOT have lua_nginx_module. Lua WAF engine cannot be installed. Recompile Nginx with Lua module in panel, then retry.'
-				: 'Nginx di server ini TIDAK punya lua_nginx_module. Engine Lua WAF tidak bisa dipasang. Bangun ulang nginx dengan modul lua di panel, lalu ulangi.';
-		} else if(s.loaded === 'ya'){
-			ket = isEn
-				? ('Lua WAF engine loaded and active (mode ' + (s.mode || '-') + '). Reinstallation is idempotent and preserves existing configs.')
-				: ('Engine Lua WAF termuat dan berjalan (mode ' + (s.mode || '-') + '). Instalasi ulang bersifat idempoten dan tidak menghapus config yang sudah ada.');
-		} else {
-			ket = isEn
-				? 'Lua WAF engine is not installed. Install Engine copies files from plugin payload without overwriting existing configs.'
-				: 'Engine Lua WAF belum terpasang. Install Engine menyalin berkas dari payload plugin tanpa menimpa config yang sudah ada.';
-		}
-		$('#nwNote').html('<b>' + (isEn ? 'Status:' : 'Status:') + '</b> ' + ket + ' ' + (isEn ? 'This engine does not apply to Apache and OpenLiteSpeed; use tab <b>Config &rsaquo; WAF</b>.' : 'Untuk apache dan openlitespeed engine ini tidak berlaku; pakai tab <b>Config &rsaquo; WAF</b>.'));
-	});
-}
-function snNwInstall(){
+function snZyLog(){
 	var isEn = (SN_LANG !== 'id');
-	layer.confirm(isEn ? 'Install Lua WAF engine from plugin payload? Existing config files will not be overwritten.' : 'Pasang engine Lua WAF dari payload plugin? Berkas config yang sudah ada tidak ditimpa.', {
-		title: isEn ? 'Install Lua WAF' : 'Pasang Lua WAF',
-		btn: isEn ? ['Install', 'Cancel'] : ['Pasang', 'Batal']
+	snAjax('get_waf_logs', {limit: 30}, function(m){
+		if(!m) return;
+		var b = '';
+		var ev = m.kejadian || [];
+		for(var i = 0; i < ev.length; i++){
+			var e = ev[i];
+			b += '<tr><td class="sn-mono">' + snEsc(e.waktu || '') + '</td><td class="sn-mono">' + snEsc(e.ip || '') + '</td>'
+				+ '<td class="sn-mono" style="max-width:300px;overflow:hidden;text-overflow:ellipsis" title="' + snEsc(e.uri || '') + '">' + snEsc((e.metode || '') + ' ' + (e.uri || '')) + '</td>'
+				+ '<td>' + snEsc(String(e.status || '')) + '</td>'
+				+ '<td title="' + snEsc(e.pesan || '') + '">' + (e.zysentinel ? '<span class="sn-badge sn-ok">ZY</span> ' : '') + snEsc(e.rule_id || '') + ' ' + snEsc((e.pesan || '').substring(0, 48)) + '</td></tr>';
+		}
+		if(b){ $('#tbZyLog').html(b); }
+		else { kosong('#tbZyLog', 5, m.ada ? (isEn ? 'No events yet.' : 'Belum ada kejadian.') : (isEn ? 'Audit log not created yet.' : 'Log audit belum dibuat.')); }
+	}, null, null, true);
+}
+
+function snLegacyPindah(){
+	var isEn = (SN_LANG !== 'id');
+	layer.confirm(isEn
+		? 'Migrate away from the old Lua WAF? Your IP/URL lists are converted, the Lua hook is removed from nginx (nginx -t, then a verified reload), and the Lua files are archived (/www/server/sentinel/backup) and deleted. If any step fails, nginx.conf is restored and the Lua files are kept. Make sure the Coraza module is loaded first so sites stay protected.'
+		: 'Pindah dari WAF Lua lama? Daftar IP/URL dikonversi, hook Lua dicabut dari nginx (nginx -t, lalu reload terverifikasi), dan berkas Lua diarsipkan (/www/server/sentinel/backup) lalu dihapus. Bila ada langkah yang gagal, konfigurasi nginx dikembalikan dan berkas Lua dipertahankan. Pastikan modul Coraza sudah dimuat lebih dulu agar situs tetap terlindungi.', {
+		title: isEn ? 'Migrate from Lua WAF' : 'Pindah dari WAF Lua',
+		btn: isEn ? ['Migrate', 'Cancel'] : ['Pindahkan', 'Batal'],
+		icon: 3
 	}, function(idx){
 		layer.close(idx);
-		var pIdx = snProgress(isEn ? 'Installing Lua WAF engine & reconfiguring Nginx...' : 'Memasang engine Lua WAF & mengonfigurasi Nginx...');
-		snAjax('freewaf_engine', {action: 'install'}, function(m){
-			if(m){ layer.msg(m, {time:4000}); snNwMuat(); snLuaMuat(); }
-		}, pIdx);
-	});
-}
-function snNwRemove(){
-	var isEn = (SN_LANG !== 'id');
-	layer.confirm(isEn ? 'Remove Lua WAF hook from nginx? Config data and logs are preserved.' : 'Cabut hook Lua WAF dari nginx? Data config dan log dipertahankan.', {
-		title: isEn ? 'Remove Lua WAF Hook' : 'Cabut Hook Lua WAF',
-		btn: isEn ? ['Remove', 'Cancel'] : ['Cabut', 'Batal']
-	}, function(idx){
-		layer.close(idx);
-		var pIdx = snProgress(isEn ? 'Removing Lua WAF hook & reloading Nginx...' : 'Mencabut hook Lua WAF & me-reload Nginx...');
-		snAjax('freewaf_engine', {action: 'remove'}, function(m){
-			if(m){ layer.msg(m, {time:4000}); snNwMuat(); snLuaMuat(); }
-		}, pIdx);
+		var ui = snCzModal(isEn ? 'Migrate from Lua WAF' : 'Pindah dari WAF Lua', [isEn ? 'Convert lists, remove Lua hook (nginx -t + verified reload), archive and delete Lua files' : 'Konversi daftar, cabut hook Lua (nginx -t + reload terverifikasi), arsipkan dan hapus berkas Lua']);
+		ui.set(0, 'run');
+		snCzRun(ui, 'remove_legacy_waf', 'legacy', function(st){
+			snCzTickCompact(ui, 0, st);
+			ui.bar(st.running ? 50 : 100);
+		}, function(ok){
+			ui.stat(ok ? (isEn ? 'Done: Lua WAF removed' : 'Selesai: WAF Lua dibersihkan') : (isEn ? 'Failed' : 'Gagal'));
+			ui.note(ok ? '' : '<span style="color:#ef4444">' + (isEn ? 'Failed; nginx.conf was restored and the Lua files were kept. See the log above.' : 'Gagal; nginx.conf dikembalikan dan berkas Lua dipertahankan. Lihat log di atas.') + '</span>');
+			ui.selesai();
+			snZyMuat(); snEngineMuat(); snWafLencana();
+		});
 	});
 }
 
@@ -6460,6 +6762,16 @@ function snUploadScanServiceToggle(action){
 	}, pIdx);
 }
 
+/* Menyegarkan tampilan aktif setelah operasi panjang (pembaruan, pasang). */
+function snMuatSemua(){
+	snStatus(null, true);
+	snTopSegar();
+}
+/* Nilai dalam onclick='...' di dalam atribut "..." harus lolos dari JS dan HTML. */
+function snJsAttr(t){
+	return snEscH(String(t === undefined || t === null ? '' : t).replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
+}
+var SN_UQ_LAYER = null;
 function snUploadQuarantineModal(vhost){
 	snAjax('get_vhost_quarantine', {vhost: vhost}, function(items){
 		var isEn = (SN_LANG !== 'id');
@@ -6470,15 +6782,15 @@ function snUploadQuarantineModal(vhost){
 		} else {
 			for(var i = 0; i < items.length; i++){
 				var item = items[i];
-				var metaSafe = (item.meta_file || '').replace(/'/g, "\\'");
-				var vhSafe = (item.vhost || '').replace(/'/g, "\\'");
+				var metaSafe = snJsAttr(item.meta_file);
+				var vhSafe = snJsAttr(item.vhost);
 				rows += '<tr>'
-					+ '<td class="sn-mono" style="font-size:11.5px;color:#cbd5e1">' + (item.time_str || '-') + '</td>'
-					+ '<td><span class="sn-tag" style="background:rgba(239,68,68,0.15);color:#ef4444;font-weight:700">' + (item.signature || 'Malware') + '</span></td>'
-					+ '<td class="sn-mono" style="font-size:11.5px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + (item.dest_file || '') + '">' + (item.dest_file || '-') + '</td>'
-					+ '<td style="font-size:11.5px">' + (item.size_str || '-') + '</td>'
-					+ '<td class="sn-mono" style="font-size:11.5px">' + (item.uploader_ip || '-') + '</td>'
-					+ '<td style="font-size:11.5px">' + (item.vhost || '-') + '</td>'
+					+ '<td class="sn-mono" style="font-size:11.5px;color:#cbd5e1">' + snEscH(item.time_str || '-') + '</td>'
+					+ '<td><span class="sn-tag" style="background:rgba(239,68,68,0.15);color:#ef4444;font-weight:700">' + snEscH(item.signature || 'Malware') + '</span></td>'
+					+ '<td class="sn-mono" style="font-size:11.5px;max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + snEscH(item.dest_file || '') + '">' + snEscH(item.dest_file || '-') + '</td>'
+					+ '<td style="font-size:11.5px">' + snEscH(item.size_str || '-') + '</td>'
+					+ '<td class="sn-mono" style="font-size:11.5px">' + snEscH(item.uploader_ip || '-') + '</td>'
+					+ '<td style="font-size:11.5px">' + snEscH(item.vhost || '-') + '</td>'
 					+ '<td style="text-align:right;white-space:nowrap">'
 					+ '<span class="sn-btn ok" style="padding:2px 6px;font-size:11px;margin-right:4px" onclick="snUploadQuarantineRestore(\'' + metaSafe + '\', \'' + vhSafe + '\')" title="' + (isEn ? 'Restore File' : 'Pulihkan Berkas') + '">' + (isEn ? 'Restore' : 'Pulihkan') + '</span>'
 					+ '<span class="sn-btn dgr" style="padding:2px 6px;font-size:11px" onclick="snUploadQuarantineDelete(\'' + metaSafe + '\', \'' + vhSafe + '\')" title="' + (isEn ? 'Delete Permanently' : 'Hapus Permanen') + '">' + (isEn ? 'Delete' : 'Hapus') + '</span>'
@@ -6490,7 +6802,7 @@ function snUploadQuarantineModal(vhost){
 		var modalHtml = '<div style="padding:16px 20px">'
 			+ '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">'
 			+ '<span style="font-size:12.5px;color:var(--ink-2)">' + (isEn ? 'Isolated quarantine storage: <code>/www/server/sentinel/av/quarantine/&lt;vhost&gt;/files/</code>' : 'Penyimpanan karantina terisolasi: <code>/www/server/sentinel/av/quarantine/&lt;vhost&gt;/files/</code>') + '</span>'
-			+ '<span class="sn-btn" style="font-size:11.5px;padding:3px 10px" onclick="snUploadQuarantineModal(\'' + (vhost || '').replace(/'/g, "\\'") + '\')">' + (isEn ? 'Refresh' : 'Segarkan') + '</span>'
+			+ '<span class="sn-btn" style="font-size:11.5px;padding:3px 10px" onclick="snUploadQuarantineModal(\'' + snJsAttr(vhost) + '\')">' + (isEn ? 'Refresh' : 'Segarkan') + '</span>'
 			+ '</div>'
 			+ '<div style="max-height:420px;overflow-y:auto;border:1px solid var(--border-subtle);border-radius:6px">'
 			+ '<table class="sn-table" style="margin:0;font-size:12px">'
@@ -6500,12 +6812,14 @@ function snUploadQuarantineModal(vhost){
 			+ '<tbody>' + rows + '</tbody>'
 			+ '</table></div></div>';
 
-		layer.open({
+		if(SN_UQ_LAYER !== null){ try{ layer.close(SN_UQ_LAYER); }catch(e){} }
+		SN_UQ_LAYER = layer.open({
 			type: 1,
 			title: title,
 			area: ['860px', '540px'],
 			shade: [0.4, '#000'],
-			content: modalHtml
+			content: modalHtml,
+			end: function(){ SN_UQ_LAYER = null; }
 		});
 	});
 }
@@ -6519,8 +6833,7 @@ function snUploadQuarantineRestore(metaFile, vhost){
 		layer.close(idx);
 		var pIdx = snProgress(isEn ? 'Restoring quarantined file...' : 'Memulihkan berkas karantina...');
 		snAjax('restore_vhost_quarantine', {meta_file: metaFile, vhost: vhost}, function(res){
-			layer.msg(res, {time: 2500});
-			snUploadQuarantineMuat();
+			if(res){ layer.msg(res, {time: 2500}); snUploadQuarantineModal(vhost); snUploadScanMuat(); }
 		}, pIdx);
 	});
 }
@@ -6534,8 +6847,7 @@ function snUploadQuarantineDelete(metaFile, vhost){
 		layer.close(idx);
 		var pIdx = snProgress(isEn ? 'Deleting quarantined file...' : 'Menghapus berkas karantina...');
 		snAjax('delete_vhost_quarantine', {meta_file: metaFile, vhost: vhost}, function(res){
-			layer.msg(res, {time: 2500});
-			snUploadQuarantineMuat();
+			if(res){ layer.msg(res, {time: 2500}); snUploadQuarantineModal(vhost); snUploadScanMuat(); }
 		}, pIdx);
 	});
 }
@@ -6567,8 +6879,8 @@ function snVhostMuat(){
 				? '<span class="sn-badge sn-bad" title="' + (isEn ? 'Total Virus/Malware: ' : 'Total Virus/Malware: ') + virus + '">' + virus + '</span>'
 				: '<span class="sn-badge sn-ok">0</span>';
 
-			b += '<tr><td><a href="javascript:void(0)" title="' + (isEn ? 'View list of attacking IPs for vhost ' : 'Lihat Daftar IP Penyerang untuk Vhost ') + v.host + '" onclick="snVhostPip(\'' + v.host
-				+ '\')">' + v.host + '</a></td>'
+			b += '<tr><td><a href="javascript:void(0)" title="' + (isEn ? 'View list of attacking IPs for vhost ' : 'Lihat Daftar IP Penyerang untuk Vhost ') + snEsc(v.host) + '" onclick="snVhostPip(\'' + snJsAttr(v.host)
+				+ '\')">' + snEsc(v.host) + '</a></td>'
 				+ '<td class="r">' + (v.req || 0).toLocaleString() + '</td>'
 				+ '<td class="r sn-mono">' + ukuranAngka(v.bytes) + '</td>'
 				+ '<td class="r">' + (v.s2 || 0) + '</td>'
@@ -6632,8 +6944,8 @@ function snNotifMuat(){
 }
 function snNotifSimpan(){
 	var isEn = (SN_LANG !== 'id');
-	var u = $('#notifUrl').val().trim();
-	var t = $('#notifToken').val().trim();
+	var u = ($('#notifUrl').val() || '').trim();
+	var t = ($('#notifToken').val() || '').trim();
 	var j = $('#notifKind').val();
 	var m = $('#notifMaks').val();
 	function kirim(url, token){
@@ -6699,13 +7011,14 @@ function snRevMuat(status){
 	SN_REV_STATUS = status || 'tunggu';
 	snAjax('get_review', {status: SN_REV_STATUS, limit: 200}, function(m){
 		if(!m) return;
-		var h = m.hitung || {};
+		var h = m.hitungan || m.hitung || {};
 		$('#revKet').text((isEn ? 'waiting ' : 'menunggu ') + (h.tunggu || 0)
 			+ (isEn ? ' | approved ' : ' | disetujui ') + (h.setuju || 0)
 			+ (isEn ? ' | dismissed ' : ' | diabaikan ') + (h.tolak || 0));
 		var b = '';
-		for(var i = 0; i < m.antrian.length; i++){
-			var r = m[i];
+		var antrian = m.antrian || [];
+		for(var i = 0; i < antrian.length; i++){
+			var r = antrian[i];
 			var st = r.status === 'tunggu'
 				? '<span class="sn-badge sn-warn">' + (isEn ? 'waiting' : 'menunggu') + '</span>'
 				: (r.status === 'setuju'
@@ -6938,12 +7251,14 @@ function snAksiMuat(){
 
 /* ---------- awal ---------- */
 SN_SUB = {
+	aktif: 'bans',
 	bans: snBans, edr: snEdrMuat, situs: snSitus, vhost: snVhostMuat, geo: snGeoMuat,
 	review: snRevMuat, notif: snNotifMuat,
 	aksi: snAksiMuat,
 	feed: snFeed, riwayat: snRiwayat, log: snLog
 };
 SN_SUB2 = {
+	aktif: 'atur',
 	atur: snConf, laju: snLaju, panic: snPanicMuat, maintenance: snLoadFeedbackHistory
 };
 
@@ -7166,8 +7481,8 @@ function snAvSitesMuat(btn, isSilent){
 				+ '<span class="sn-btn" onclick="snAvCheck(\'' + safePath + '\',\'' + safeName + '\')" title="' + (isEn ? 'Check integrity changes against baseline' : 'Periksa Perubahan Integritas terhadap Baseline') + '">' + (isEn ? 'Check' : 'Periksa') + '</span>';
 
 			h += '<tr>'
-				+ '<td><b>' + s.name + '</b>' + (s.status == '0' ? (' <span class="sn-badge sn-off">' + (isEn ? 'stopped' : 'terhenti') + '</span>') : '') + '</td>'
-				+ '<td class="sn-mono" style="font-size:12px">' + s.path + '</td>'
+				+ '<td><b>' + snEsc(s.name) + '</b>' + (s.status == '0' ? (' <span class="sn-badge sn-off">' + (isEn ? 'stopped' : 'terhenti') + '</span>') : '') + '</td>'
+				+ '<td class="sn-mono" style="font-size:12px">' + snEsc(s.path) + '</td>'
 				+ '<td>' + baseBadge + '</td>'
 				+ '<td>' + scanBadge + '</td>'
 				+ '<td>' + infectedText + '</td>'
@@ -7366,31 +7681,111 @@ function snAvScanSystemRootkit(){
 	);
 }
 
+var SN_AVUPD_MENU = null;
+var SN_AVUPD_TASKS = {
+	'db-update': {en: 'Update ClamAV database (freshclam)', id: 'Perbarui basis data ClamAV (freshclam)'},
+	'rkhunter-propupd': {en: 'Record system binary hashes (rkhunter --propupd)', id: 'Rekam hash biner sistem (rkhunter --propupd)'},
+	'rkhunter-update': {en: 'Update Rkhunter signatures (--update)', id: 'Perbarui signature Rkhunter (--update)'}
+};
+
+/* Menu pilihan. Menutup HANYA lapisan menu ini: layer.closeAll() menutup seluruh dialog
+   plugin (termasuk halaman utama) karena panel membuka plugin di dalam layer juga. */
 function snAvDbUpdateMenu(){
 	var isEn = (SN_LANG !== 'id');
+	if(SN_AVUPD_MENU !== null){ try{ layer.close(SN_AVUPD_MENU); }catch(e){} SN_AVUPD_MENU = null; }
+	var item = function(tasks, judul, ket, bantu){
+		return '<button class="sn-btn" data-tasks="' + tasks + '" onclick="snAvDbUpdatePilih(this.getAttribute(\'data-tasks\'))" style="text-align:left;padding:8px 12px">'
+			+ '<b>' + judul + '</b><br><span style="font-size:12px;color:var(--ink-2)">' + ket + '</span></button>';
+	};
 	var html = '<div style="padding:16px 20px;font-size:13px;color:var(--ink);line-height:1.6">'
 		+ '<p style="margin-bottom:12px">' + (isEn ? 'Choose security database update:' : 'Pilih pembaruan basis data keamanan:') + '</p>'
 		+ '<div style="display:flex;flex-direction:column;gap:10px">'
-		+ '<button class="sn-btn" onclick="layer.closeAll();snAvDbUpdate()" style="text-align:left;padding:8px 12px">'
-		+ '<b>1. Update ClamAV Database (freshclam)</b><br><span style="font-size:12px;color:var(--ink-2)">' + (isEn ? 'Download latest virus, trojan, and webshell signatures' : 'Unduh signature virus, trojan, dan webshell terbaru') + '</span>'
-		+ '</button>'
-		+ '<button class="sn-btn" onclick="layer.closeAll();snRkhunterPropupd()" style="text-align:left;padding:8px 12px">'
-		+ '<b>2. Update Rkhunter File Properties (--propupd)</b><br><span style="font-size:12px;color:var(--ink-2)">' + (isEn ? 'Record fresh system binary checksums after OS package updates' : 'Rekam patokan hash biner sistem terbaru setelah pembaruan OS') + '</span>'
-		+ '</button>'
-		+ '<button class="sn-btn" onclick="layer.closeAll();snRkhunterUpdate()" style="text-align:left;padding:8px 12px">'
-		+ '<b>3. Update Rkhunter Signatures (--update)</b><br><span style="font-size:12px;color:var(--ink-2)">' + (isEn ? 'Check official rootkit hunter signature database updates' : 'Periksa pembaruan database signature rootkit hunter resmi') + '</span>'
-		+ '</button>'
-		+ '</div>'
-		+ '</div>';
-
-	layer.open({
+		+ item('db-update', '1. Update ClamAV Database (freshclam)', isEn ? 'Download latest virus, trojan, and webshell signatures' : 'Unduh signature virus, trojan, dan webshell terbaru')
+		+ item('rkhunter-propupd', '2. Update Rkhunter File Properties (--propupd)', isEn ? 'Record fresh system binary checksums after OS package updates' : 'Rekam patokan hash biner sistem terbaru setelah pembaruan OS')
+		+ item('rkhunter-update', '3. Update Rkhunter Signatures (--update)', isEn ? 'Check official rootkit hunter signature database updates' : 'Periksa pembaruan database signature rootkit hunter resmi')
+		+ item('db-update,rkhunter-propupd,rkhunter-update', (isEn ? '4. Run all of the above' : '4. Jalankan ketiganya berurutan'), isEn ? 'Runs 1, 2, and 3 in order with progress for each task' : 'Menjalankan 1, 2, dan 3 berurutan dengan kemajuan tiap tugas')
+		+ '</div></div>';
+	SN_AVUPD_MENU = layer.open({
 		type: 1,
 		title: isEn ? '🔄 Update Security Databases' : '🔄 Pembaruan Basis Data Keamanan',
 		area: ['480px', 'auto'],
 		content: html,
 		btn: [isEn ? 'Close' : 'Tutup'],
-		yes: function(idx){ layer.close(idx); }
+		yes: function(idx){ layer.close(idx); },
+		end: function(){ SN_AVUPD_MENU = null; }
 	});
+}
+
+function snAvDbUpdatePilih(tasks){
+	if(SN_AVUPD_MENU !== null){ try{ layer.close(SN_AVUPD_MENU); }catch(e){} SN_AVUPD_MENU = null; }
+	snAvUpdateRun(String(tasks || '').split(','));
+}
+
+/* Jalankan tugas pembaruan di latar dan tampilkan kemajuan serta hasil tiap tugas. */
+function snAvUpdateRun(tasks){
+	var isEn = (SN_LANG !== 'id');
+	var langkah = [];
+	for(var i = 0; i < tasks.length; i++){
+		var t = SN_AVUPD_TASKS[tasks[i]];
+		langkah.push(t ? (isEn ? t.en : t.id) : tasks[i]);
+	}
+	var ui = snCzModal(isEn ? 'Update Security Databases' : 'Pembaruan Basis Data Keamanan', langkah);
+	ui.set(0, 'run');
+	ui.stat(isEn ? 'Starting...' : 'Memulai...');
+	snAjax('av_update_start', {tasks: tasks.join(',')}, function(m){
+		if(!m){
+			ui.stat(isEn ? 'Could not start the update' : 'Pembaruan tidak bisa dimulai');
+			ui.note('<span style="color:#ef4444">' + (isEn ? 'The server refused to start the job. See the message shown before this dialog.' : 'Server menolak memulai job. Lihat pesan yang tampil sebelum dialog ini.') + '</span>');
+			ui.selesai();
+			return;
+		}
+		if(m.started === false && m.running){
+			ui.note('<span style="color:#f59e0b">' + (isEn ? 'An update is already running; showing its progress.' : 'Pembaruan lain sedang berjalan; menampilkan kemajuannya.') + '</span>');
+		}
+		var gagal429 = 0;
+		var tick = function(){
+			snAjax('get_av_update_job', {}, function(st){
+				if(!st){
+					if(++gagal429 > 5){
+						ui.stat(isEn ? 'Lost contact with the panel' : 'Kontak dengan panel terputus');
+						ui.note('<span style="color:#ef4444">' + (isEn ? 'The job may still be running on the server. Reopen this dialog later to check.' : 'Job mungkin masih berjalan di server. Buka dialog ini lagi nanti untuk memeriksa.') + '</span>');
+						ui.selesai();
+						return;
+					}
+					setTimeout(tick, 3000); return;
+				}
+				gagal429 = 0;
+				ui.log(st.log || '');
+				var total = st.total || tasks.length;
+				for(var n = 1; n <= tasks.length; n++){
+					var h = st.hasil && st.hasil[n];
+					if(h){ ui.set(n - 1, h.rc === 0 ? 'ok' : 'fail', (h.rc === 0 ? '' : ('rc=' + h.rc + ', ')) + h.dtk + (isEn ? ' s' : ' dtk')); }
+					else if(n === st.tahap && st.running){ ui.set(n - 1, 'run'); }
+					else if(n < st.tahap){ ui.set(n - 1, 'ok'); }
+					else if(!st.running && n === st.tahap){ ui.set(n - 1, 'fail'); }
+					else { ui.set(n - 1, 'wait'); }
+				}
+				var selesaiN = 0;
+				for(var k in (st.hasil || {})){ selesaiN++; }
+				ui.bar(st.running ? (100 * selesaiN / Math.max(total, 1)) : (st.rc === 0 ? 100 : (100 * selesaiN / Math.max(total, 1))));
+				if(st.running){
+					ui.stat((st.etap ? ('[' + st.tahap + '/' + total + '] ' + st.etap) : (isEn ? 'Running...' : 'Berjalan...')) + ' · ' + ui.detik() + (isEn ? 's' : ' dtk'));
+					setTimeout(tick, 1000);
+					return;
+				}
+				if(st.rc === 0){
+					ui.stat(isEn ? 'Done: all tasks succeeded' : 'Selesai: semua tugas berhasil');
+					ui.note('<span style="color:#10b981">' + (isEn ? 'All selected updates completed.' : 'Semua pembaruan terpilih selesai.') + '</span>');
+				} else {
+					ui.stat(isEn ? 'Finished with errors' : 'Selesai dengan galat');
+					ui.note('<span style="color:#ef4444">' + (isEn ? 'At least one task failed. See the log above for details.' : 'Sedikitnya satu tugas gagal. Lihat log di atas untuk rinciannya.') + '</span>');
+				}
+				ui.selesai();
+				snAvMuat();
+			}, null, null, true);
+		};
+		setTimeout(tick, 600);
+	}, null, null, false);
 }
 
 function snRkhunterPropupd(){
@@ -7920,10 +8315,10 @@ function snCheckUpdate(){
 	snAjax('check_github_update', {}, function(data){
 		layer.close(loadIdx);
 		if(!data) return;
-		var vCur = snFmtVer(data.current_version || 'v1.6.2');
-		var vLat = snFmtVer(data.latest_version || vCur);
+		var vCur = snEsc(snFmtVer(data.current_version || 'v1.6.2'));
+		var vLat = snEsc(snFmtVer(data.latest_version || vCur));
 		var hasUpd = data.has_update;
-		var notes = data.release_notes || (isEn ? 'No release notes.' : 'Tidak ada catatan rilis.');
+		var notes = snEsc(data.release_notes || (isEn ? 'No release notes.' : 'Tidak ada catatan rilis.'));
 		$('#snUpdStatusTxt').text((isEn ? 'Version: ' : 'Versi: ') + vCur + (hasUpd ? (isEn ? ' (Available ' + vLat + ')' : ' (Tersedia ' + vLat + ')') : (isEn ? ' (Latest)' : ' (Terbaru)')));
 
 		var updHtml = '<div style="padding:16px 20px;font-size:13px;line-height:1.5">'

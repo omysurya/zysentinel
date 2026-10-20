@@ -81,13 +81,31 @@ unduh_payload() {
   { ada unzip || [ -x "$PYENV" ] || ada python3; } || pm_pasang unzip || true
   tmp="$(mktemp -d /tmp/zysentinel-fetch.XXXXXX)" || return 1
   zip="$tmp/paket.zip"
-  for url in \
-      "https://github.com/$REPO_GH/releases/download/v$ver/zysentinel-v$ver.zip" \
-      "https://github.com/$REPO_GH/archive/refs/heads/v$ver.zip"; do
-    say "payload tidak ditemukan, mengunduh paket resmi: $url"
-    unduh_berkas "$url" "$zip" && [ -s "$zip" ] && break
-    rm -f "$zip"
-  done
+  # Paket ini berisi skrip yang dijalankan sebagai root: hanya rilis dengan checksum
+  # SHA-256 yang cocok yang diterima. Cabang/arsip tanpa checksum hanya bila operator
+  # secara sadar mengizinkan (ZYS_ALLOW_UNVERIFIED=1).
+  local rel="https://github.com/$REPO_GH/releases/download/v$ver" sums want got
+  say "payload tidak ditemukan, mengunduh paket resmi: $rel/zysentinel-v$ver.zip"
+  if unduh_berkas "$rel/zysentinel-v$ver.zip" "$zip" && [ -s "$zip" ]; then
+    sums="$tmp/SHA256SUMS.txt"
+    if unduh_berkas "$rel/SHA256SUMS.txt" "$sums" && [ -s "$sums" ]; then
+      want="$(awk -v f="zysentinel-v$ver.zip" '$2==f || $2=="*"f {print $1; exit}' "$sums")"
+      got="$(sha256sum "$zip" 2>/dev/null | awk '{print $1}')"
+      if [ -z "$want" ] || [ "$want" != "$got" ]; then
+        err "SHA-256 paket tidak cocok dengan SHA256SUMS.txt; paket ditolak"
+        rm -f "$zip"
+      else
+        say "SHA-256 paket terverifikasi"
+      fi
+    else
+      err "SHA256SUMS.txt rilis tidak tersedia; paket tidak bisa diverifikasi"
+      rm -f "$zip"
+    fi
+  fi
+  if [ ! -s "$zip" ] && [ "${ZYS_ALLOW_UNVERIFIED:-0}" = "1" ]; then
+    say "PERINGATAN: memakai arsip cabang TANPA verifikasi (ZYS_ALLOW_UNVERIFIED=1)"
+    unduh_berkas "https://github.com/$REPO_GH/archive/refs/heads/v$ver.zip" "$zip" || rm -f "$zip"
+  fi
   [ -s "$zip" ] || { rm -rf "$tmp"; return 1; }
   mkdir -p "$tmp/x"
   ekstrak_zip "$zip" "$tmp/x" || { rm -rf "$tmp"; return 1; }
@@ -271,11 +289,6 @@ cek_jq()       { ada jq; }
 cek_zip()      { ada zip && ada unzip; }
 cek_python()   { [ -x "$PYENV" ] || ada python3; }
 cek_kompiler() { ada gcc && [ -f /usr/include/sqlite3.h ]; }
-cek_cjson() {
-  [ -f "$PAY/waf/lua_waf/cjson.so" ] || [ -f "$PAY/lua_waf/cjson.so" ] \
-    || [ -f /usr/local/lib/lua/5.1/cjson.so ] || [ -f /usr/lib/x86_64-linux-gnu/lua/5.1/cjson.so ] \
-    || [ -f /usr/lib64/lua/5.1/cjson.so ]
-}
 cek_guardd_jalan() {
   # Biner precompiled ditautkan ke glibc build-nya; di distro dengan
   # glibc lebih tua (Debian 12, Alma 9, Ubuntu 22) ia gagal dimuat.
@@ -390,7 +403,7 @@ PY
 
 aapanel_tunggu_nginx_lalu_repair() {
   # Kompilasi nginx oleh antrean panel makan 10-30 menit. Pengawas latar
-  # (satu saja, lewat berkas PID) menunggu nginx + lua siap dan antrean
+  # (satu saja, lewat berkas PID) menunggu nginx siap dan antrean
   # nginx kosong, lalu menjalankan self-heal agar WAF terkait.
   # Pola "[i]nstall_soft" dipakai agar pgrep tidak mencocokkan dirinya.
   local skrip="$PANEL_PLUG/install.sh" pidf="$BASE/run/nginx-watch.pid"
@@ -402,10 +415,10 @@ aapanel_tunggu_nginx_lalu_repair() {
   nohup setsid bash -c '
     echo $$ > "$1"
     for i in $(seq 1 480); do
-      if /www/server/nginx/sbin/nginx -V 2>&1 | grep -q lua_nginx_module \
+      if [ -x /www/server/nginx/sbin/nginx ] \
          && ! pgrep -f "[i]nstall_soft.sh .*install nginx" >/dev/null 2>&1; then
         sleep 10
-        echo "[$(date "+%F %T")] nginx + lua siap, menjalankan repair" >>/www/server/sentinel/log/install-deps.log
+        echo "[$(date "+%F %T")] nginx siap, menjalankan repair" >>/www/server/sentinel/log/install-deps.log
         bash "$0" repair >>/www/server/sentinel/log/install-deps.log 2>&1
         break
       fi
@@ -478,29 +491,31 @@ prasyarat_maxminddb() {
 }
 
 prasyarat_webserver() {
+  # WAF memakai Coraza (nginx) dan ModSecurity (Apache/OLS) dengan satu
+  # ruleset SecLang; tidak ada lagi syarat modul Lua di nginx. Modul Coraza
+  # untuk nginx dibangun dari panel (Config > WAF > Siapkan Coraza) sebagai
+  # modul dinamis: biner nginx TIDAK diganti.
   local ngx=/www/server/nginx/sbin/nginx
   if [ -x "$ngx" ]; then
-    if "$ngx" -V 2>&1 | grep -q 'lua_nginx_module'; then
-      catat_dep "nginx + lua (WAF)" fitur "OK" "aaPanel"
+    if grep -qE '^[[:space:]]*load_module[[:space:]]+[^;]*ngx_http_coraza_module' /www/server/nginx/conf/nginx.conf 2>/dev/null; then
+      catat_dep "nginx + Coraza (WAF)" fitur "OK" "modul Coraza dimuat"
     else
-      # Membangun ulang nginx produksi otomatis akan memutus situs
-      # pelanggan saat kompilasi; diserahkan ke admin.
-      catat_dep "nginx + lua (WAF)" fitur "PERLU-TINDAKAN" "nginx tanpa lua: App Store > Nginx > Update"
+      catat_dep "nginx + Coraza (WAF)" fitur "PERLU-TINDAKAN" "panel: Config > WAF > Siapkan Coraza"
     fi
     return 0
   fi
   if [ -x /www/server/apache/bin/httpd ] || [ -x /usr/local/lsws/bin/litespeed ] || [ -x /usr/local/lsws/bin/openlitespeed ]; then
-    catat_dep "nginx + lua (WAF)" fitur "LEWAT" "apache/OLS: jalur snippet"
+    catat_dep "nginx + Coraza (WAF)" fitur "LEWAT" "apache/OLS: ModSecurity dengan ruleset yang sama"
     return 0
   fi
   if [ "${ZYS_SKIP_NGINX:-0}" = "1" ]; then
-    catat_dep "nginx + lua (WAF)" fitur "LEWAT" "ZYS_SKIP_NGINX=1"
+    catat_dep "nginx + Coraza (WAF)" fitur "LEWAT" "ZYS_SKIP_NGINX=1"
     return 0
   fi
   if aapanel_ada && aapanel_nginx_antre; then
     say "  - Nginx sudah ada di antrean / sedang dikompilasi aaPanel, tidak diantrekan ulang"
     aapanel_tunggu_nginx_lalu_repair
-    catat_dep "nginx + lua (WAF)" fitur "DIANTREKAN" "aaPanel (tugas sudah berjalan)"
+    catat_dep "nginx + Coraza (WAF)" fitur "DIANTREKAN" "aaPanel (tugas sudah berjalan)"
     return 0
   fi
   if aapanel_ada; then
@@ -508,12 +523,12 @@ prasyarat_webserver() {
     if [ -n "$ver" ] && aapanel_pasang nginx "$ver"; then
       say "  - webserver belum ada: Nginx $ver (terbaru di katalog aaPanel) diantrekan di panel"
       aapanel_tunggu_nginx_lalu_repair
-      catat_dep "nginx + lua (WAF)" fitur "DIANTREKAN" "aaPanel App Store nginx $ver"
+      catat_dep "nginx + Coraza (WAF)" fitur "DIANTREKAN" "aaPanel App Store nginx $ver"
     else
-      catat_dep "nginx + lua (WAF)" fitur "GAGAL" "antrean aaPanel"
+      catat_dep "nginx + Coraza (WAF)" fitur "GAGAL" "antrean aaPanel"
     fi
   else
-    catat_dep "nginx + lua (WAF)" fitur "LEWAT" "bukan server aaPanel"
+    catat_dep "nginx + Coraza (WAF)" fitur "LEWAT" "bukan server aaPanel"
   fi
 }
 
@@ -551,11 +566,6 @@ cek_prasyarat() {
   prasyarat_os "inotify-tools"        fitur cek_inotify inotify-tools inotify-tools -- inotify-tools -- epel
   prasyarat_os "clamav"               fitur cek_clamav clamav clamav clamav-daemon clamav-freshclam -- clamav clamd clamav-update -- epel
   prasyarat_os "rkhunter"             fitur cek_rkhunter rkhunter rkhunter -- rkhunter -- epel
-  if cek_cjson; then
-    catat_dep "lua-cjson" fitur "OK" "cjson.so payload"
-  else
-    prasyarat_os "lua-cjson"          fitur cek_cjson lua-cjson lua-cjson -- lua-cjson -- epel
-  fi
   prasyarat_webserver
   prasyarat_maxminddb
   prasyarat_os "jq"                   opsi cek_jq jq jq -- jq
@@ -565,16 +575,6 @@ cek_prasyarat() {
   modprobe -q ip_set 2>/dev/null || true
   modprobe -q xt_set 2>/dev/null || true
   modprobe -q xt_conntrack 2>/dev/null || true
-
-  # cjson.so juga disediakan untuk Lua global (dipakai WAF bila
-  # package.cpath tidak menunjuk ke folder lua_waf).
-  local cj=""
-  [ -f "$PAY/waf/lua_waf/cjson.so" ] && cj="$PAY/waf/lua_waf/cjson.so"
-  [ -z "$cj" ] && [ -f "$PAY/lua_waf/cjson.so" ] && cj="$PAY/lua_waf/cjson.so"
-  if [ -n "$cj" ]; then
-    mkdir -p /usr/local/lib/lua/5.1 2>/dev/null || true
-    [ -f /usr/local/lib/lua/5.1/cjson.so ] || cp -p "$cj" /usr/local/lib/lua/5.1/cjson.so 2>/dev/null || true
-  fi
 
   say "hasil pemeriksaan prasyarat:"
   cetak_ringkas_deps
@@ -586,6 +586,60 @@ cek_prasyarat() {
   return 0
 }
 
+# ------------------------------------------------------------------
+# guardd: biner HARUS sesuai dengan sumber (guardd.c). Dulu setiap install/update
+# menimpa biner hasil kompilasi dengan biner payload bawaan yang bisa tertinggal
+# dari sumber (tanpa perbaikan keamanan). Aturannya sekarang:
+#   1. sumber payload disalin ke $BASE/src;
+#   2. bila hash sumber sama dengan stempel biner terpasang dan biner jalan: biarkan;
+#   3. bila gcc + sqlite3.h ada: kompilasi dengan hardening, uji (-V), baru ganti;
+#   4. selain itu: pakai biner payload HANYA bila stempel payload cocok dengan sumber.
+# Mengembalikan 0 bila biner berubah (layanan perlu di-restart), 1 bila tetap, 2 bila gagal.
+# ------------------------------------------------------------------
+siapkan_guardd() {
+  local pay="$PAY" src="$BASE/src/guardd.c" want have tmp="$BIN/guardd.tmp"
+  mkdir -p "$BIN" "$BASE/src"
+  [ -f "$pay/guardd.c" ] && cp -p "$pay/guardd.c" "$src"
+  [ -f "$src" ] || { [ -x "$BIN/guardd" ] && return 1; err "sumber guardd.c tidak ada"; return 2; }
+  want="$(sha256sum "$src" 2>/dev/null | awk '{print $1}')"
+  have="$(cat "$BIN/guardd.srchash" 2>/dev/null)"
+  if [ -x "$BIN/guardd" ] && "$BIN/guardd" -V >/dev/null 2>&1 && [ "$have" = "$want" ]; then
+    return 1
+  fi
+  if command -v gcc >/dev/null 2>&1 && [ -f /usr/include/sqlite3.h ]; then
+    say "menyusun guardd dari sumber C (hardening: canary, PIE, RELRO)"
+    if gcc -O2 -Wall -Wextra -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -pie -Wl,-z,relro,-z,now \
+         -o "$tmp" "$src" -lsqlite3 -lm >>"$LOG_DEPS" 2>&1 && "$tmp" -V >/dev/null 2>&1; then
+      chmod 750 "$tmp"; mv -f "$tmp" "$BIN/guardd"; printf '%s\n' "$want" > "$BIN/guardd.srchash"
+      return 0
+    fi
+    rm -f "$tmp"; err "kompilasi guardd gagal (lihat $LOG_DEPS), mencoba biner payload"
+  fi
+  if [ -f "$pay/guardd" ]; then
+    if [ "$(cat "$pay/guardd.srchash" 2>/dev/null)" = "$want" ]; then
+      cp -p --remove-destination "$pay/guardd" "$tmp" && chmod 750 "$tmp" && "$tmp" -V >/dev/null 2>&1 \
+        && mv -f "$tmp" "$BIN/guardd" && printf '%s\n' "$want" > "$BIN/guardd.srchash" \
+        && { say "biner guardd dipasang dari payload (cocok dengan sumber)"; return 0; }
+      rm -f "$tmp"
+      err "biner payload tidak bisa dijalankan di sistem ini dan gcc tidak tersedia"
+    else
+      err "biner payload TIDAK cocok dengan sumber (versi lama) dan gcc tidak tersedia: tidak dipasang"
+    fi
+  fi
+  [ -x "$BIN/guardd" ] && "$BIN/guardd" -V >/dev/null 2>&1 && { say "memakai biner guardd yang sudah ada"; return 1; }
+  return 2
+}
+
+# Restart guardd bila biner diganti (tanpa ini proses lama tetap berjalan dengan kode lama).
+segarkan_guardd() {
+  [ "$1" = "0" ] || return 0
+  if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
+    systemctl is-active --quiet sentinel.service 2>/dev/null && { systemctl restart sentinel.service 2>/dev/null; say "sentinel.service di-restart (biner baru)"; }
+  elif pgrep -x guardd >/dev/null 2>&1; then
+    "$BIN/guardctl" stop >/dev/null 2>&1; sleep 1; "$BIN/guardctl" start >/dev/null 2>&1; say "guardd di-restart (biner baru)"
+  fi
+}
+
 pasang_daemon() {
   mkdir -p "$ETC" "$BASE/run" "$BASE/data" "$BASE/log" "$BASE/src" "$BIN" \
            "$BASE/av/baseline" "$BASE/av/last" "$BASE/av/quarantine/files" "$BASE/av/quarantine/meta"
@@ -595,14 +649,12 @@ pasang_daemon() {
   # Salin BERKAS yang dibutuhkan dari payload ke tempat kerjanya.
   if [ -d "$pay" ]; then
     mkdir -p "$BIN" "$BASE/src"
-    for f in guardctl sentinel-fw.sh sentinel-waf.sh sentinel-av.sh sentinel-proc.py sentinel-intel.sh sentinel-notify.sh sentinel-ports.py sentinel-upload-scan.py sentinel-sage.py; do
+    for f in guardctl sentinel-fw.sh sentinel-waf.sh sentinel-av.sh sentinel-proc.py sentinel-intel.sh sentinel-notify.sh sentinel-ports.py sentinel-upload-scan.py sentinel-sage.py sentinel-zyrules.py; do
       if [ -f "$pay/$f" ]; then
         cp -p "$pay/$f" "$BIN/$f"
         chmod 755 "$BIN/$f"
       fi
     done
-    [ -f "$pay/guardd" ] && cp -p --remove-destination "$pay/guardd" "$BIN/guardd" && chmod 755 "$BIN/guardd"
-    [ -f "$pay/guardd.c" ] && cp -p "$pay/guardd.c" "$BASE/src/guardd.c"
     # config TIDAK ditimpa bila sudah ada: isinya memuat penyesuaian
     # operator (ambang, geo-ban, throttle) yang tidak boleh hilang saat
     # update plugin.
@@ -653,24 +705,12 @@ EOF
     err "guardd.conf tidak ada, konfigurasi tidak bisa dibuat otomatis"
     return 1
   fi
-  if [ ! -x "$BIN/guardd" ] || ! "$BIN/guardd" -V >/dev/null 2>&1; then
-    if [ -f "$pay/guardd" ]; then
-      cp -p --remove-destination "$pay/guardd" "$BIN/guardd"
-      chmod 755 "$BIN/guardd"
-      say "binary guardd dipasang dari payload"
-    fi
-    if [ ! -x "$BIN/guardd" ] || ! "$BIN/guardd" -V >/dev/null 2>&1; then
-      if [ -f "$BASE/src/guardd.c" ] && command -v gcc >/dev/null 2>&1; then
-        say "menyusun guardd dari sumber C"
-        gcc -O2 -Wall -Wextra -o "$BIN/guardd.tmp" "$BASE/src/guardd.c" \
-            -lsqlite3 -lm && mv -f "$BIN/guardd.tmp" "$BIN/guardd" || { err "gagal menyusun guardd"; return 1; }
-      else
-        err "binary guardd tidak dapat dijalankan dan compiler gcc tidak tersedia"
-        return 1
-      fi
-    fi
+  siapkan_guardd; GUARDD_RC=$?
+  if [ "$GUARDD_RC" = "2" ]; then
+    err "guardd tidak bisa disiapkan"
+    return 1
   fi
-  chmod 755 "$BIN/guardd" "$BIN/guardctl" "$BIN/sentinel-fw.sh" "$BIN/sentinel-av.sh" "$BIN/sentinel-proc.py" "$BIN/sentinel-intel.sh" "$BIN/sentinel-notify.sh" "$BIN/sentinel-ports.py" "$BIN/sentinel-upload-scan.py" "$BIN/sentinel-sage.py" 2>/dev/null
+  chmod 755 "$BIN/guardd" "$BIN/guardctl" "$BIN/sentinel-fw.sh" "$BIN/sentinel-av.sh" "$BIN/sentinel-proc.py" "$BIN/sentinel-intel.sh" "$BIN/sentinel-notify.sh" "$BIN/sentinel-ports.py" "$BIN/sentinel-upload-scan.py" "$BIN/sentinel-sage.py" "$BIN/sentinel-zyrules.py" 2>/dev/null
   return 0
 }
 
@@ -723,70 +763,49 @@ pasang_notif() {
 }
 
 konsolidasi_waf() {
-  # Pastikan aset WAF mandiri berada langsung di bawah sentinel/waf/lua_waf
-  mkdir -p "$BASE/waf/lua_waf/rule" "$BASE/waf/lua_waf/html" "$BASE/waf/lua_waf/resty" "$BASE/waf/lua_waf/ngx" || return 1
-  local pay
-  pay="$PAY"
-
-  local src_waf="$pay/waf/lua_waf"
-  [ -d "$src_waf" ] || src_waf="$pay/lua_waf"
-
-  if [ -d "$src_waf" ]; then
-    cp -rn "$src_waf"/* "$BASE/waf/lua_waf/" 2>/dev/null || true
-    say "aset WAF mandiri disalin dari payload ke $BASE/waf/lua_waf"
+  # Pasang ruleset ZySentinel (SecLang) dari payload ke $BASE/waf/zyrules dan
+  # susun konfigurasinya. Berkas lokal operator (zysentinel-config.local.conf,
+  # zysentinel-exclusions.local.conf) dan daftar IP/URL tidak ditimpa.
+  local pay="$PAY"
+  mkdir -p "$BASE/waf" "$ETC/waf-lists" || return 1
+  chmod 755 "$ETC/waf-lists" 2>/dev/null || true
+  if [ -d "$pay/zyrules" ] && [ -x "$BIN/sentinel-waf.sh" ]; then
+    SENTINEL_PAYLOAD="$pay" bash "$BIN/sentinel-waf.sh" zyrules-install \
+      || { err "pemasangan ruleset ZySentinel gagal"; return 1; }
+  else
+    err "payload zyrules atau sentinel-waf.sh tidak ditemukan"
+    return 1
   fi
-
-  # Pastikan modul cjson.so & json_pure.lua terpasang mandiri di lua_waf
-  if [ -f "$src_waf/cjson.so" ]; then
-    cp -p "$src_waf/cjson.so" "$BASE/waf/lua_waf/cjson.so"
-  fi
-  if [ -f "$src_waf/json_pure.lua" ]; then
-    cp -p "$src_waf/json_pure.lua" "$BASE/waf/lua_waf/json_pure.lua"
-  fi
-
-  # Salin config default jika belum ada
-  for f in config.json site.json total.json drop_ip.log; do
-    if [ ! -f "$BASE/waf/lua_waf/$f" ] && [ -f "$src_waf/$f.default" ]; then
-      cp -p "$src_waf/$f.default" "$BASE/waf/lua_waf/$f"
-      say "dibuat default: $BASE/waf/lua_waf/$f"
-    fi
-  done
-  chown -R www:www "$BASE/waf/lua_waf" 2>/dev/null || true
-  chmod 755 "$BASE/waf/lua_waf" "$BASE/waf/lua_waf/rule" "$BASE/waf/lua_waf/html" 2>/dev/null || true
   return 0
 }
 
 pasang_waf() {
-  # Pasang engine WAF sesuai webserver yang TERPASANG di mesin ini.
-  # nginx + lua -> engine Lua WAF dari payload (idempoten, config
-  #   yang sudah ada tidak ditimpa).
-  # apache / openlitespeed -> engine Lua tidak berlaku di sana; yang
-  #   dipakai jalur snippet ModSecurity (dikelola tab Config > WAF).
-  #   Di sini hanya dilaporkan kesiapannya, tidak ada yang diubah.
+  # WAF: ruleset ZySentinel sudah dipasang oleh konsolidasi_waf. Modul Coraza
+  # untuk nginx dibangun dari panel (butuh compiler dan Go dari aaPanel Go SDK
+  # Manager); di sini hanya dilaporkan kesiapannya, tidak ada yang diubah di
+  # nginx produksi. Apache/OLS memakai ModSecurity dengan ruleset yang sama.
   local skrip="$BIN/sentinel-waf.sh"
   [ -x "$skrip" ] || { err "$skrip tidak ada"; return 1; }
-  local nginx_bin="/www/server/nginx/sbin/nginx"
-  if [ -x "$nginx_bin" ]; then
-    if "$nginx_bin" -V 2>&1 | grep -q 'lua_nginx_module'; then
-      say "nginx + lua terdeteksi, memasang engine Lua WAF"
-      bash "$skrip" freewaf-install || {
-        err "pemasangan engine Lua WAF gagal (lihat pesan di atas)"
-        return 1
-      }
-    else
-      say "nginx ada tetapi TANPA lua_nginx_module."
-      say "Engine Lua WAF dilewati. Bangun ulang nginx dengan modul lua,"
-      say "lalu jalankan: bash $skrip freewaf-install"
-    fi
-  else
-    say "nginx tidak terpasang, engine Lua WAF dilewati."
+  local eng
+  eng="$(bash "$skrip" engine 2>/dev/null)"
+  printf '%s\n' "$eng" | sed 's/^/[zysentinel]   waf: /'
+  if printf '%s' "$eng" | grep -q '^nginx=none'; then
+    say "nginx belum memuat modul Coraza: panel > Config > WAF > Siapkan Coraza."
   fi
-  local ada_apache=0 ada_ols=0
-  [ -x /www/server/apache/bin/httpd ] && ada_apache=1
-  [ -x /usr/local/lsws/bin/openlitespeed ] && ada_ols=1
-  [ -x /usr/local/lsws/bin/litespeed ] && ada_ols=1
-  [ "$ada_apache" -eq 1 ] && say "apache terdeteksi: pakai tab Config > WAF (jalur snippet)."
-  [ "$ada_ols" -eq 1 ] && say "openlitespeed terdeteksi: pakai tab Config > WAF (jalur snippet)."
+  # Peninggalan engine Lua dari versi lama: TIDAK dicabut otomatis, sebab itu
+  # bisa memutus perlindungan bila Coraza belum dimuat. Pindahkan dari panel
+  # (banner di tab WAF), atau jalankan dengan ZYS_MIGRATE_LUA=1.
+  local leg
+  leg="$(bash "$skrip" legacy-status 2>/dev/null)"
+  if printf '%s' "$leg" | grep -q '^legacy=ya'; then
+    if [ "${ZYS_MIGRATE_LUA:-0}" = "1" ]; then
+      say "ZYS_MIGRATE_LUA=1: memindahkan dari engine Lua lama"
+      bash "$skrip" legacy-remove || err "pemindahan dari engine Lua gagal; berkas Lua dipertahankan"
+    else
+      say "PERINGATAN: engine Lua WAF lama masih terpasang dan aktif, tetapi tidak dipakai lagi oleh plugin."
+      say "Setelah modul Coraza dimuat, pindahkan lewat panel (tab WAF) atau: bash $skrip legacy-remove"
+    fi
+  fi
   return 0
 }
 
@@ -940,8 +959,30 @@ pasang_layanan() {
     fi
   else
     say "systemd tidak aktif sebagai init (PID 1), menjalankan guardctl start..."
+    segarkan_guardd "${GUARDD_RC:-1}"
     "$BIN/guardctl" start 2>/dev/null || true
   fi
+}
+
+# Aturan yang tersimpan di persistensi iptables (netfilter-persistent) bisa memuat chain dan
+# set Sentinel. Setelah uninstall, set-nya hilang sehingga iptables-restore saat boot GAGAL
+# dan SELURUH aturan tersimpan (aaPanel, docker, fail2ban) ikut tidak termuat. Baris milik
+# Sentinel dibuang dari berkas itu (cadangan berdampingan, diuji dengan --test sebelum ditimpa).
+bersihkan_persistensi() {
+  local f tmp
+  command -v iptables-restore >/dev/null 2>&1 || return 0
+  for f in /etc/iptables/rules.v4 /etc/sysconfig/iptables; do
+    [ -f "$f" ] || continue
+    grep -qi 'sentinel' "$f" 2>/dev/null || continue
+    tmp="$(mktemp /tmp/zysentinel-rules.XXXXXX)" || continue
+    grep -viE '(^:SENTINEL|^-A SENTINEL|-j SENTINEL|--match-set sentinel_|--comment "?sentinel:)' "$f" > "$tmp"
+    if iptables-restore --test < "$tmp" >/dev/null 2>&1; then
+      cp -p "$f" "$f.bak.$(date +%Y%m%d%H%M%S)" && cat "$tmp" > "$f" && say "baris Sentinel dibuang dari $f"
+    else
+      err "$f tidak diubah: hasil pembersihan tidak lolos iptables-restore --test"
+    fi
+    rm -f "$tmp"
+  done
 }
 
 uninstall_clean() {
@@ -968,12 +1009,19 @@ uninstall_clean() {
   say "Memulai pencabutan bersih ZySentinel (Clean uninstallation)..."
   rm -f "$ETC/uninstall.lock" 2>/dev/null || true
 
-  # 1. Cabut hook WAF webserver dan reload Nginx
+  # 1. Cabut snippet WAF per vhost (nginx/Apache/OLS), modul Coraza, dan hook Lua
+  #    peninggalan versi lama; lalu uji dan reload nginx.
+  say "Mencabut snippet WAF dari webserver"
+  rm -f /www/server/panel/vhost/nginx/extension/*/sentinel-waf.conf \
+        /www/server/panel/vhost/apache/extension/*/sentinel-waf.conf 2>/dev/null || true
+  # OLS: folder waf/ bisa berisi berkas milik pihak lain; hanya hapus yang ditulis plugin ini.
+  for f in /www/server/panel/vhost/openlitespeed/waf/*.conf; do
+    [ -f "$f" ] && grep -q 'dikelola sentinel-waf.sh' "$f" 2>/dev/null && rm -f "$f"
+  done
+  rm -f /www/server/panel/vhost/nginx/sentinel_waf.conf 2>/dev/null || true
   if [ -x "$BIN/sentinel-waf.sh" ]; then
-    say "Mencabut hook Lua WAF dan Coraza dari webserver"
-    bash "$BIN/sentinel-waf.sh" freewaf-remove 2>/dev/null || true
+    bash "$BIN/sentinel-waf.sh" coraza-uninstall 2>/dev/null || true
   fi
-  rm -f /www/server/panel/vhost/nginx/sentinel_waf.conf /www/server/panel/vhost/nginx/free_waf.conf 2>/dev/null || true
   if [ -x /www/server/nginx/sbin/nginx ]; then
     if /www/server/nginx/sbin/nginx -t >/dev/null 2>&1; then
       /etc/init.d/nginx reload >/dev/null 2>&1 || true
@@ -987,11 +1035,13 @@ uninstall_clean() {
     bash "$BIN/sentinel-fw.sh" remove 2>/dev/null || true
   fi
   if command -v ipset >/dev/null 2>&1; then
-    for s in sentinel_ban sentinel_thr sentinel_rev sentinel_intel sentinel_ports_in sentinel_ports_out; do
+    for s in sentinel_ban sentinel_throttle sentinel_review sentinel_geo sentinel_intel sentinel_ports_in sentinel_ports_out; do
       ipset flush "$s" 2>/dev/null || true
       ipset destroy "$s" 2>/dev/null || true
     done
   fi
+
+  bersihkan_persistensi
 
   # 3. Hentikan & hapus seluruh unit systemd
   if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
@@ -1000,18 +1050,32 @@ uninstall_clean() {
       systemctl stop "$u" 2>/dev/null || true
       systemctl disable "$u" 2>/dev/null || true
     done
-    rm -f /etc/systemd/system/sentinel* /etc/init.d/sentinel 2>/dev/null || true
+    # Hanya unit milik plugin (nama persis), bukan glob 'sentinel*'.
+    for u in $units; do rm -f "/etc/systemd/system/$u" 2>/dev/null || true; done
+    rm -f /etc/init.d/sentinel 2>/dev/null || true
     systemctl daemon-reload 2>/dev/null || true
     say "seluruh layanan systemd dihentikan dan unit dicabut"
   else
     [ -x "$BIN/guardctl" ] && "$BIN/guardctl" stop 2>/dev/null || true
-    rm -f /etc/systemd/system/sentinel* /etc/init.d/sentinel 2>/dev/null || true
+    for u in sentinel-upload-scan.service sentinel-proc.service sentinel-intel.timer sentinel-intel.service sentinel-av.timer sentinel-av.service sentinel-fw.timer sentinel-fw.service sentinel-notify.timer sentinel-notify.service sentinel.service; do
+      rm -f "/etc/systemd/system/$u" 2>/dev/null || true
+    done
+    rm -f /etc/init.d/sentinel 2>/dev/null || true
     say "seluruh layanan dihentikan via guardctl stop"
   fi
+
+  # Sisa konfigurasi sistem milik plugin ini
+  if [ -f /etc/ld.so.conf.d/sentinel-coraza.conf ]; then
+    rm -f /etc/ld.so.conf.d/sentinel-coraza.conf && command -v ldconfig >/dev/null 2>&1 && ldconfig 2>/dev/null || true
+  fi
+  rm -f /etc/logrotate.d/zysentinel-waf 2>/dev/null || true
 
   # 4. Hapus seluruh direktori kerja, basis data, dan log Sentinel
   rm -rf "$BASE"
   say "berkas di $BASE dan log dibersihkan secara total"
+  # Penanda: sampai install berikutnya, panel tidak boleh membangkitkan kembali bin/ dan unit
+  # (self-heal di sentinel_main) pada plugin yang sudah dicabut.
+  touch "$PLUG_DIR/.uninstalled" 2>/dev/null || true
   say "pencabutan bersih selesai. Server kembali ke konfigurasi awal."
   return 0
 }
@@ -1029,6 +1093,7 @@ cabut() {
 }
 
 pasang_fresh() {
+  rm -f "$PLUG_DIR/.uninstalled" 2>/dev/null || true
   say "memulai instalasi baru (Fresh Install) ZySentinel..."
   rm -f "$ETC/uninstall.lock" 2>/dev/null || true
   # Hentikan layanan lama bila sedang berjalan
@@ -1054,6 +1119,7 @@ pasang_fresh() {
 }
 
 perbaiki_mandiri() {
+  rm -f "$PLUG_DIR/.uninstalled" 2>/dev/null || true
   say "memulai diagnostik dan perbaikan mandiri (Self-Heal) ZySentinel..."
   local pay="$PAY"
   local dipulihkan=0
@@ -1066,7 +1132,7 @@ perbaiki_mandiri() {
   cek_prasyarat || true
 
   # 2. Periksa skrip biner di BIN
-  for f in guardctl sentinel-fw.sh sentinel-waf.sh sentinel-av.sh sentinel-proc.py sentinel-intel.sh sentinel-notify.sh sentinel-ports.py sentinel-upload-scan.py sentinel-sage.py; do
+  for f in guardctl sentinel-fw.sh sentinel-waf.sh sentinel-av.sh sentinel-proc.py sentinel-intel.sh sentinel-notify.sh sentinel-ports.py sentinel-upload-scan.py sentinel-sage.py sentinel-zyrules.py; do
     # Hilang, kosong, ATAU isinya berbeda dari payload (rusak, termodifikasi,
     # atau versi lama setelah pembaruan plugin): payload adalah sumber kebenaran.
     if [ -f "$pay/$f" ] && ! cmp -s "$pay/$f" "$BIN/$f"; then
@@ -1077,28 +1143,10 @@ perbaiki_mandiri() {
     fi
   done
 
-  # 3. Periksa biner guardd
-  if [ ! -x "$BIN/guardd" ] || ! "$BIN/guardd" -V >/dev/null 2>&1; then
-    if [ -f "$pay/guardd" ]; then
-      cp -p --remove-destination "$pay/guardd" "$BIN/guardd"
-      chmod 750 "$BIN/guardd"
-    fi
-    # Biner payload bisa tidak cocok dengan glibc sistem: susun ulang.
-    if ! "$BIN/guardd" -V >/dev/null 2>&1; then
-      [ -f "$BASE/src/guardd.c" ] || cp -p "$pay/guardd.c" "$BASE/src/guardd.c" 2>/dev/null
-      if [ -f "$BASE/src/guardd.c" ] && command -v gcc >/dev/null 2>&1 \
-         && gcc -O2 -Wall -Wextra -o "$BIN/guardd.tmp" "$BASE/src/guardd.c" -lsqlite3 -lm >>"$LOG_DEPS" 2>&1; then
-        mv -f "$BIN/guardd.tmp" "$BIN/guardd"
-        chmod 750 "$BIN/guardd"
-        say "biner guardd dikompilasi ulang dari sumber C"
-      else
-        err "guardd tidak bisa dipulihkan (biner tidak cocok, gcc/sumber tidak ada)"
-      fi
-    else
-      say "biner guardd dipulihkan dari payload"
-    fi
-    dipulihkan=$((dipulihkan + 1))
-  fi
+  # 3. Periksa biner guardd (harus cocok dengan sumber, bukan sekadar bisa jalan)
+  siapkan_guardd; local grc=$?
+  if [ "$grc" = "0" ]; then dipulihkan=$((dipulihkan + 1)); segarkan_guardd 0; fi
+  [ "$grc" = "2" ] && err "guardd tidak bisa dipulihkan"
 
   # 4. Periksa berkas konfigurasi default
   if [ ! -f "$ETC/guardd.conf" ] && [ -f "$pay/guardd.conf.default" ]; then
@@ -1146,16 +1194,13 @@ perbaiki_mandiri() {
     dipulihkan=$((dipulihkan + 1))
   fi
 
-  # 8. Periksa hook WAF & validasi Nginx (Zero Downtime)
+  # 8. Periksa ruleset WAF & validasi Nginx (Zero Downtime)
   if [ -x "$BIN/sentinel-waf.sh" ]; then
     local waf_st
-    waf_st="$(bash "$BIN/sentinel-waf.sh" freewaf-status 2>/dev/null)"
-    # nginx + lua baru tersedia (mis. selesai dipasang dari antrean
-    # aaPanel) tetapi engine belum terkait: pasang sekarang.
-    if printf '%s' "$waf_st" | grep -q '^lua=ada' && ! printf '%s' "$waf_st" | grep -q '^loaded=ya'; then
-      say "nginx + lua tersedia tetapi WAF belum aktif, memasang engine Lua WAF"
+    waf_st="$(bash "$BIN/sentinel-waf.sh" engine 2>/dev/null)"
+    if printf '%s' "$waf_st" | grep -q '^zyrules=hilang'; then
+      say "ruleset ZySentinel belum terpasang, memasang"
       konsolidasi_waf || true
-      pasang_waf || true
       dipulihkan=$((dipulihkan + 1))
     fi
   fi
@@ -1200,6 +1245,8 @@ verifikasi_akhir() {
     say "  $(printf '%-30s' 'rantai iptables SENTINEL') ada"
   else
     say "  $(printf '%-30s' 'rantai iptables SENTINEL') TIDAK ADA"
+    err "firewall kernel tidak terpasang (iptables tidak ada, tanpa hak NET_ADMIN, atau pemasangan gagal): perlindungan jaringan TIDAK aktif"
+    gagal=1
   fi
   if [ "$gagal" -ne 0 ] || [ "$DEPS_GAGAL_WAJIB" -gt 0 ]; then
     err "instalasi BELUM utuh. Prasyarat: $STATUS_DEPS, log: $LOG_DEPS"
@@ -1248,38 +1295,23 @@ kunci_keamanan_benteng() {
   chmod 700 "$BASE/av" "$BASE/av/baseline" "$BASE/av/last" "$BASE/av/quarantine" 2>/dev/null || true
   chmod -R 700 "$BASE/av/quarantine" 2>/dev/null || true
 
-  # 7. Amankan aturan WAF Lua WAF: Hapus izin world-writable (666) yang berbahaya
-  for waf_d in "$BASE/waf/lua_waf" "$BASE/waf/free_waf"; do
-    if [ -d "$waf_d/rule" ] && [ ! -L "$waf_d" ]; then
-      chown -R root:root "$waf_d" 2>/dev/null || true
-      chmod 755 "$waf_d" "$waf_d/rule" 2>/dev/null || true
-      chmod 644 "$waf_d/rule"/*.json 2>/dev/null || true
-      chmod 644 "$waf_d"/*.lua 2>/dev/null || true
-      chmod 644 "$waf_d"/*.json 2>/dev/null || true
-      chmod 640 "$waf_d"/*.bak* 2>/dev/null || true
-      touch "$waf_d/drop_ip.log" "$waf_d/total.json" 2>/dev/null || true
-      chown www:www "$waf_d/drop_ip.log" "$waf_d/total.json" 2>/dev/null \
-        || chown nobody:nogroup "$waf_d/drop_ip.log" "$waf_d/total.json" 2>/dev/null || true
-      chmod 660 "$waf_d/drop_ip.log" "$waf_d/total.json" 2>/dev/null || true
-      chmod o-rw "$waf_d/drop_ip.log" "$waf_d/total.json" 2>/dev/null || true
-    fi
-  done
-
-  # 8. Amankan seluruh direktori plugin panel aaPanel dari modifikasi non-root
-  local panel_plugin_dir="/www/server/panel/plugin"
-  if [ -d "$panel_plugin_dir" ]; then
-    chown -R root:root "$panel_plugin_dir" 2>/dev/null || true
-    chmod 755 "$panel_plugin_dir" 2>/dev/null || true
-    chmod -R u+rwX,go-w "$panel_plugin_dir" 2>/dev/null || true
-    find "$panel_plugin_dir" -maxdepth 1 -type d -exec chmod 755 {} + 2>/dev/null || true
+  # 7. Ruleset WAF: berkas dibaca user web server (worker), jadi harus terbaca
+  #    tetapi tidak boleh bisa ditulis siapa pun selain root.
+  if [ -d "$BASE/waf/zyrules" ]; then
+    chown -R root:root "$BASE/waf/zyrules" 2>/dev/null || true
+    find "$BASE/waf/zyrules" -type d -exec chmod 755 {} + 2>/dev/null || true
+    find "$BASE/waf/zyrules" -type f -exec chmod 644 {} + 2>/dev/null || true
   fi
+  [ -d "$ETC/waf-lists" ] && chmod 755 "$ETC/waf-lists" 2>/dev/null || true
+
+  # 8. HANYA direktori plugin ini. Dulu chown/chmod -R dijalankan pada SELURUH
+  #    /www/server/panel/plugin (plugin pihak lain), panel/config, panel/vhost, dan
+  #    nginx/conf: itu mengubah berkas yang bukan milik plugin ini dan bisa merusak
+  #    plugin lain yang berjalan sebagai user non-root.
   chmod -R go-w "$plug_dir" 2>/dev/null || true
   chmod 750 "$plug_dir"/*.sh 2>/dev/null || true
 
-  # 9. Amankan berkas konfigurasi kritis webserver & panel dari manipulasi
-  chmod -R go-w /www/server/panel/config /www/server/panel/vhost /www/server/nginx/conf 2>/dev/null || true
-
-  say "seluruh izin benteng dikunci rapat untuk root saja"
+  say "izin direktori milik plugin ini dikunci untuk root saja"
 }
 
 pasang_icon() {
@@ -1304,6 +1336,7 @@ case "$AKSI" in
 esac
 
 pasang_lengkap() {
+  rm -f "$PLUG_DIR/.uninstalled" 2>/dev/null || true
   pulihkan_izin_staging
   cek_prasyarat || true
   pasang_daemon || err "pemasangan daemon gagal"

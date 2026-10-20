@@ -13,6 +13,7 @@ import os
 import json
 import re
 import subprocess
+import ipaddress
 
 CONF_DIR = '/www/server/sentinel/etc'
 CONF_FILE = os.path.join(CONF_DIR, 'ports.json')
@@ -22,6 +23,49 @@ SSH_CONFIG_FILES = [
     '/etc/ssh/sshd_config.d/00-aapanel.conf',
     '/etc/ssh/sshd_config.d/50-cloud-init.conf'
 ]
+
+# ---- validasi aturan sebelum menyentuh shell/iptables --------------------
+# ports.json bisa berubah di luar API (edit manual, versi lama), dan nilainya
+# disisipkan ke perintah shell. Aturan yang tidak lolos DILEWATI dan dilaporkan,
+# bukan dikirim ke iptables.
+_PROTO_OK = ('tcp', 'udp', 'tcp/udp', 'tcp+udp', 'all', 'any')
+
+def _src_valid(v):
+    """Daftar IPv4/CIDR dipisah koma, semuanya ketat dan IPv4 saja."""
+    if not isinstance(v, str) or not v.strip() or len(v) > 400:
+        return False
+    for b in v.split(','):
+        b = b.strip()
+        if not re.fullmatch(r'(?:(?:0|[1-9][0-9]{0,2})\.){3}(?:0|[1-9][0-9]{0,2})(?:/(?:0|[1-9][0-9]?))?', b):
+            return False
+        try:
+            ipaddress.IPv4Network(b if '/' in b else b + '/32', strict=True)
+        except ValueError:
+            return False
+    return True
+
+def rule_problem(r, kolom):
+    """None bila aturan aman dipasang, selain itu alasan penolakan."""
+    if not isinstance(r, dict):
+        return 'bukan objek aturan'
+    proto = str(r.get('protocol', 'tcp')).lower()
+    if proto not in _PROTO_OK:
+        return 'protokol tidak valid: %r' % proto[:20]
+    action = str(r.get('action', 'ACCEPT')).upper()
+    if action not in ('ACCEPT', 'DROP'):
+        return 'aksi tidak valid: %r' % action[:20]
+    port = str(r.get('port', '')).strip().lower()
+    if port not in ('', 'all', 'any'):
+        m = re.fullmatch(r'([1-9][0-9]{0,4})(?:[-:]([1-9][0-9]{0,4}))?', port)
+        if not m or int(m.group(1)) > 65535 or (m.group(2) and (int(m.group(2)) > 65535 or int(m.group(2)) <= int(m.group(1)))):
+            return 'port tidak valid: %r' % port[:20]
+    if not _src_valid(str(r.get(kolom, '0.0.0.0/0')).strip() or '0.0.0.0/0'):
+        return 'alamat %s tidak valid: %r' % (kolom, str(r.get(kolom))[:40])
+    return None
+
+def clean_rid(r):
+    return re.sub(r'[^A-Za-z0-9_-]', '', str(r.get('id', 'rule')))[:20] or 'rule'
+
 
 def get_iptables_bin():
     for b in ['/usr/sbin/iptables', '/sbin/iptables', 'iptables']:
@@ -156,12 +200,56 @@ def save_config(cfg):
     os.replace(tmp_file, CONF_FILE)
     os.chmod(CONF_FILE, 0o644)
 
+def sshd_ports():
+    """Port SSH yang BENAR-BENAR dipakai sekarang: baris Port di sshd_config dan
+    soket sshd yang listen. Dibaca ulang setiap apply; dulu hanya terdeteksi sekali saat
+    ports.json pertama dibuat, sehingga mengganti port SSH berujung terkunci."""
+    ports = set()
+    for f in SSH_CONFIG_FILES:
+        try:
+            with open(f, 'r') as fp:
+                for line in fp:
+                    m = re.match(r'^\s*Port\s+([0-9]+)', line, re.I)
+                    if m and 1 <= int(m.group(1)) <= 65535:
+                        ports.add(int(m.group(1)))
+        except Exception:
+            pass
+    rc, o, _ = run_cmd("ss -Hltnp 2>/dev/null | grep -w sshd")
+    if rc == 0:
+        for ln in o.splitlines():
+            m = re.search(r':([0-9]+)\s', ln)
+            if m and 1 <= int(m.group(1)) <= 65535:
+                ports.add(int(m.group(1)))
+    if not ports:
+        ports.add(detect_ssh_port())
+    return sorted(ports)
+
+
 def apply_kernel(cfg=None):
+    # Satu apply pada satu waktu: apply bersamaan (timer + UI) menghapus dan memasang
+    # ulang chain secara berselang-seling dan bisa meninggalkan urutan aturan yang salah.
+    import fcntl
+    _lk = None
+    try:
+        os.makedirs('/www/server/sentinel/run', exist_ok=True)
+        _lk = open('/www/server/sentinel/run/.ports-apply.lock', 'w')
+        fcntl.flock(_lk, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        return True, 'apply lain sedang berjalan, dilewati'
+    except Exception:
+        _lk = None
     if cfg is None:
         cfg = load_config()
-    ipt = get_iptables_bin()
+    ipt = get_iptables_bin() + ' -w 10'   # tunggu kunci xtables (iptables lain bisa sedang jalan)
     in_chain = 'SENTINEL_IN_PORTS'
     out_chain = 'SENTINEL_OUT_PORTS'
+    dilewati = []   # aturan tidak valid, tidak dikirim ke iptables
+    gagal = []      # aturan valid tetapi ditolak iptables
+
+    def pasang(cmd, rid):
+        rc, _, e = run_cmd(cmd)
+        if rc != 0:
+            gagal.append('%s (%s)' % (rid, (e or 'iptables gagal')[:60]))
 
     # Buat chain jika belum ada
     run_cmd(f"{ipt} -N {in_chain} 2>/dev/null || true")
@@ -199,37 +287,65 @@ def apply_kernel(cfg=None):
     for r in cfg.get('inbound', []):
         if not r.get('enabled', True):
             continue
+        masalah = rule_problem(r, 'source')
+        if masalah:
+            dilewati.append('%s: %s' % (clean_rid(r), masalah))
+            continue
         proto = r.get('protocol', 'tcp').lower()
         port = str(r.get('port', '')).strip().replace('-', ':')
         action = r.get('action', 'ACCEPT').upper()
         src = r.get('source', '0.0.0.0/0').strip() or '0.0.0.0/0'
-        rid = str(r.get('id', 'rule'))[:20]
+        rid = clean_rid(r)
         cmt = f"sentinel:in:{rid}"
 
         is_all_ports = (port in ['all', 'any', '1:65535', '0:65535', ''])
         if proto in ['all', 'any']:
-            run_cmd(f"{ipt} -A {in_chain} -s {src} -m comment --comment '{cmt}' -j {action}")
+            pasang(f"{ipt} -A {in_chain} -s {src} -m comment --comment '{cmt}' -j {action}", rid)
         elif proto in ['tcp/udp', 'tcp+udp']:
             if is_all_ports:
-                run_cmd(f"{ipt} -A {in_chain} -p tcp -s {src} -m comment --comment '{cmt}' -j {action}")
-                run_cmd(f"{ipt} -A {in_chain} -p udp -s {src} -m comment --comment '{cmt}' -j {action}")
+                pasang(f"{ipt} -A {in_chain} -p tcp -s {src} -m comment --comment '{cmt}' -j {action}", rid)
+                pasang(f"{ipt} -A {in_chain} -p udp -s {src} -m comment --comment '{cmt}' -j {action}", rid)
             else:
-                run_cmd(f"{ipt} -A {in_chain} -p tcp --dport {port} -s {src} -m comment --comment '{cmt}' -j {action}")
-                run_cmd(f"{ipt} -A {in_chain} -p udp --dport {port} -s {src} -m comment --comment '{cmt}' -j {action}")
+                pasang(f"{ipt} -A {in_chain} -p tcp --dport {port} -s {src} -m comment --comment '{cmt}' -j {action}", rid)
+                pasang(f"{ipt} -A {in_chain} -p udp --dport {port} -s {src} -m comment --comment '{cmt}' -j {action}", rid)
         else:
             if is_all_ports:
-                run_cmd(f"{ipt} -A {in_chain} -p {proto} -s {src} -m comment --comment '{cmt}' -j {action}")
+                pasang(f"{ipt} -A {in_chain} -p {proto} -s {src} -m comment --comment '{cmt}' -j {action}", rid)
             else:
-                run_cmd(f"{ipt} -A {in_chain} -p {proto} --dport {port} -s {src} -m comment --comment '{cmt}' -j {action}")
+                pasang(f"{ipt} -A {in_chain} -p {proto} --dport {port} -s {src} -m comment --comment '{cmt}' -j {action}", rid)
+
+    # 5b. SSH dan panel yang SEDANG dipakai selalu boleh (tidak bergantung pada ports.json),
+    #     supaya mengganti port SSH/panel tidak mengunci operator di balik DROP default.
+    for lbl, plist in (('ssh', sshd_ports()), ('panel', [detect_panel_port()])):
+        for pn in plist:
+            pasang(f"{ipt} -A {in_chain} -p tcp --dport {int(pn)} -m comment --comment 'sentinel:in:auto-{lbl}' -j ACCEPT", 'auto-' + lbl)
+
+    # 5c. Port UDP yang dipakai WireGuard di server ini (listen-port tiap antarmuka wg*):
+    #     handshake dari peer yang memulai koneksi adalah paket NEW dan akan jatuh ke DROP
+    #     default bila port ini tidak diizinkan (terowongan putus begitu conntrack kedaluwarsa).
+    rc_w, o_w, _ = run_cmd("wg show interfaces 2>/dev/null")
+    if rc_w == 0 and o_w.strip():
+        for wif in o_w.split():
+            if not re.fullmatch(r'[A-Za-z0-9_.-]{1,15}', wif):
+                continue
+            rc_p, o_p, _ = run_cmd(f"wg show {wif} listen-port 2>/dev/null")
+            if rc_p == 0 and o_p.strip().isdigit() and 1 <= int(o_p.strip()) <= 65535:
+                pasang(f"{ipt} -A {in_chain} -p udp --dport {int(o_p.strip())} -m comment --comment 'sentinel:in:auto-wg-{wif}' -j ACCEPT", 'auto-wg-' + wif)
 
     # 6. ICMP Ping diizinkan
     run_cmd(f"{ipt} -A {in_chain} -p icmp -j ACCEPT")
 
     # 7. Kebijakan default inbound
-    if cfg.get('inbound_policy', 'DROP').upper() == 'DROP':
+    # DROP default HANYA dipasang bila SEMUA aturan izin (SSH, panel, WireGuard, dan aturan
+    # pengguna) benar-benar terpasang. Satu aturan izin yang gagal (kunci xtables, nilai
+    # tak sah) lalu disusul DROP default memutus layanan itu, termasuk SSH: dalam keadaan
+    # itu chain dibiarkan fail-open (RETURN) dan kegagalan dilaporkan.
+    if cfg.get('inbound_policy', 'DROP').upper() == 'DROP' and not gagal:
         run_cmd(f"{ipt} -A {in_chain} -m conntrack --ctstate NEW -m comment --comment 'sentinel:in-default-drop' -j DROP")
     else:
         run_cmd(f"{ipt} -A {in_chain} -j RETURN")
+        if gagal:
+            gagal.append('DROP default TIDAK dipasang (fail-open) karena ada aturan izin yang gagal')
 
     # --- ATURAN OUTBOUND (SENTINEL_OUT_PORTS) ---
     run_cmd(f"{ipt} -A {out_chain} -o lo -j ACCEPT")
@@ -259,27 +375,31 @@ def apply_kernel(cfg=None):
         for r in cfg.get('outbound', []):
             if not r.get('enabled', True):
                 continue
+            masalah = rule_problem(r, 'dest')
+            if masalah:
+                dilewati.append('%s: %s' % (clean_rid(r), masalah))
+                continue
             proto = r.get('protocol', 'tcp').lower()
             port = str(r.get('port', '')).strip().replace('-', ':')
             action = r.get('action', 'ACCEPT').upper()
             dst = r.get('dest', '0.0.0.0/0').strip() or '0.0.0.0/0'
-            rid = str(r.get('id', 'rule'))[:20]
+            rid = clean_rid(r)
             cmt = f"sentinel:out:{rid}"
             is_all_ports = (port in ['all', 'any', '1:65535', '0:65535', ''])
             if proto in ['all', 'any']:
-                run_cmd(f"{ipt} -A {out_chain} -d {dst} -m comment --comment '{cmt}' -j {action}")
+                pasang(f"{ipt} -A {out_chain} -d {dst} -m comment --comment '{cmt}' -j {action}", rid)
             elif proto in ['tcp/udp', 'tcp+udp']:
                 if is_all_ports:
-                    run_cmd(f"{ipt} -A {out_chain} -p tcp -d {dst} -m comment --comment '{cmt}' -j {action}")
-                    run_cmd(f"{ipt} -A {out_chain} -p udp -d {dst} -m comment --comment '{cmt}' -j {action}")
+                    pasang(f"{ipt} -A {out_chain} -p tcp -d {dst} -m comment --comment '{cmt}' -j {action}", rid)
+                    pasang(f"{ipt} -A {out_chain} -p udp -d {dst} -m comment --comment '{cmt}' -j {action}", rid)
                 else:
-                    run_cmd(f"{ipt} -A {out_chain} -p tcp --dport {port} -d {dst} -m comment --comment '{cmt}' -j {action}")
-                    run_cmd(f"{ipt} -A {out_chain} -p udp --dport {port} -d {dst} -m comment --comment '{cmt}' -j {action}")
+                    pasang(f"{ipt} -A {out_chain} -p tcp --dport {port} -d {dst} -m comment --comment '{cmt}' -j {action}", rid)
+                    pasang(f"{ipt} -A {out_chain} -p udp --dport {port} -d {dst} -m comment --comment '{cmt}' -j {action}", rid)
             else:
                 if is_all_ports:
-                    run_cmd(f"{ipt} -A {out_chain} -p {proto} -d {dst} -m comment --comment '{cmt}' -j {action}")
+                    pasang(f"{ipt} -A {out_chain} -p {proto} -d {dst} -m comment --comment '{cmt}' -j {action}", rid)
                 else:
-                    run_cmd(f"{ipt} -A {out_chain} -p {proto} --dport {port} -d {dst} -m comment --comment '{cmt}' -j {action}")
+                    pasang(f"{ipt} -A {out_chain} -p {proto} --dport {port} -d {dst} -m comment --comment '{cmt}' -j {action}", rid)
 
         if cfg.get('outbound_policy', 'ACCEPT').upper() == 'DROP':
             run_cmd(f"{ipt} -A {out_chain} -m conntrack --ctstate NEW -j REJECT --reject-with icmp-port-unreachable")
@@ -318,10 +438,17 @@ def apply_kernel(cfg=None):
     if f"-j {out_chain}" not in s_out:
         run_cmd(f"{ipt} -I OUTPUT 1 -j {out_chain}")
 
+    if dilewati or gagal:
+        pesan = "Sebagian aturan TIDAK diterapkan."
+        if dilewati:
+            pesan += " Tidak valid, dilewati: " + "; ".join(dilewati)
+        if gagal:
+            pesan += " Ditolak iptables: " + "; ".join(gagal)
+        return False, pesan
     return True, "Aturan port firewall Inbound & Outbound berhasil diterapkan ke kernel"
 
 def remove_kernel():
-    ipt = get_iptables_bin()
+    ipt = get_iptables_bin() + ' -w 10'   # tunggu kunci xtables (iptables lain bisa sedang jalan)
     in_chain = 'SENTINEL_IN_PORTS'
     out_chain = 'SENTINEL_OUT_PORTS'
 
@@ -337,7 +464,7 @@ def remove_kernel():
     return True, "Chain port firewall berhasil dicabut dari kernel"
 
 def get_status():
-    ipt = get_iptables_bin()
+    ipt = get_iptables_bin() + ' -w 10'   # tunggu kunci xtables (iptables lain bisa sedang jalan)
     cfg = load_config()
     in_chain = 'SENTINEL_IN_PORTS'
     out_chain = 'SENTINEL_OUT_PORTS'
@@ -363,6 +490,7 @@ def main():
     elif action == 'apply':
         ok, msg = apply_kernel()
         print(f"[{'OK' if ok else 'FAIL'}] {msg}")
+        sys.exit(0 if ok else 3)
     elif action == 'reset':
         cfg = get_default_config()
         save_config(cfg)

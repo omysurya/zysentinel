@@ -32,7 +32,11 @@
 # ============================================================
 set -u
 
-IPT="$(command -v iptables || echo /usr/sbin/iptables)"
+IPT_BIN="$(command -v iptables || echo /usr/sbin/iptables)"
+# Semua pemanggilan iptables menunggu kunci xtables (docker, aaPanel, fail2ban memegangnya
+# sebentar-sebentar); tanpa -w sebuah aturan bisa gagal dipasang diam-diam.
+ipt_w() { "$IPT_BIN" -w 10 "$@"; }
+IPT=ipt_w
 IPSET="$(command -v ipset || echo /usr/sbin/ipset)"
 CHAIN="SENTINEL"
 
@@ -172,6 +176,10 @@ THROTTLE_BURST="${SENTINEL_THROTTLE_BURST:-$(conf_get throttle_burst 15)}"
 # rpm = permintaan per menit. Kosongkan untuk mematikan aturan per menit.
 THROTTLE_RPM="${SENTINEL_THROTTLE_RPM:-$(conf_get throttle_rpm 0)}"
 case "$THROTTLE_RPM" in ''|*[!0-9]*) THROTTLE_RPM=0 ;; esac
+# Nilai tak sah dari guardd.conf tidak boleh membuat aturan RETURN gagal sementara
+# aturan throttle-drop tetap terpasang (semua IP throttle akan terblokir total).
+case "$THROTTLE_RPS" in ''|*[!0-9]*|0) THROTTLE_RPS=5 ;; esac
+case "$THROTTLE_BURST" in ''|*[!0-9]*|0) THROTTLE_BURST=15 ;; esac
 
 # ---- geo-ban (blokir per negara) ----
 # geo_mode: off | block | allow. Bawaan off: tidak ada negara yang
@@ -260,9 +268,30 @@ install_allow_rules() {
 }
 
 # --- 2b. deteksi otomatis antarmuka & koneksi VPN (WireGuard, OpenVPN, Tailscale, ZeroTier) ---
+# Hanya CIDR yang sempit yang boleh masuk daftar putih: "wg show allowed-ips" pada
+# klien WireGuard sering berisi 0.0.0.0/0, dan satu entri itu memutihkan SELURUH internet
+# (tidak ada IP yang pernah diblokir lagi). Awalan di bawah /16 ditolak.
+vpn_cidr_ok() {
+  local c="$1" o p
+  [[ "$c" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})(/([0-9]{1,2}))?$ ]] || return 1
+  for o in 1 2 3 4; do [ "${BASH_REMATCH[$o]}" -le 255 ] || return 1; done
+  p="${BASH_REMATCH[6]:-32}"
+  [ "$p" -ge 16 ] && [ "$p" -le 32 ] || return 1
+  case "$c" in 0.*|127.*|224.*|225.*|23[0-9].*|24[0-9].*|25[0-5].*) return 1 ;; esac
+  return 0
+}
+
+# Tambah satu entri ke allowlist.txt (milik plugin) bila belum ada sebagai BARIS PENUH.
+vpn_allow_add() {
+  local e="$1" note="$2"
+  [ -f "$ALLOW_FILE" ] || return 0
+  grep -qxF -- "$e" "$ALLOW_FILE" 2>/dev/null && return 0
+  printf '\n# %s\n%s\n' "$note" "$e" >> "$ALLOW_FILE"
+}
+
 auto_detect_vpn_whitelist() {
   local vpn_devs dev ip_cidr r_net ep aip
-  vpn_devs="$(ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | grep -E '^(wg|tun|tap|tailscale|zt|ppp)' | cut -d'@' -f1 | sort -u)"
+  vpn_devs="$(ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | grep -E '^(wg|tun|tailscale|zt|ppp)' | cut -d'@' -f1 | sort -u)"
   [ -z "$vpn_devs" ] && return 0
 
   for dev in $vpn_devs; do
@@ -271,54 +300,42 @@ auto_detect_vpn_whitelist() {
     # 1. Bypass inspeksi INPUT pada antarmuka VPN
     "$IPT" -A "$CHAIN" -i "$dev" -j RETURN 2>/dev/null || true
 
-    # 2. Whitelist seluruh IP/CIDR lokal antarmuka VPN
+    # 2. Whitelist IP/CIDR lokal antarmuka VPN
     for ip_cidr in $(ip -o -4 addr show dev "$dev" 2>/dev/null | awk '{print $4}'); do
-      [ -n "$ip_cidr" ] || continue
+      vpn_cidr_ok "$ip_cidr" || { say "vpn-guard: $ip_cidr dilewati (tidak sempit)"; continue; }
       "$IPT" -A "$CHAIN" -s "$ip_cidr" -j RETURN 2>/dev/null || true
-      "$IPSET" add aapanel.ipv4.whitelist "$ip_cidr" -exist 2>/dev/null || true
-      if [ -f "$ALLOW_FILE" ] && ! grep -qF "$ip_cidr" "$ALLOW_FILE" 2>/dev/null; then
-        printf '\n# Auto-whitelist antarmuka VPN %s\n%s\n' "$dev" "$ip_cidr" >> "$ALLOW_FILE"
-      fi
+      vpn_allow_add "$ip_cidr" "Auto-whitelist antarmuka VPN $dev"
     done
 
     # 3. Whitelist rute terkait antarmuka VPN
     for r_net in $(ip -o route show dev "$dev" 2>/dev/null | awk '{print $1}' | grep -v default); do
-      [ -n "$r_net" ] || continue
+      vpn_cidr_ok "$r_net" || { say "vpn-guard: rute $r_net dilewati (tidak sempit)"; continue; }
       "$IPT" -A "$CHAIN" -s "$r_net" -j RETURN 2>/dev/null || true
-      "$IPSET" add aapanel.ipv4.whitelist "$r_net" -exist 2>/dev/null || true
-      if [ -f "$ALLOW_FILE" ] && ! grep -qF "$r_net" "$ALLOW_FILE" 2>/dev/null; then
-        printf '%s\n' "$r_net" >> "$ALLOW_FILE"
-      fi
+      vpn_allow_add "$r_net" "Auto-whitelist rute VPN $dev"
     done
 
-    # 4. Ambil endpoints dan allowed-ips WireGuard bila tersedia
+    # 4. Endpoint dan allowed-ips WireGuard bila tersedia
     if command -v wg >/dev/null 2>&1 && [[ "$dev" =~ ^wg ]]; then
       for ep in $(wg show "$dev" endpoints 2>/dev/null | awk '{print $2}' | cut -d: -f1); do
-        if [[ "$ep" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-          "$IPT" -A "$CHAIN" -s "$ep/32" -j RETURN 2>/dev/null || true
-          "$IPSET" add aapanel.ipv4.whitelist "$ep/32" -exist 2>/dev/null || true
-          if [ -f "$ALLOW_FILE" ] && ! grep -qF "$ep" "$ALLOW_FILE" 2>/dev/null; then
-            printf '# WireGuard peer endpoint\n%s/32\n' "$ep" >> "$ALLOW_FILE"
-          fi
-        fi
+        vpn_cidr_ok "$ep" || continue
+        "$IPT" -A "$CHAIN" -s "$ep/32" -j RETURN 2>/dev/null || true
+        vpn_allow_add "$ep/32" "WireGuard peer endpoint"
       done
       for aip in $(wg show "$dev" allowed-ips 2>/dev/null | awk '{$1=""; print $0}' | tr ',' ' '); do
-        if [[ "$aip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?$ ]]; then
-          "$IPT" -A "$CHAIN" -s "$aip" -j RETURN 2>/dev/null || true
-          "$IPSET" add aapanel.ipv4.whitelist "$aip" -exist 2>/dev/null || true
-          if [ -f "$ALLOW_FILE" ] && ! grep -qF "$aip" "$ALLOW_FILE" 2>/dev/null; then
-            printf '%s\n' "$aip" >> "$ALLOW_FILE"
-          fi
-        fi
+        vpn_cidr_ok "$aip" || { say "vpn-guard: allowed-ips $aip dilewati (tidak sempit)"; continue; }
+        "$IPT" -A "$CHAIN" -s "$aip" -j RETURN 2>/dev/null || true
+        vpn_allow_add "$aip" "WireGuard allowed-ips"
       done
     fi
 
-    # 5. Routing & Penerusan FORWARD (menjamin Docker container seperti payroll-api bebas akses ke VPN)
-    "$IPT" -C FORWARD -i "$dev" -j ACCEPT 2>/dev/null || "$IPT" -I FORWARD 1 -i "$dev" -j ACCEPT 2>/dev/null || true
-    "$IPT" -C FORWARD -o "$dev" -j ACCEPT 2>/dev/null || "$IPT" -I FORWARD 1 -o "$dev" -j ACCEPT 2>/dev/null || true
-
-    # 6. Pastikan NAT MASQUERADE untuk trafik keluar lewat VPN
-    "$IPT" -t nat -C POSTROUTING -o "$dev" -j MASQUERADE 2>/dev/null || "$IPT" -t nat -I POSTROUTING 1 -o "$dev" -j MASQUERADE 2>/dev/null || true
+    # 5-6. FORWARD dan NAT milik pihak lain: HANYA bila operator memintanya
+    # (touch $BASE/etc/vpn_forward.enabled). Dulu selalu menyisipkan aturan global
+    # yang tidak ikut dicabut saat uninstall.
+    if [ -f "${ETC:-$(dirname "$ALLOW_FILE")}/vpn_forward.enabled" ]; then
+      "$IPT" -C FORWARD -i "$dev" -j ACCEPT 2>/dev/null || "$IPT" -I FORWARD 1 -i "$dev" -j ACCEPT 2>/dev/null || true
+      "$IPT" -C FORWARD -o "$dev" -j ACCEPT 2>/dev/null || "$IPT" -I FORWARD 1 -o "$dev" -j ACCEPT 2>/dev/null || true
+      "$IPT" -t nat -C POSTROUTING -o "$dev" -j MASQUERADE 2>/dev/null || "$IPT" -t nat -I POSTROUTING 1 -o "$dev" -j MASQUERADE 2>/dev/null || true
+    fi
   done
   return 0
 }
@@ -327,6 +344,14 @@ auto_detect_vpn_whitelist() {
 
 do_install() {
   need_root
+  # Satu pemasangan pada satu waktu (timer 5 menit dan UI bisa bersamaan):
+  # pemasangan ganda mengacaukan urutan aturan, dan RETURN di tengah = fail-open.
+  mkdir -p /www/server/sentinel/run 2>/dev/null
+  exec 9>/www/server/sentinel/run/.fw-install.lock 2>/dev/null
+  if ! flock -n 9 2>/dev/null; then
+    say "pemasangan lain sedang berjalan, dilewati"
+    return 0
+  fi
   if ! "$IPT" -t filter -L INPUT -n >/dev/null 2>&1; then
     err "iptables tidak bisa membaca chain INPUT, keluar"
     exit 1
@@ -498,7 +523,9 @@ do_install() {
 
   # 5) Anti SYN flood dan anti koneksi berkelanjutan, per IP.
   if have_mod connlimit && have_mod conntrack; then
-    "$IPT" -A "$CHAIN" -p tcp --syn -m conntrack --ctstate NEW \
+    # Dibatasi ke port web: tanpa --dport, IP admin dengan banyak koneksi SSH/panel
+    # ikut terkunci.
+    "$IPT" -A "$CHAIN" -p tcp -m multiport --dports "$WEB_PORTS" --syn -m conntrack --ctstate NEW \
       -m connlimit --connlimit-above "$SYN_MAX" --connlimit-mask 32 \
       -m comment --comment "sentinel:syn-guard" -j DROP
     "$IPT" -A "$CHAIN" -p tcp -m multiport --dports "$WEB_PORTS" -m conntrack \
@@ -557,7 +584,7 @@ do_install() {
     /www/server/panel/pyenv/bin/python3 /www/server/sentinel/bin/sentinel-ports.py apply >/dev/null 2>&1 || python3 /www/server/sentinel/bin/sentinel-ports.py apply >/dev/null 2>&1 || true
   fi
 
-  say "selesai. periksa dengan: $IPT -S $CHAIN"
+  say "selesai. periksa dengan: $IPT_BIN -S $CHAIN"
 }
 
 do_remove() {
@@ -836,7 +863,7 @@ do_backend() {
   b="$(detect_backend)"
   split="$(backend_split)"
   induk="$(hook_parent)"
-  printf 'backend=%s\nhook=%s\nbinary=%s\n' "$b" "$induk" "$IPT"
+  printf 'backend=%s\nhook=%s\nbinary=%s\n' "$b" "$induk" "$IPT_BIN"
   if command -v ufw >/dev/null 2>&1; then
     printf 'ufw=%s\n' "$(ufw status 2>/dev/null | head -1 | tr -d '\r')"
   else
@@ -1035,8 +1062,29 @@ do_ports_reset() {
   python3 /www/server/sentinel/bin/sentinel-ports.py reset
 }
 
+# Self-heal ringan (dipanggil dari timer 5 menit setelah install):
+# - guardd yang "hidup" tetapi membeku (status.json tidak diperbarui) di-restart;
+# - kesehatan WAF diperiksa; WAF yang merusak nginx dicabut dengan aman.
+# Tidak menyentuh apa pun yang bukan milik plugin.
+heal_services() {
+  command -v systemctl >/dev/null 2>&1 || return 0
+  local sj=/www/server/sentinel/run/status.json now mt
+  if systemctl is-active --quiet sentinel.service 2>/dev/null && [ -f "$sj" ]; then
+    now=$(date +%s); mt=$(stat -c %Y "$sj" 2>/dev/null || echo "$now")
+    if [ $((now - mt)) -gt 300 ]; then
+      say "heal: status.json guardd basi $((now - mt))s, restart sentinel.service"
+      systemctl restart sentinel.service 2>/dev/null || true
+    fi
+  fi
+  if [ -x /www/server/sentinel/bin/sentinel-waf.sh ]; then
+    /www/server/sentinel/bin/sentinel-waf.sh guard 2>&1 | while IFS= read -r l; do say "heal: $l"; done
+  fi
+  return 0
+}
+
 case "${1:-status}" in
-  install) do_install ;;
+  install) do_install; heal_services ;;
+  heal)    heal_services ;;
   remove)  do_remove ;;
   flush)   do_flush ;;
   status)  do_status ;;
@@ -1053,5 +1101,5 @@ case "${1:-status}" in
   ports-apply)  do_ports_apply ;;
   ports-status) do_ports_status ;;
   ports-reset)  do_ports_reset ;;
-  *) echo "Usage: $0 {install|remove|flush|status|backend|panic-on|panic-off|panic-status|egress-on|egress-off|egress-status|geo-apply|geo-clear|geo-status|ports-apply|ports-status|ports-reset}"; exit 1 ;;
+  *) echo "Usage: $0 {install|heal|remove|flush|status|backend|panic-on|panic-off|panic-status|egress-on|egress-off|egress-status|geo-apply|geo-clear|geo-status|ports-apply|ports-status|ports-reset}"; exit 1 ;;
 esac

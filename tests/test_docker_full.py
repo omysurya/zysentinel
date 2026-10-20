@@ -204,14 +204,14 @@ def run_tests():
                 or os.path.isfile(os.path.join(SENTINEL_DIR, 'bin', 'sentinel-sage.py')))
     assert_true("sentinel-proc.py exists", os.path.isfile(os.path.join(PAYLOAD_DIR, 'sentinel-proc.py'))
                 or os.path.isfile(os.path.join(SENTINEL_DIR, 'bin', 'sentinel-proc.py')))
-    assert_true("info.json exists", os.path.isfile(os.path.join(PAYLOAD_DIR, 'info.json')))
+    assert_true("info.json exists", os.path.isfile(os.path.join(PLUGIN_DIR, 'info.json')))
     assert_true("index.html exists (UI file)", os.path.isfile(os.path.join(PAYLOAD_DIR, 'index.html')))
     assert_true("README.md exists", os.path.isfile(os.path.join(PLUGIN_DIR, 'README.md'))
                 or os.path.isfile(os.path.join(PAYLOAD_DIR, 'README.md')))
 
     # Validasi info.json
     try:
-        info_data = json.loads(open(os.path.join(PAYLOAD_DIR, 'info.json')).read())
+        info_data = json.loads(open(os.path.join(PLUGIN_DIR, 'info.json')).read())
         assert_true("info.json valid JSON with required keys",
             'name' in info_data and 'versions' in info_data and 'shell' in info_data, str(info_data)[:80])
     except Exception as ex:
@@ -626,41 +626,42 @@ def run_tests():
             assert_true("API del_port_rule: Remove port rule (id=%s)" % found_port_id, r_del.get('status') is True, str(r_del))
 
     # =========================================================================
-    # BAGIAN 11: WAF ENGINE & FREE WAF RULES
+    # BAGIAN 11: WAF (Coraza / ModSecurity + OWASP CRS + ruleset ZySentinel)
     # =========================================================================
-    print("\n--- 11. WAF Engine & FreeWAF Rules ---")
+    print("\n--- 11. WAF Engine & ZySentinel Ruleset ---")
 
     if sm:
         waf = sm.get_waf(DummyGet({}))
         assert_true("API get_waf: Returns WAF settings", waf.get('status') is not None, str(waf))
 
         waf_eng = sm.get_waf_engine(DummyGet({}))
-        assert_true("API get_waf_engine: Returns active engine", waf_eng.get('status') is True, str(waf_eng))
+        assert_true("API get_waf_engine: Returns engine status", waf_eng.get('status') is True, str(waf_eng))
+        assert_true("API get_waf_engine: No Lua/free_waf keys remain",
+                    'free_waf' not in waf_eng.get('msg', {}) and 'pilih' not in waf_eng.get('msg', {}), str(waf_eng))
 
         waf_mode = sm.get_waf_mode(DummyGet({}))
         assert_true("API get_waf_mode: Returns active mode", waf_mode.get('status') is True, str(waf_mode))
 
-        # Pastikan direktori FW_HOME dan site.json tersedia untuk pengujian
-        if not os.path.exists(sm.FW_HOME):
-            os.makedirs(sm.FW_HOME, exist_ok=True)
-        site_json_path = os.path.join(sm.FW_HOME, 'site.json')
-        if not os.path.exists(site_json_path):
-            src_default = os.path.join(PAYLOAD_DIR, 'free_waf', 'site.json.default')
-            if os.path.exists(src_default):
-                shutil.copyfile(src_default, site_json_path)
-            else:
-                with open(site_json_path, 'w') as f:
-                    json.dump({"test.local": {"open": True, "cc": {"open": False, "limit": 300, "cycle": 60, "endtime": 300}}}, f)
+        zy = sm.get_zyrules(DummyGet({}))
+        assert_true("API get_zyrules: Returns ruleset status", zy.get('status') is True and 'modul' in zy.get('msg', {}), str(zy))
+        assert_true("API get_zyrules: Reports legacy Lua state", 'legacy' in zy.get('msg', {}), str(zy))
 
-        fw_sites = sm.get_fw_sites(DummyGet({}))
-        assert_true("API get_fw_sites: Returns monitored vhost list", fw_sites.get('status') is True, str(fw_sites))
+        wl = sm.get_waf_lists(DummyGet({}))
+        assert_true("API get_waf_lists: Returns four lists", wl.get('status') is True and set(wl.get('msg', {})) == set(['ip_white', 'ip_black', 'url_white', 'url_black']), str(wl))
 
-        fw_lists = sm.get_fw_lists(DummyGet({}))
-        assert_true("API get_fw_lists: Returns WAF filter rules", fw_lists.get('status') is True, str(fw_lists))
+        bad = sm.waf_list_add(DummyGet({'list': 'ip_black', 'value': '999.1.1.1', 'reload': '0'}))
+        assert_true("API waf_list_add: Rejects invalid IP", bad.get('status') is False, str(bad))
+        bad = sm.set_zy_module(DummyGet({'name': 'nope', 'state': 'on'}))
+        assert_true("API set_zy_module: Rejects unknown module", bad.get('status') is False, str(bad))
+        bad = sm.set_zy_setting(DummyGet({'key': 'bot_level', 'value': '9'}))
+        assert_true("API set_zy_setting: Rejects out-of-range value", bad.get('status') is False, str(bad))
 
-        fw_info = sm.freewaf_info(DummyGet({}))
-        assert_true("API freewaf_info: Returns FreeWAF runtime info", fw_info.get('status') is True, str(fw_info))
-        assert_true("API freewaf_info: Has loaded key", 'loaded' in fw_info.get('msg', {}), str(fw_info))
+        for gone in ('get_freewaf', 'set_fw_open', 'set_fw_module', 'freewaf_info', 'freewaf_engine', 'set_waf_engine', 'get_fw_sites'):
+            assert_true("API %s: removed with the Lua engine" % gone, not hasattr(sm, gone), gone)
+        assert_true("Payload has no Lua WAF assets",
+                    not os.path.exists(os.path.join(PAYLOAD_DIR, 'lua_waf')) and not os.path.exists(os.path.join(PAYLOAD_DIR, 'waf', 'lua_waf')))
+        assert_true("Payload ships the ZySentinel ruleset",
+                    all(os.path.isfile(os.path.join(PAYLOAD_DIR, 'zyrules', f)) for f in ('zysentinel-before.conf', 'zysentinel-after.conf', 'zysentinel-config.conf', 'zysentinel-base.conf.in')))
 
     # =========================================================================
     # BAGIAN 12: GEO-IP & GEO-BAN
