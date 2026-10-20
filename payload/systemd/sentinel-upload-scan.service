@@ -1,5 +1,5 @@
 [Unit]
-Description=ZySentinel Real-Time Upload Scanner & Per-Host Quarantine Guard (Imunify360 Style)
+Description=ZySentinel Realtime Upload Protection (pemindai upload, gerbang eksekusi, karantina per vhost)
 After=network.target sentinel.service clamav-daemon.service
 Wants=sentinel.service clamav-daemon.service
 
@@ -7,13 +7,15 @@ Wants=sentinel.service clamav-daemon.service
 Type=simple
 ExecStart=/www/server/panel/pyenv/bin/python3 /www/server/sentinel/bin/sentinel-upload-scan.py daemon
 Restart=always
-RestartSec=5
-Nice=19
-IOSchedulingClass=idle
+RestartSec=1
+Nice=0
+IOSchedulingClass=best-effort
+IOSchedulingPriority=2
 MemoryMax=256M
 MemoryHigh=192M
-CPUQuota=50%
-KillMode=process
+CPUQuota=100%
+KillMode=control-group
+TimeoutStopSec=15
 StandardOutput=journal
 StandardError=journal
 
