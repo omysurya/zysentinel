@@ -57,6 +57,11 @@ MODULES = {
     'scanner':         ('8000130-8000132', 'Pemindai kerentanan (User-Agent, header, penanda)'),
     'bot':             ('8000140-8000143', 'Bot scraper dan crawler (tingkat diatur terpisah)'),
     'lfi_args':        ('8000160-8000160', 'Baca berkas sensitif dan path traversal lewat parameter'),
+    'probe_cms':       ('8000400-8000409', 'Probe WordPress/Joomla/Drupal pada situs yang bukan CMS itu'),
+    'probe_tools':     ('8000410-8000419', 'Probe Adminer/phpMyAdmin, phpinfo, endpoint debug, aplikasi infrastruktur'),
+    'probe_cve':       ('8000420-8000429', 'Eksploit router/IoT/CVE dan trik path traversal ;/'),
+    'probe_archive':   ('8000430-8000439', 'Tebakan nama arsip cadangan di root situs'),
+    'probe_secrets':   ('8000440-8000449', 'Berkas berawalan titik, kredensial, internal Laravel, skrip di .well-known'),
 }
 MODE_ENGINE = {'block': 'On', 'monitor': 'DetectionOnly', 'disable': 'Off'}
 LISTS = ('ip_white', 'ip_black', 'url_white', 'url_black')
@@ -272,6 +277,62 @@ def gen_base(conf):
             .replace('@BODY_NOFILES@', str(nofiles)).replace('@BODY_TOTAL@', str(total)))
 
 
+# ------------------------------------------------------- pengecualian per vhost --
+VHOST_DIRS = os.environ.get('SENTINEL_VHOST_DIRS', '/www/server/panel/vhost/nginx:/www/server/panel/vhost/apache').split(':')
+
+
+def detect_apps():
+    """Situs yang SAH menjalankan WordPress/CMS, phpMyAdmin/Adminer, atau CGI: aturan probe
+    untuk kelompok itu dikecualikan di vhost tersebut (bila tidak, situs sahnya ikut terblokir).
+    Hasil: {'zys-cms': [host...], 'zys-tools': [...], 'zys-cve': [...]}."""
+    hasil = {'zys-cms': set(), 'zys-tools': set(), 'zys-cve': set()}
+    for d in VHOST_DIRS:
+        try:
+            berkas = sorted(os.listdir(d))
+        except OSError:
+            continue
+        for f in berkas:
+            if not f.endswith('.conf') or '.bak.' in f:
+                continue
+            try:
+                isi = open(os.path.join(d, f), errors='replace').read(65536)
+            except OSError:
+                continue
+            m_root = re.search(r'^\s*root\s+([^;\s]+);', isi, re.M) or re.search(r'^\s*DocumentRoot\s+"?([^"\s]+)"?', isi, re.M)
+            m_name = re.search(r'^\s*server_name\s+([^;]+);', isi, re.M) or re.search(r'^\s*ServerName\s+(\S+)', isi, re.M)
+            if not m_root or not m_name:
+                continue
+            root = m_root.group(1)
+            hosts = [h.lower() for h in m_name.group(1).split() if re.fullmatch(r'[A-Za-z0-9._-]{1,253}', h) and h != '_']
+            if not hosts or not os.path.isdir(root):
+                continue
+            def ada(*nama):
+                return any(os.path.exists(os.path.join(root, n)) for n in nama)
+            if ada('wp-config.php', 'wp-includes', 'wp-load.php', 'administrator/index.php', 'typo3', 'core/install.php'):
+                hasil['zys-cms'].update(hosts)
+            if ada('phpmyadmin', 'pma', 'adminer.php', 'adminer', 'phpMyAdmin', 'index.php/_profiler') or \
+               any(n.lower().startswith(('adminer', 'phpmyadmin')) for n in os.listdir(root)):
+                hasil['zys-tools'].update(hosts)
+            if ada('cgi-bin') and os.listdir(os.path.join(root, 'cgi-bin')):
+                hasil['zys-cve'].update(hosts)
+    return {k: sorted(v) for k, v in hasil.items()}
+
+
+def gen_exceptions():
+    """Aturan pengecualian per vhost (dimuat SEBELUM aturan probe)."""
+    s = ''
+    nomor = 8000490
+    for tag, hosts in detect_apps().items():
+        if not hosts:
+            continue
+        rx = '^(?:%s)(?::[0-9]+)?$' % '|'.join(re.escape(h) for h in hosts)
+        s += ('# Situs sah yang memakai aplikasi ini: %s\n'
+              'SecRule REQUEST_HEADERS:Host "@rx %s" "id:%d,phase:1,pass,nolog,t:none,t:lowercase,ctl:ruleRemoveByTag=%s"\n'
+              % (', '.join(hosts), rx, nomor, tag))
+        nomor += 1
+    return s
+
+
 def gen_settings(conf):
     bot = conf_int(conf, 'zy.bot_level', 1, 0, 3)
     strict = conf_int(conf, 'zy.strict', 0, 0, 1)
@@ -279,7 +340,7 @@ def gen_settings(conf):
     return ('# Dibuat oleh sentinel-zyrules.py dari waf.conf. Jangan edit.\n'
             'SecAction "id:8000300,phase:1,pass,nolog,t:none,'
             'setvar:tx.zy_bot_level=%d,setvar:tx.zy_strict=%d,setvar:tx.zy_fallback=%d"\n'
-            % (bot, strict, fb))
+            % (bot, strict, fb)) + gen_exceptions()
 
 
 def gen_disable(conf):

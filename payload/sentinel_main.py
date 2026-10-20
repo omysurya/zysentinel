@@ -2221,7 +2221,8 @@ class sentinel_main(object):
     WAF_LISTS_DIR = '/www/server/sentinel/etc/waf-lists'
     WAF_AUDIT_LOG = '/www/wwwlogs/zysentinel_waf_audit.jsonl'
     ZY_MODUL = ('sensitive_files', 'webshell', 'spam', 'scanner', 'bot',
-                'lfi_args')
+                'lfi_args', 'probe_cms', 'probe_tools', 'probe_cve',
+                'probe_archive', 'probe_secrets')
     ZY_SETTING = {'bot_level': (0, 3), 'strict': (0, 1), 'fallback': (0, 1),
                   'paranoia': (1, 4), 'threshold': (1, 100),
                   'body_nofiles_kb': (16, 4096), 'body_total_mb': (1, 512)}

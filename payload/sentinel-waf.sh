@@ -241,7 +241,7 @@ do_rule_set() {
   say "rule $nama -> $aksi (berlaku setelah web server di-reload)"
 }
 
-KUNCI_MODUL="sensitive_files webshell spam scanner bot lfi_args"
+KUNCI_MODUL="sensitive_files webshell spam scanner bot lfi_args probe_cms probe_tools probe_cve probe_archive probe_secrets"
 
 do_modul_set() {
   # $1 = nama modul ZySentinel, $2 = on|off

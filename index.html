@@ -6525,7 +6525,12 @@ var SN_ZY_MODUL = {
 	spam:            {id: 'URL judi online & penambang kripto', en: 'Online gambling spam & crypto-miner URLs'},
 	scanner:         {id: 'Pemindai kerentanan (UA, header, penanda)', en: 'Vulnerability scanners (UA, headers, markers)'},
 	bot:             {id: 'Bot scraper & crawler (tingkat di Pengaturan)', en: 'Scraper bots & crawlers (level in Settings)'},
-	lfi_args:        {id: 'Baca berkas sensitif / traversal lewat parameter', en: 'Sensitive file read / traversal via parameters'}
+	lfi_args:        {id: 'Baca berkas sensitif / traversal lewat parameter', en: 'Sensitive file read / traversal via parameters'},
+	probe_cms:       {id: 'Probe WordPress/Joomla/Drupal pada situs non-CMS (situs CMS sah dikecualikan otomatis)', en: 'WordPress/Joomla/Drupal probes on non-CMS sites (legit CMS sites auto-excepted)'},
+	probe_tools:     {id: 'Probe Adminer/phpMyAdmin, phpinfo, endpoint debug, aplikasi infrastruktur', en: 'Adminer/phpMyAdmin, phpinfo, debug endpoints, infrastructure app probes'},
+	probe_cve:       {id: 'Eksploit router/IoT/CVE dan trik path ;/', en: 'Router/IoT/CVE exploits and ;/ path tricks'},
+	probe_archive:   {id: 'Tebakan nama arsip cadangan di root situs', en: 'Backup archive name guessing at site root'},
+	probe_secrets:   {id: 'Berkas berawalan titik, kredensial, internal Laravel, skrip di .well-known', en: 'Dotfiles, credentials, Laravel internals, scripts in .well-known'}
 };
 
 function snZySelect(kunci, nilai, opsi){
