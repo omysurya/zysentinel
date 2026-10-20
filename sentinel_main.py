@@ -1289,6 +1289,124 @@ class sentinel_main(object):
                         'level': e['level'], 'n': e['n']} for e in events],
         })
 
+    # Urutan = prioritas: transaksi WAF yang cocok dengan beberapa tag dihitung
+    # sekali pada jenis yang paling spesifik (SQLi lebih spesifik dari scanner).
+    ATTACK_TAG_JENIS = (
+        ('sqli', ('attack-sqli',)),
+        ('xss', ('attack-xss',)),
+        ('rce', ('attack-rce', 'attack-webshell', 'attack-xxe', 'attack-injection',
+                 'attack-injection-php', 'attack-injection-java',
+                 'attack-injection-generic', 'attack-generic')),
+        ('traversal', ('attack-lfi', 'attack-rfi')),
+        ('scanner', ('attack-scanner', 'attack-reputation-scanner',
+                     'attack-sensitive-file', 'attack-info-disclosure',
+                     'attack-disclosure', 'attack-probe-cms', 'attack-probe-tools',
+                     'attack-probe-cve', 'attack-probe-archive',
+                     'attack-probe-secrets')),
+        ('bot', ('attack-bot', 'attack-spam', 'attack-reputation-crawler',
+                 'attack-reputation-scripting')),
+        ('protocol', ('attack-protocol',)),
+    )
+    ATTACK_EVENT_JENIS = {'flood': 'ddos', 'scanner': 'scanner',
+                          'bruteforce': 'bruteforce', 'campuran': 'campuran'}
+    _ATTACK_CACHE = {}
+
+    def _attack_waf_jenis(self, sejak):
+        """Hitung transaksi log audit WAF sejak `sejak` per jenis serangan.
+        Loopback tidak dihitung (itu uji lokal, bukan penyerang)."""
+        hitung = {}
+        berkas = [self.WAF_AUDIT_LOG, self.WAF_AUDIT_LOG + '.1']
+        sisa = 16 * 1024 * 1024
+        for p in berkas:
+            if sisa <= 0 or not os.path.isfile(p):
+                continue
+            try:
+                ukuran = os.path.getsize(p)
+                baca = min(ukuran, sisa)
+                sisa -= baca
+                with open(p, 'rb') as f:
+                    f.seek(ukuran - baca)
+                    data = f.read().decode('utf-8', 'replace')
+            except Exception:
+                continue
+            for baris in data.splitlines():
+                baris = baris.strip()
+                if not baris.startswith('{'):
+                    continue
+                try:
+                    j = json.loads(baris)
+                except Exception:
+                    continue
+                tx = j.get('transaction') or {}
+                if tx.get('client_ip') in ('127.0.0.1', '::1'):
+                    continue
+                try:
+                    ts = int(tx.get('unix_timestamp') or 0) // 1000000000
+                except Exception:
+                    ts = 0
+                if not ts:
+                    try:
+                        ts = int(time.mktime(time.strptime(
+                            tx.get('timestamp', ''), '%Y/%m/%d %H:%M:%S')))
+                    except Exception:
+                        continue
+                if ts < sejak:
+                    continue
+                tags = set(re.findall(r'\[tag \\?"([^"\\]+)\\?"\]', baris))
+                ids = set(re.findall(r'\[id \\?"(\d+)\\?"\]', baris))
+                jenis = 'lainnya'
+                for nama, daftar in self.ATTACK_TAG_JENIS:
+                    if tags.intersection(daftar):
+                        jenis = nama
+                        break
+                else:
+                    if any(i.startswith('920') or i.startswith('921') for i in ids):
+                        jenis = 'protocol'
+                hitung[jenis] = hitung.get(jenis, 0) + 1
+        return hitung
+
+    def get_attack_types(self, get):
+        """Jumlah serangan per jenis untuk diagram donat dasbor.
+
+        Sumber: tabel events guardd (flood = DDoS, scanner, brute force,
+        campuran) dan log audit WAF Coraza (SQLi, XSS, RCE, traversal, scanner
+        berkas rahasia, bot, anomali protokol)."""
+        jam = int(get.get('hours', 24) or 24)
+        jam = max(1, min(168, jam))
+        sejak = int(time.time()) - jam * 3600
+        kunci = jam
+        try:
+            ukuran = os.path.getsize(self.WAF_AUDIT_LOG)
+        except OSError:
+            ukuran = -1
+        c = self._ATTACK_CACHE.get(kunci)
+        if c and c[0] == ukuran and time.time() - c[1] < 20:
+            return public.returnMsg(True, c[2])
+
+        hitung = {}
+        sumber = {'events': 0, 'waf': 0}
+        rows = self._sql(
+            "SELECT kind, COUNT(*) n FROM events WHERE ts >= ? GROUP BY kind",
+            (sejak,))
+        if isinstance(rows, list):
+            for r in rows:
+                jenis = self.ATTACK_EVENT_JENIS.get(r['kind'], 'lainnya')
+                hitung[jenis] = hitung.get(jenis, 0) + (r['n'] or 0)
+                sumber['events'] += r['n'] or 0
+        for jenis, n in self._attack_waf_jenis(sejak).items():
+            hitung[jenis] = hitung.get(jenis, 0) + n
+            sumber['waf'] += n
+
+        hasil = {
+            'jam': jam,
+            'total': sum(hitung.values()),
+            'sumber': sumber,
+            'jenis': [{'key': k, 'n': n} for k, n in
+                      sorted(hitung.items(), key=lambda x: -x[1]) if n > 0],
+        }
+        self._ATTACK_CACHE[kunci] = (ukuran, time.time(), hasil)
+        return public.returnMsg(True, hasil)
+
     # ------------------------------------------------------------------ #
     # daftar ban dan throttle                                            #
     # ------------------------------------------------------------------ #
@@ -1827,13 +1945,30 @@ class sentinel_main(object):
             self._sh('systemctl stop sentinel-fw.timer', 20)
         return public.returnMsg(True, o.strip() or e.strip() or 'selesai')
 
+    @staticmethod
+    def _fw_penghitung(keluaran):
+        """Urai `iptables -L SENTINEL -n -v -x` menjadi daftar penghitung.
+
+        Hanya aturan bertanda komentar `sentinel:<nama>`. Tiap butir:
+        target, rule (nama), detail (kriteria pencocokan), pkts, bytes."""
+        hasil = []
+        for baris in (keluaran or '').splitlines():
+            m = re.match(r'^\s*(\d+)\s+(\d+)\s+(\S+)\s+\S+\s+--\s+\S+\s+\S+\s+'
+                         r'\S+\s+\S+\s*(.*?)\s*/\*\s*sentinel:([\w.-]+)\s*\*/', baris)
+            if not m:
+                continue
+            hasil.append({'pkts': int(m.group(1)), 'bytes': int(m.group(2)),
+                          'target': m.group(3), 'rule': m.group(5),
+                          'detail': m.group(4)})
+        return hasil
+
     def get_fw(self, get):
         """Isi chain kernel, isi set, dan penghitung paket."""
         rc, chain, e = self._sh('iptables -S SENTINEL 2>/dev/null', 20)
         rc2, order, _ = self._sh("iptables -S INPUT | grep -nE "
                                  "'aapanel|IN_BT'", 20)
         rc3, hooks, _ = self._sh('iptables -S IN_BT 2>/dev/null', 20)
-        rc4, cnt, _ = self._sh('iptables -L SENTINEL -n -v 2>/dev/null', 20)
+        rc4, cnt, _ = self._sh('iptables -L SENTINEL -n -v -x 2>/dev/null', 20)
         rc5, sets, _ = self._sh(
             'for s in sentinel_ban sentinel_throttle; do '
             'printf "%s " "$s"; ipset list $s 2>/dev/null | '
@@ -1847,8 +1982,7 @@ class sentinel_main(object):
             'chain': chain.strip().splitlines() if chain.strip() else [],
             'urutan_input': order.strip().splitlines() if order.strip() else [],
             'in_bt': hooks.strip().splitlines() if hooks.strip() else [],
-            'penghitung': [x for x in cnt.splitlines()
-                           if 'sentinel:' in x],
+            'penghitung': self._fw_penghitung(cnt),
             'jumlah_set': jml,
             'terpasang': bool(chain.strip()),
         })

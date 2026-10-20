@@ -293,6 +293,10 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 .sn-note.dgr{background:rgba(35,10,10,0.9);border-color:rgba(239,68,68,0.45);color:#fca5a5}
 .sn-grid2{display:flex;gap:14px;flex-wrap:wrap}
 .sn-grid2>*{flex:1 1 440px;min-width:0}
+.sn-grid3{display:flex;gap:14px;flex-wrap:wrap}
+.sn-grid3>*{flex:1 1 300px;min-width:0}
+.sn-grid3>.sn-w2{flex:2 1 440px}
+.sn-donut{width:100%;height:300px}
 .sn-fl{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .sn-empty{padding:26px;text-align:center;color:var(--text-dim);font-family:var(--mono-font);font-size:12.5px}
 .sn-chart{width:100%;height:300px}
@@ -467,11 +471,11 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 
 				<div class="sn-stats" id="snStats"></div>
 
-				<div class="sn-grid2" style="margin-bottom:12px">
-					<div class="sn-card">
+				<div class="sn-grid3" style="margin-bottom:12px">
+					<div class="sn-card sn-w2">
 						<h3>Request Trends
 							<span class="sn-fl">
-								<select id="selJam" class="sn-inp" onchange="snGrafik()">
+								<select id="selJam" class="sn-inp" onchange="snGrafik(true)">
 									<option value="1" data-i18n="opt_last_1h">Last 1 hour</option>
 									<option value="6" data-i18n="opt_last_6h">Last 6 hours</option>
 									<option value="12" data-i18n="opt_last_12h">Last 12 hours</option>
@@ -484,6 +488,12 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 						</h3>
 						<div id="grafikKosong" class="sn-empty" style="display:none" data-i18n="grafik_kosong">No data in this timeframe. ZySentinel began collecting statistics when started.</div>
 						<div id="grafik" class="sn-chart"></div>
+					</div>
+
+					<div class="sn-card">
+						<h3><span data-i18n="sec_attack_types">Attack Types</span></h3>
+						<div id="donutKosong" class="sn-empty" style="display:none" data-i18n="attack_kosong">No attacks recorded in this timeframe.</div>
+						<div id="donutJenis" class="sn-donut"></div>
 					</div>
 
 					<div class="sn-card">
@@ -1093,11 +1103,12 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 					<!-- ==================== WAF: REAL-TIME UPLOAD PROTECTION (Imunify360 Style) ==================== -->
 					<div class="sn-subpage" id="w-upload">
 						<div class="sn-card">
-							<h3>Upload Scanner Service (Imunify360 Style)
+							<h3><span>Realtime Upload Protection</span>
 								<span class="sn-fl">
 									<span class="sn-badge sn-off" id="usvcBadge">loading</span>
 									<span class="sn-btn pri" id="btnUsvcToggle" onclick="snUploadScanServiceToggle('restart')" data-i18n="btn_restart_service" data-i18n-title="tip_restart_upload_svc" title="Restart Upload Monitor Service">Restart Service</span>
-									<span class="sn-btn" onclick="snUploadScanMuat()" data-i18n="btn_refresh" data-i18n-title="tip_refresh_upload_svc" title="Refresh Upload Monitor Service Status">Refresh</span>
+									<span id="usvcTime" class="sn-mono" style="font-size:11px;color:var(--muted);font-weight:400"></span>
+									<span class="sn-btn" id="btnUsvcRefresh" onclick="snUploadScanMuat(this, true)" data-i18n-title="tip_refresh_upload_svc" title="Refresh Upload Monitor Service Status"><i class="layui-icon layui-icon-refresh"></i> <span data-i18n="btn_refresh">Refresh</span></span>
 								</span>
 							</h3>
 							<div class="sn-sys" id="usvcInfo"></div>
@@ -1666,6 +1677,20 @@ var SN_I18N = {
 		opt_last_7d: 'Last 7 days',
 		opt_last_30d: 'Last 30 days',
 		sec_sys_info: 'System Information',
+		sec_attack_types: 'Attack Types',
+		attack_kosong: 'No attacks recorded in this timeframe.',
+		atk_total: 'attacks',
+		atk_ddos: 'DDoS / Flood',
+		atk_scanner: 'Scanner / Probe',
+		atk_sqli: 'SQL Injection',
+		atk_xss: 'XSS',
+		atk_rce: 'RCE / Code Injection',
+		atk_traversal: 'Path Traversal / LFI',
+		atk_bruteforce: 'Brute Force',
+		atk_bot: 'Bot / Scraper',
+		atk_protocol: 'Protocol Anomaly',
+		atk_campuran: 'Mixed',
+		atk_lainnya: 'Other',
 		th_pid: 'PID',
 		th_ppid: 'PPID',
 		th_uid: 'UID',
@@ -2263,6 +2288,20 @@ var SN_I18N = {
 		opt_last_7d: '7 Hari Terakhir',
 		opt_last_30d: '30 Hari Terakhir',
 		sec_sys_info: 'Informasi Sistem',
+		sec_attack_types: 'Jenis Serangan',
+		attack_kosong: 'Tidak ada serangan tercatat pada rentang waktu ini.',
+		atk_total: 'serangan',
+		atk_ddos: 'DDoS / Flood',
+		atk_scanner: 'Scanner / Probe',
+		atk_sqli: 'SQL Injection',
+		atk_xss: 'XSS',
+		atk_rce: 'RCE / Injeksi kode',
+		atk_traversal: 'Path Traversal / LFI',
+		atk_bruteforce: 'Brute Force',
+		atk_bot: 'Bot / Scraper',
+		atk_protocol: 'Anomali protokol',
+		atk_campuran: 'Campuran',
+		atk_lainnya: 'Lainnya',
 		th_pid: 'PID',
 		th_ppid: 'PPID',
 		th_uid: 'UID',
@@ -3812,7 +3851,7 @@ function snSub(nama, el){
 	if(SN_GRAF && SN_SUB.aktif !== 'log'){ 
 		// Debounce resize - only resize if enough time passed
 		clearTimeout(SN_GRAF._resizeTO);
-		SN_GRAF._resizeTO = setTimeout(function(){ SN_GRAF.resize(); }, 100); 
+		SN_GRAF._resizeTO = setTimeout(function(){ SN_GRAF.resize(); if(SN_DONUT){ SN_DONUT.resize(); } }, 100); 
 	}
 }
 function snSub2(nama, el){
@@ -4614,6 +4653,7 @@ function snGrafik(force){
 	}
 	SN_LAST_CHART_T = now;
 	var jam = $('#selJam').val() || 24;
+	snJenisSerangan(jam);
 	snAjax('get_chart', {hours: jam}, function(m){
 		if(!m) return;
 		var el = document.getElementById('grafik');
@@ -4664,6 +4704,42 @@ function snGrafik(force){
 			]
 		});
 	});
+}
+
+/* ---------- diagram donat jenis serangan ---------- */
+var SN_DONUT = null;
+var SN_ATK_WARNA = {ddos: '#ef4444', scanner: '#f59e0b', sqli: '#a855f7', xss: '#ec4899', rce: '#f97316',
+	traversal: '#38bdf8', bruteforce: '#10b981', bot: '#eab308', protocol: '#6366f1', campuran: '#14b8a6', lainnya: '#64748b'};
+function snJenisSerangan(jam){
+	snAjax('get_attack_types', {hours: jam}, function(m){
+		if(!m) return;
+		var el = document.getElementById('donutJenis');
+		if(!el) return;
+		var jenis = m.jenis || [];
+		if(!jenis.length){
+			$('#donutKosong').show();
+			el.style.display = 'none';
+			return;
+		}
+		$('#donutKosong').hide();
+		el.style.display = 'block';
+		var data = [];
+		for(var i = 0; i < jenis.length; i++){
+			data.push({name: snT('atk_' + jenis[i].key, jenis[i].key), value: jenis[i].n,
+				itemStyle: {color: SN_ATK_WARNA[jenis[i].key] || '#64748b'}});
+		}
+		if(!SN_DONUT){ SN_DONUT = echarts.init(el); } else { SN_DONUT.resize(); }
+		SN_DONUT.setOption({
+			backgroundColor: 'transparent',
+			tooltip: {trigger: 'item', formatter: '{b}<br/>{c} ({d}%)', backgroundColor: 'rgba(8,15,33,0.92)', borderColor: 'rgba(0,240,255,0.3)', textStyle: {color: '#f1f5f9'}},
+			legend: {orient: 'horizontal', bottom: 0, type: 'scroll', textStyle: {color: '#94a3b8', fontSize: 11}, itemWidth: 10, itemHeight: 10},
+			title: {text: String(m.total), subtext: snT('atk_total', 'attacks'), left: 'center', top: '34%',
+				textStyle: {color: '#f1f5f9', fontSize: 22, fontFamily: "'JetBrains Mono', monospace"}, subtextStyle: {color: '#94a3b8', fontSize: 11}},
+			series: [{type: 'pie', radius: ['48%', '72%'], center: ['50%', '45%'], avoidLabelOverlap: true,
+				itemStyle: {borderColor: 'rgba(8,15,33,0.9)', borderWidth: 2}, label: {show: false}, labelLine: {show: false},
+				emphasis: {label: {show: false}, scaleSize: 6}, data: data}]
+		}, true);
+	}, null, null, true);
 }
 
 /* ---------- blocked IPs ---------- */
@@ -5298,13 +5374,16 @@ function snRenderFwHits(hits){
 	var rows = '';
 	for(var i = 0; i < hits.length; i++){
 		var h = hits[i];
-		var pktBadge = h.pkts > 0
-			? '<span class="sn-badge sn-ok">' + h.pkts.toLocaleString() + '</span>'
+		if(!h || typeof h !== 'object' || !h.target) continue;
+		var pkts = Number(h.pkts) || 0, bytes = Number(h.bytes) || 0;
+		var pktBadge = pkts > 0
+			? '<span class="sn-badge sn-ok">' + pkts.toLocaleString() + '</span>'
 			: '<span class="sn-badge sn-off">0</span>';
-		var byteStr = h.bytes > 0 ? ukuranAngka(h.bytes) : '0 B';
+		var byteStr = bytes > 0 ? ukuranAngka(bytes) : '0 B';
 		rows += '<tr>'
-			+ '<td><span class="sn-tag ' + (h.target === 'DROP' ? 'crit' : 'ok') + '">' + h.target + '</span></td>'
-			+ '<td class="sn-mono" style="font-size:11.5px">' + snEsc(h.rule) + '</td>'
+			+ '<td><span class="sn-tag ' + (h.target === 'DROP' ? 'crit' : 'ok') + '">' + snEsc(h.target) + '</span></td>'
+			+ '<td class="sn-mono" style="font-size:11.5px">' + snEsc(h.rule || '-')
+			+ (h.detail ? '<div style="font-size:10.5px;color:var(--muted)">' + snEsc(h.detail) + '</div>' : '') + '</td>'
 			+ '<td class="r sn-mono">' + pktBadge + '</td>'
 			+ '<td class="r sn-mono" style="color:var(--ink)">' + byteStr + '</td>'
 			+ '</tr>';
@@ -5321,6 +5400,9 @@ function snRenderFwHits(hits){
 		+ '<tbody>' + rows + '</tbody>'
 		+ '</table></div>';
 
+	if(!rows){
+		tbHtml = '<div class="sn-empty" style="padding:14px">' + (isEn ? 'No packet counters available (Sentinel chain not active).' : 'Penghitung paket belum tersedia (rantai Sentinel belum aktif).') + '</div>';
+	}
 	$('#fwHitBox').html(tbHtml);
 	$('#fwHitTime').text(new Date().toLocaleTimeString());
 }
@@ -6700,22 +6782,52 @@ function snLegacyPindah(){
 }
 
 /* ---------- WAF: Real-Time Upload Protection (Imunify360 Style) ---------- */
-function snUploadScanMuat(){
+/* Baris statistik mesin pemindai (hanya bila daemon versi baru mengirim `stats`). */
+function snUploadStatsRows(st, isEn, baris){
+	if(!st || typeof st !== 'object' || st.scanned === undefined) return '';
+	var n = function(k){ return Number(st[k]) || 0; };
+	var gerbang = n('gate_on') ? (isEn ? 'active' : 'aktif') + ' (' + n('gate_wait') + (isEn ? ' waited, ' : ' menunggu, ') + n('gate_deny') + (isEn ? ' denied' : ' ditolak') + ')' : (isEn ? 'off' : 'mati');
+	return baris(isEn ? 'Verdict latency avg / p95 / max' : 'Latensi putusan rata-rata / p95 / maks', n('lat_avg_ms') + ' / ' + n('lat_p95_ms') + ' / ' + n('lat_max_ms') + ' ms')
+		+ baris(isEn ? 'Files scanned / infected' : 'Berkas dipindai / terinfeksi', n('scanned') + ' / ' + n('infected'))
+		+ baris(isEn ? 'Queue / held now' : 'Antrean / sedang ditahan', n('queue') + ' / ' + n('held_now'))
+		+ baris(isEn ? 'Execution gate (fanotify)' : 'Gerbang eksekusi (fanotify)', gerbang)
+		+ baris(isEn ? 'Caught by sweep / catch-up' : 'Tertangkap sapuan / catch-up', n('sweep_enq') + ' / ' + n('catchup_enq'));
+}
+function snUploadScanMuat(btn, manual){
+	var stopSpin = snSpinBtn(btn);
 	snAjax('get_upload_scan_status', {}, function(data){
+		stopSpin();
 		if(!data) return;
 		var isEn = (SN_LANG !== 'id');
-		var svc = data.service || {};
+		var cfg = data.config || {};
+		var jalan = !!(data.service_running || data.systemd_active);
 		var svcBadge = $('#usvcBadge');
-		if(svc.active){
-			svcBadge.removeClass('sn-off sn-bad').addClass('sn-badge sn-ok').text(isEn ? 'RUNNING' : 'BERJALAN');
-			$('#btnUploadSvcToggle').removeClass('pri').addClass('sn-btn dgr').text(isEn ? 'Stop Service' : 'Hentikan Layanan').attr('onclick', "snUploadScanServiceToggle('stop')");
+		var tombol = $('#btnUsvcToggle');
+		if(jalan){
+			svcBadge.attr('class', 'sn-badge sn-ok').text(isEn ? 'RUNNING' : 'BERJALAN');
+			tombol.attr('class', 'sn-btn pri').text(isEn ? 'Restart Service' : 'Mulai Ulang Layanan').attr('onclick', "snUploadScanServiceToggle('restart')");
 		} else {
-			svcBadge.removeClass('sn-ok sn-bad').addClass('sn-badge sn-off').text(isEn ? 'STOPPED' : 'BERHENTI');
-			$('#btnUploadSvcToggle').removeClass('dgr').addClass('sn-btn pri').text(isEn ? 'Start Service' : 'Jalankan Layanan').attr('onclick', "snUploadScanServiceToggle('start')");
+			svcBadge.attr('class', 'sn-badge sn-off').text(isEn ? 'STOPPED' : 'BERHENTI');
+			tombol.attr('class', 'sn-btn pri').text(isEn ? 'Start Service' : 'Jalankan Layanan').attr('onclick', "snUploadScanServiceToggle('start')");
 		}
+
+		var ram = Number(data.available_ram_mb) || 0, minRam = Number(cfg.min_memory_mb) || 0;
+		var baris = function(k, v){ return '<div><span>' + k + '</span><span>' + v + '</span></div>'; };
+		$('#usvcInfo').html(
+			baris(isEn ? 'Service' : 'Layanan', jalan ? ((isEn ? 'running' : 'berjalan') + (data.pid ? ' (PID ' + snEsc(data.pid) + ')' : '')) : (isEn ? 'stopped' : 'berhenti'))
+			+ baris('ClamAV (clamd)', data.clamd_ready ? (isEn ? 'ready' : 'siap') : (isEn ? 'not ready' : 'belum siap'))
+			+ baris(isEn ? 'Free RAM' : 'RAM bebas', ram + ' MB' + (minRam && ram < minRam ? (isEn ? ' (below fuse limit, scans skipped)' : ' (di bawah batas sekring, pemindaian dilewati)') : ''))
+			+ baris(isEn ? 'Memory fuse limit' : 'Batas sekring memori', minRam + ' MB')
+			+ baris(isEn ? 'Max file size' : 'Ukuran berkas maksimum', (Number(cfg.max_file_size_mb) || 0) + ' MB')
+			+ baris(isEn ? 'Action on detection' : 'Tindakan saat terdeteksi', snEsc(cfg.action || '-'))
+			+ baris(isEn ? 'Protected vhosts' : 'Vhost terlindungi', (Number(data.active_vhosts_count) || 0) + ' / ' + (Number(data.total_vhosts_count) || 0))
+			+ baris(isEn ? 'Quarantined files' : 'Berkas terkarantina', Number(data.total_quarantined) || 0)
+			+ snUploadStatsRows(data.stats, isEn, baris));
 
 		var tb = '';
 		var list = data.vhosts || [];
+		$('#usvcTime').text((isEn ? 'Updated ' : 'Diperbarui ') + new Date().toLocaleTimeString());
+		if(manual && window.layer && layer.msg){ layer.msg(isEn ? 'Status refreshed' : 'Status diperbarui', {time: 1500, icon: 1}); }
 		if(!list.length){
 			$('#tbUploadVhosts').html('<tr><td colspan="6" class="sn-empty">' + (isEn ? 'No vhosts detected' : 'Tidak ada vhost terdeteksi') + '</td></tr>');
 			return;
@@ -6723,7 +6835,7 @@ function snUploadScanMuat(){
 
 		for(var i = 0; i < list.length; i++){
 			var vh = list[i];
-			var vhNameSafe = vh.vhost.replace(/'/g, "\\'");
+			var vhNameSafe = snJsAttr(vh.vhost);
 			var btnToggle = vh.enabled
 				? '<span class="sn-btn dgr" style="padding:2px 8px;font-size:11px" onclick="snUploadVhostToggle(\'' + vhNameSafe + '\')" title="' + (isEn ? 'Disable automatic upload scanning for this vhost' : 'Matikan Pemindaian Upload Otomatis untuk Vhost Ini') + '">' + (isEn ? 'ON (Disable)' : 'ON (Matikan)') + '</span>'
 				: '<span class="sn-btn pri" style="padding:2px 8px;font-size:11px" onclick="snUploadVhostToggle(\'' + vhNameSafe + '\')" title="' + (isEn ? 'Enable automatic upload scanning for this vhost' : 'Aktifkan Pemindaian Upload Otomatis untuk Vhost Ini') + '">' + (isEn ? 'OFF (Enable)' : 'OFF (Aktifkan)') + '</span>';
@@ -6733,8 +6845,8 @@ function snUploadScanMuat(){
 				: '<span class="sn-badge sn-off">' + (isEn ? '0 clean' : '0 bersih') + '</span>';
 
 			tb += '<tr>'
-				+ '<td><b>' + vh.vhost + '</b></td>'
-				+ '<td class="sn-mono" style="font-size:11px">' + (vh.root || '-') + '</td>'
+				+ '<td><b>' + snEsc(vh.vhost) + '</b></td>'
+				+ '<td class="sn-mono" style="font-size:11px">' + snEsc(vh.root || '-') + '</td>'
 				+ '<td><span class="sn-badge">' + (vh.server || 'nginx').toUpperCase() + '</span></td>'
 				+ '<td>' + btnToggle + '</td>'
 				+ '<td>' + qBadge + '</td>'
@@ -6742,7 +6854,7 @@ function snUploadScanMuat(){
 				+ '</tr>';
 		}
 		$('#tbUploadVhosts').html(tb);
-	});
+	}, null, btn);
 }
 
 function snUploadVhostToggle(vhost){
@@ -7316,6 +7428,7 @@ $(function(){
 
 	window.addEventListener('resize', function(){
 		if(SN_GRAF){ SN_GRAF.resize(); }
+		if(SN_DONUT){ SN_DONUT.resize(); }
 	});
 	/* Timer TIDAK dibuat di sini. snBuka() yang memakainya, supaya timer
 	   lahir dan mati bersama dialog. Kalau dibuat di sini, timer tetap

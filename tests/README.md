@@ -9,3 +9,9 @@
 | `waf/` | analisis serangan dari log dan uji ruleset (replay, false positive, regresi) | lihat `waf/README.md` |
 | `lifecycle/` | uji pasang/reinstall/uninstall/pasang ulang di container uji | `bash lifecycle/lifecycle_test.sh sentinel.zip` |
 | `prod/` | uji firewall/WAF di host produksi (netns, dead-man) | lihat `prod/README.md` |
+| `atk_types_test.py` | endpoint `get_attack_types` (klasifikasi log audit WAF untuk diagram donat) | `python3 atk_types_test.py /path/sentinel_main.py` |
+| `fw_counters_test.py` | penguraian penghitung paket firewall (`get_fw` mengirim objek, bukan teks mentah) | `python3 fw_counters_test.py /path/sentinel_main.py` |
+| `ui/t_fwhits.js`, `ui/t_fwtab.js` | render tabel Packet Counters dan seluruh tab Firewall dengan data nyata (cari `undefined`) | `node ui/t_fwhits.js ../index.html` |
+| `ui/t_upload.js` | tab Realtime Upload Protection: judul, umpan balik Refresh, badge dan kotak info (data nyata `get_upload_scan_status`) | `node ui/t_upload.js ../index.html status.json` |
+| `upload_realtime_test.py` | uji end-to-end Realtime Upload Protection di sandbox (nginx+Coraza+PHP+salinan pemindai+clamd tiruan): upload tetap 200, karantina, latensi, daemon mati/kill -9, inotify dimulai ulang/buta, clamd lambat/mati/pulih, webshell/polyglot, penyerang mengejar berkas (gerbang fanotify), biaya gerbang (60 pemeriksaan, ±6 menit) | `python3 upload_realtime_test.py ../payload/sentinel-upload-scan.py` (root) |
+| `upload_heuristic_test.py` | heuristik webshell/backdoor/polyglot, positif palsu pada data acak, penguraian jawaban clamd (offline) | `python3 upload_heuristic_test.py ../payload/sentinel-upload-scan.py` |
