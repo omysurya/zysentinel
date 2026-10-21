@@ -4,12 +4,24 @@ Documentation=file:/www/docs/2026-10-02-fitur-sentinel-monitoring-firewall.md
 After=network-online.target
 Wants=network-online.target
 
+StartLimitIntervalSec=900
+StartLimitBurst=6
+
 [Service]
 Type=simple
 ExecStart=/www/server/sentinel/bin/guardd -c /www/server/sentinel/etc/guardd.conf
 ExecReload=/bin/kill -HUP $MAINPID
-Restart=always
-RestartSec=5
+# Pemulihan crash dengan jeda makin panjang (2 dtk naik bertahap ke 60 dtk), lalu BERHENTI setelah 6 kali
+# dalam 15 menit (unit jadi failed). sentinel-selfheal melanjutkan dengan jeda 2, 5, 10, 20, 40, 60 menit dan
+# paling banyak 12 percobaan per 24 jam, jadi tidak ada putaran restart tanpa akhir yang membanjiri CPU dan log.
+Restart=on-failure
+# 0 = daemon yang menangkap SIGTERM lalu keluar bersih (kill dari luar) tetap dipulihkan; systemctl stop tidak terpengaruh
+RestartForceExitStatus=0 SIGTERM SIGHUP SIGINT SIGPIPE
+RestartSec=2
+RestartSteps=5
+RestartMaxDelaySec=60
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=100
 # batas keras: kalau daemon membengkak, restart lebih baik
 # daripada zajamnya sampai server kehabisan memori
 MemoryMax=256M

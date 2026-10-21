@@ -347,7 +347,7 @@ class sentinel_main(object):
             core_scripts = [
                 'sentinel-ports.py', 'sentinel-waf.sh', 'sentinel-fw.sh',
                 'sentinel-av.sh', 'sentinel-proc.py', 'sentinel-intel.sh',
-                'sentinel-notify.sh', 'sentinel-upload-scan.py',
+                'sentinel-notify.sh', 'sentinel-upload-scan.py', 'sentinel-selfheal.py',
                 'sentinel-sage.py', 'sentinel-zyrules.py', 'guardctl', 'guardd'
             ]
             for s in core_scripts:

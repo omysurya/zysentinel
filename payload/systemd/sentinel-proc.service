@@ -3,11 +3,23 @@ Description=ZySentinel Process Watchdog (Runtime EDR Guard)
 After=network.target sentinel.service
 Wants=sentinel.service
 
+StartLimitIntervalSec=900
+StartLimitBurst=6
+
 [Service]
 Type=simple
 ExecStart=/www/server/panel/pyenv/bin/python3 /www/server/sentinel/bin/sentinel-proc.py daemon
-Restart=always
-RestartSec=3
+# Pemulihan crash dengan jeda makin panjang (2 dtk naik bertahap ke 60 dtk), lalu BERHENTI setelah 6 kali
+# dalam 15 menit (unit jadi failed). sentinel-selfheal melanjutkan dengan jeda 2, 5, 10, 20, 40, 60 menit dan
+# paling banyak 12 percobaan per 24 jam, jadi tidak ada putaran restart tanpa akhir yang membanjiri CPU dan log.
+Restart=on-failure
+# 0 = daemon yang menangkap SIGTERM lalu keluar bersih (kill dari luar) tetap dipulihkan; systemctl stop tidak terpengaruh
+RestartForceExitStatus=0 SIGTERM SIGHUP SIGINT SIGPIPE
+RestartSec=2
+RestartSteps=5
+RestartMaxDelaySec=60
+LogRateLimitIntervalSec=30s
+LogRateLimitBurst=100
 KillMode=process
 StandardOutput=journal
 StandardError=journal

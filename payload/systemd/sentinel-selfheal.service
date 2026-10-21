@@ -1,0 +1,14 @@
+[Unit]
+Description=ZySentinel self-heal (pulihkan layanan plugin dan clamd yang crash atau macet, dengan jeda makin panjang)
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/www/server/panel/pyenv/bin/python3 /www/server/sentinel/bin/sentinel-selfheal.py run
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+TimeoutStartSec=300
+# jejak ditulis ke /www/server/sentinel/log/selfheal.log (hanya saat keadaan berubah); tidak ke journal
+StandardOutput=null
+StandardError=journal
