@@ -59,6 +59,7 @@ SERVICES = [
     {'unit': 'sentinel-notify.timer'},
     {'unit': 'sentinel-av.timer'},
     {'unit': 'sentinel-intel.timer'},
+    {'unit': 'sentinel-sweeper.timer'},
 ]
 CLAMD_SOCKETS = ('/var/run/clamav/clamd.ctl', '/run/clamav/clamd.ctl', '/var/run/clamd.scan/clamd.sock')
 

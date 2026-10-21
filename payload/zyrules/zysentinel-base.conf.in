@@ -52,12 +52,36 @@ SecRule REQUEST_BODY_LENGTH "@gt @BODY_NOFILES@" \
     "id:8000215,phase:2,deny,status:413,log,auditlog,t:none,\
     msg:'ZySentinel: badan permintaan (bukan unggahan berkas) melebihi batas',tag:'zysentinel',tag:'attack-protocol',severity:'WARNING',chain"
     SecRule REQUEST_HEADERS:Content-Type "!@rx ^multipart/form-data" "t:none,t:lowercase"
+# Dua celah aturan di atas:
+#  - multipart: field TEKS (bukan berkas) tetap masuk ARGS dan dipindai CRS sampai
+#    SecRequestBodyLimit (50 MB). Uji 140 KB: 4,16 detik per permintaan; 4 worker
+#    nginx habis oleh segelintir permintaan. ARGS_COMBINED_SIZE tidak menghitung isi
+#    berkas, jadi unggahan berkas besar tetap lolos.
+#  - tanpa Content-Type: negasi pada header yang tidak ada tidak pernah cocok di
+#    Coraza, sehingga 8000214/8000215 dilewati (uji 140 KB: 2,13 detik).
+SecRule ARGS_COMBINED_SIZE "@gt @BODY_NOFILES@" \
+    "id:8000217,phase:2,deny,status:413,log,auditlog,t:none,\
+    msg:'ZySentinel: total argumen melebihi batas',tag:'zysentinel',tag:'attack-protocol',severity:'WARNING'"
+SecRule REQUEST_HEADERS:Content-Length "@gt @BODY_NOFILES@" \
+    "id:8000218,phase:1,deny,status:413,log,auditlog,t:none,\
+    msg:'ZySentinel: badan tanpa Content-Type melebihi batas',tag:'zysentinel',tag:'attack-protocol',severity:'WARNING',chain"
+    SecRule &REQUEST_HEADERS:Content-Type "@eq 0" "t:none"
+SecRule REQUEST_BODY_LENGTH "@gt @BODY_NOFILES@" \
+    "id:8000219,phase:2,deny,status:413,log,auditlog,t:none,\
+    msg:'ZySentinel: badan tanpa Content-Type melebihi batas',tag:'zysentinel',tag:'attack-protocol',severity:'WARNING',chain"
+    SecRule &REQUEST_HEADERS:Content-Type "@eq 0" "t:none"
 
 # Log: hanya permintaan relevan (kena aturan), format JSON
 SecAuditEngine RelevantOnly
-# 4xx kecuali 404, dan semua 5xx (tanpa lookahead: Coraza memakai RE2)
+# 4xx kecuali 404, dan semua 5xx (tanpa lookahead: Coraza memakai RE2).
+# Di Coraza, RelevantOnly murni berbasis status ini (blokir WAF pun hanya tercatat
+# bila statusnya cocok), jadi 4xx/5xx aplikasi tetap ikut tercatat.
 SecAuditLogRelevantStatus "^(?:5[0-9][0-9]|4(?:0[0-35-9]|[1-9][0-9]))$"
-SecAuditLogParts ABFHZ
+# TANPA bagian B (header request). Dengan B, header Cookie pengguna sah (termasuk
+# 422/401/403 aplikasi yang tidak ada hubungannya dengan WAF) tersimpan di berkas
+# milik www -- user yang sama dengan PHP-FPM -- sehingga skrip PHP situs mana pun
+# bisa membaca sesi pengguna situs lain. Metode dan URI tetap ada di bagian A.
+SecAuditLogParts AFHZ
 SecAuditLogType Serial
 SecAuditLogFormat JSON
 SecAuditLog @AUDIT_LOG@

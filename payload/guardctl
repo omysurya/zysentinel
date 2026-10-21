@@ -163,6 +163,7 @@ case "${1:-}" in
     ctl "allow $2"
     ;;
   rescan) ctl "rescan" ;;
+  learnload) ctl "learnload" ;;
   flush)  ctl "flush" ;;
 
   panic|panic-on|panic-off|panic-status)
@@ -369,6 +370,7 @@ pakai: guardctl <perintah>
   unreview <ip>     lepas dari antrian review tanpa memblokir
   allow <ip>        whitelist permanen (bertahan setelah restart)
   rescan            paksa penemuan ulang daftar access log sekarang juga
+  learnload         muat ulang pelajaran dari keputusan operator (learned.tsv)
   flush             paksa penulisan statistik ke database
   panic-on          blokir seluruh akses web (port web saja, SSH tetap aman)
   panic-off         cabut blokir panic
@@ -392,6 +394,7 @@ Usage: guardctl <command>
   unreview <ip>     remove IP from review queue without banning
   allow <ip>        permanent whitelist (persists across restarts)
   rescan            force redetection of access log files now
+  learnload         reload lessons learned from operator decisions (learned.tsv)
   flush             flush statistics to database
   panic-on          emergency lockdown web access (SSH remains accessible)
   panic-off         disable panic lockdown

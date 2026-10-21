@@ -73,7 +73,94 @@ def get_iptables_bin():
             return b
     return 'iptables'
 
+# ---- mode rencana (pemasangan atomik) ----
+# Saat _PLAN berupa list, perintah "-A SENTINEL_IN_PORTS/SENTINEL_OUT_PORTS ..." tidak
+# dijalankan tetapi dikumpulkan, lalu _plan_commit menerapkannya dalam SATU transaksi
+# iptables-restore. Dulu setiap 5 menit chain di-flush lalu diisi ~25 perintah: selama
+# itu default-drop belum ada dan penghitung paket selalu kembali ke nol.
+_PLAN = None
+_PLAN_RE = re.compile(r'^\S+ -w \d+ (-A SENTINEL_(?:IN|OUT)_PORTS .*?)(?: 2>/dev/null)?(?: \|\| true)?$')
+_PLAN_STATE = '/www/server/sentinel/run/.ports-plan.sha'
+
+
+def _plan_line(cmd):
+    import shlex
+    m = _PLAN_RE.match(cmd.strip())
+    if not m:
+        return None
+    try:
+        toks = shlex.split(m.group(1))
+    except ValueError:
+        return None
+    # Set ipset yang tidak ada membuat SELURUH transaksi restore ditolak. Di cara lama
+    # aturan seperti itu gagal sendiri dan dilewati ("|| true"); di sini dibuang dari rencana.
+    if '--match-set' in toks:
+        nama = toks[toks.index('--match-set') + 1] if toks.index('--match-set') + 1 < len(toks) else ''
+        if nama not in _ipset_ada():
+            return ''
+    return ' '.join('"%s"' % t if re.search(r'[\s"\']', t) else t for t in toks)
+
+
+_IPSET_CACHE = None
+
+
+def _ipset_ada():
+    global _IPSET_CACHE
+    if _IPSET_CACHE is None:
+        try:
+            o = subprocess.run(['ipset', 'list', '-n'], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=10).stdout
+            _IPSET_CACHE = set(o.split())
+        except Exception:
+            _IPSET_CACHE = set()
+    return _IPSET_CACHE
+
+
+def _plan_commit(ipt_bin, rencana, chains):
+    """Terapkan rencana. Return 'sama' (tidak diubah, penghitung tetap), 'ok', atau None (gagal)."""
+    import hashlib
+    teks = '\n'.join(rencana) + '\n'
+    sha = hashlib.sha256(teks.encode()).hexdigest()
+    try:
+        lama = open(_PLAN_STATE).read().strip()
+    except Exception:
+        lama = ''
+    if lama == sha:
+        jumlah = 0
+        for c in chains:
+            rc, o, _ = run_cmd(f"{ipt_bin} -w 10 -S {c} 2>/dev/null")
+            if rc != 0:
+                jumlah = -1
+                break
+            jumlah += sum(1 for l in o.splitlines() if l.startswith('-A '))
+        if jumlah == len(rencana):
+            return 'sama'
+    restore = ipt_bin + '-restore'
+    if not os.path.exists(restore):
+        restore = 'iptables-restore'
+    isi = '*filter\n' + ''.join(':%s - [0:0]\n' % c for c in chains) + teks + 'COMMIT\n'
+    try:
+        p = subprocess.run([restore, '-w', '10', '--noflush'], input=isi, text=True,
+                           stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
+    except Exception:
+        return None
+    if p.returncode != 0:
+        return None
+    try:
+        with open(_PLAN_STATE + '.tmp', 'w') as f:
+            f.write(sha)
+        os.replace(_PLAN_STATE + '.tmp', _PLAN_STATE)
+    except Exception:
+        pass
+    return 'ok'
+
+
 def run_cmd(cmd):
+    if _PLAN is not None:
+        baris = _plan_line(cmd)
+        if baris is not None:
+            if baris:
+                _PLAN.append(baris)
+            return 0, '', ''
     try:
         p = subprocess.run(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=15)
         return p.returncode, p.stdout.strip(), p.stderr.strip()
@@ -226,6 +313,29 @@ def sshd_ports():
 
 
 def apply_kernel(cfg=None):
+    """Atomik bila bisa: rencana dikumpulkan lalu diterapkan sekaligus, atau tidak
+    diubah sama sekali bila identik dengan yang terpasang. Bila iptables-restore menolak,
+    jatuh ke cara lama (per aturan) yang punya pengaman fail-open per aturan."""
+    global _PLAN
+    _PLAN = []
+    try:
+        hasil = _apply_kernel(cfg, rencana=True)
+    finally:
+        rencana, _PLAN = _PLAN, None
+    if hasil is None:
+        _hapus_state()
+        return _apply_kernel(cfg, rencana=False)
+    return hasil
+
+
+def _hapus_state():
+    try:
+        os.remove(_PLAN_STATE)
+    except Exception:
+        pass
+
+
+def _apply_kernel(cfg=None, rencana=False):
     # Satu apply pada satu waktu: apply bersamaan (timer + UI) menghapus dan memasang
     # ulang chain secara berselang-seling dan bisa meninggalkan urutan aturan yang salah.
     import fcntl
@@ -251,16 +361,19 @@ def apply_kernel(cfg=None):
         if rc != 0:
             gagal.append('%s (%s)' % (rid, (e or 'iptables gagal')[:60]))
 
-    # Buat chain jika belum ada
+    # Buat chain jika belum ada (mode rencana: dikosongkan di dalam transaksi restore)
     run_cmd(f"{ipt} -N {in_chain} 2>/dev/null || true")
-    run_cmd(f"{ipt} -F {in_chain}")
     run_cmd(f"{ipt} -N {out_chain} 2>/dev/null || true")
-    run_cmd(f"{ipt} -F {out_chain}")
+    if not rencana:
+        run_cmd(f"{ipt} -F {in_chain}")
+        run_cmd(f"{ipt} -F {out_chain}")
 
     if not cfg.get('active', True):
         # Jika nonaktif, chain hanya me-return
         run_cmd(f"{ipt} -A {in_chain} -j RETURN")
         run_cmd(f"{ipt} -A {out_chain} -j RETURN")
+        if rencana and _plan_commit(get_iptables_bin(), list(_PLAN), [in_chain, out_chain]) is None:
+            return None
         return True, "Port firewall dinonaktifkan di kernel (mode pasif/return)"
 
     # --- ATURAN INBOUND (SENTINEL_IN_PORTS) ---
@@ -271,9 +384,16 @@ def apply_kernel(cfg=None):
     # 3. Whitelist set & allowlist
     run_cmd(f"{ipt} -A {in_chain} -m set --match-set sentinel_white src -j ACCEPT 2>/dev/null || true")
     run_cmd(f"{ipt} -A {in_chain} -m set --match-set aapanel.ipv4.whitelist src -j ACCEPT 2>/dev/null || true")
-    # 4. Jaringan lokal privat
+    # 4. Jaringan lokal privat, KECUALI bila datang dari antarmuka internet (rute
+    #    bawaan): alamat privat di eth0 pasti dipalsukan dan dulu melewati
+    #    default-drop untuk semua port (mis. UDP buta dari 10.x palsu).
+    rc_w, o_w, _ = run_cmd("ip -4 route show default 2>/dev/null | awk '{for(i=1;i<NF;i++) if($i==\"dev\"){print $(i+1); exit}}'")
+    wan = o_w.strip() if rc_w == 0 and re.fullmatch(r'[A-Za-z0-9_.@-]{1,15}', (o_w or '').strip()) else ''
     for net in ['127.0.0.0/8', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16']:
-        run_cmd(f"{ipt} -A {in_chain} -s {net} -j ACCEPT 2>/dev/null || true")
+        if wan:
+            run_cmd(f"{ipt} -A {in_chain} ! -i {wan} -s {net} -j ACCEPT 2>/dev/null || true")
+        else:
+            run_cmd(f"{ipt} -A {in_chain} -s {net} -j ACCEPT 2>/dev/null || true")
 
     # 4b. Antarmuka VPN aktif (WireGuard, OpenVPN, Tailscale, ZeroTier)
     rc_v, o_v, _ = run_cmd("ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | grep -E '^(wg|tun|tap|tailscale|zt|ppp)' | cut -d'@' -f1 | sort -u")
@@ -404,10 +524,23 @@ def apply_kernel(cfg=None):
         if cfg.get('outbound_policy', 'ACCEPT').upper() == 'DROP':
             run_cmd(f"{ipt} -A {out_chain} -m conntrack --ctstate NEW -j REJECT --reject-with icmp-port-unreachable")
 
+    if rencana:
+        # Mode rencana: aturan belum terpasang; "gagal" tidak bisa diketahui per aturan.
+        # Pasang sekaligus; bila restore menolak, pemanggil mengulang dengan cara lama.
+        status = _plan_commit(get_iptables_bin(), list(_PLAN), [in_chain, out_chain])
+        if status is None:
+            return None
+
     # --- HOOKING KE CHAIN UTAMA ---
-    # Hook SENTINEL_IN_PORTS ke dalam SENTINEL (tepat sebelum baris RETURN terakhir)
+    # Hook SENTINEL_IN_PORTS ke dalam SENTINEL (tepat sebelum baris RETURN terakhir).
+    # Bila dua aturan terakhir SENTINEL sudah "-j SENTINEL_IN_PORTS" lalu "-j RETURN"
+    # (dipasang sentinel-fw.sh), tidak diubah: menghapus lalu menambah lagi membuka celah
+    # singkat tanpa default-drop.
     rc, s_chain, _ = run_cmd(f"{ipt} -S SENTINEL 2>/dev/null")
-    if rc == 0:
+    akhir = [l.strip() for l in s_chain.splitlines() if l.strip().startswith('-A SENTINEL ')][-2:] if rc == 0 else []
+    if rc == 0 and akhir == [f"-A SENTINEL -j {in_chain}", "-A SENTINEL -j RETURN"]:
+        pass
+    elif rc == 0:
         # Bersihkan hook in_chain lama dari SENTINEL bila sudah ada
         while True:
             rc_d, _, _ = run_cmd(f"{ipt} -D SENTINEL -j {in_chain} 2>/dev/null")

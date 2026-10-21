@@ -240,6 +240,10 @@ def rx_siapkan(pola_list):
 def rx_valid(pola):
     if not pola or len(pola) > 300 or re.search(r'[\x00-\x1f\x7f]', pola):
         return False
+    # Sintaks yang tidak didukung RE2 (Coraza) menggagalkan seluruh ruleset.
+    if re.search(r'\(\?<?[=!]|\(\?>|\(\?P=|\\[1-9]|[*+?}]\+', pola):
+        warn('pola dibuang karena tidak didukung WAF (RE2): %r' % pola[:40])
+        return False
     if pola not in _RX_CACHE:
         rx_siapkan([pola])
     h = _RX_CACHE.get(pola)

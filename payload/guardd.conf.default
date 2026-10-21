@@ -92,10 +92,24 @@ weight_brute    = 6
 weight_badua    = 1
 weight_distinct = 1
 
-# Batas maksimum kontribusi per kategori, supaya satu kategori saja
-# tidak cukup untuk mencapai ambang ban.
-# Total maksimum = 80 + 120 + 20 + 20 = 240.
-cap_scan     = 10
+# Batas maksimum kontribusi per kategori. Scanner SENGAJA bisa mencapai
+# ban sendirian: sejak 21 Okt 2026 scanner hanya dihitung untuk path
+# terlarang yang DITOLAK server (4xx) atau dotfile/berkas rahasia, jadi
+# pengunjung sah tidak menyentuhnya. Kategori lain tetap tidak cukup
+# sendirian. Total maksimum = 160 + 120 + 20 + 20 = 320.
+cap_scan     = 20
+# 20 x 8 = 160: scanner murni (hanya path terlarang yang ditolak 4xx) kini
+# bisa mencapai ambang ban 150. Dengan 10, scanner murni mentok di 80.
+
+# --- flood per IP (permintaan per jendela 64 detik, 0 = mati) ---
+flood_throttle_req = 3840
+# rata-rata 60 permintaan/detik selama satu menit -> throttle
+flood_ban_req      = 12800
+# rata-rata 200 permintaan/detik selama satu menit -> ban
+
+decay_seconds = 60
+# Penghitung kategori dibagi dua setiap sekian detik. Dulu 15 detik:
+# scanner lambat (1 hit / 5 detik) tidak pernah melewati 32 poin.
 cap_brute    = 20
 cap_badua    = 20
 cap_distinct = 20
@@ -120,6 +134,18 @@ db_path    = /www/server/sentinel/data/guardd.db
 run_dir    = /www/server/sentinel/run
 log_file   = /www/server/sentinel/log/guardd.log
 allow_file = /www/server/sentinel/etc/allowlist.txt
+learn_file = /www/server/sentinel/etc/learned.tsv
+# Pelajaran dari keputusan operator di Event Feed (ditulis panel, dibaca
+# daemon). Bila berkas tidak ada, tidak ada yang dipelajari.
+
+# Berapa kecocokan pola (dalam 60 detik, hanya untuk permintaan berstatus 4xx)
+# sebelum IP diblokir oleh pelajaran blokir. Makin sempit pola, makin sedikit.
+learn_hits_both = 1
+# path DAN user-agent sama-sama dipelajari
+learn_hits_path = 2
+# hanya path yang dapat dipelajari (user-agent peramban)
+learn_hits_ua   = 3
+# hanya user-agent yang dapat dipelajari
 
 # Direktori yang dipindai rekursif untuk mencari directive access_log.
 conf_dir = /www/server/panel/vhost/nginx

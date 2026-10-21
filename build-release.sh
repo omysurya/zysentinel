@@ -31,6 +31,19 @@ elif [ "$(sha256sum "$SRC_C" | awk '{print $1}')" != "$(cat "$SCRIPT_DIR/payload
     exit 1
 fi
 
+# 1a. Mesin Sweeper (C): dikompilasi dari sumber dengan stempel hash. Bila gcc tidak ada, rilis tetap dibuat
+#     (Sweeper akan menyusun sendiri saat dipasang atau memakai mesin Python), tetapi tanpa biner payload.
+SW_C="$SCRIPT_DIR/payload/sentinel-sweeper.c"
+if command -v gcc >/dev/null 2>&1; then
+    echo "[*] Mengompilasi payload/sentinel-sweeper dari sentinel-sweeper.c (canary, PIE, RELRO)..."
+    gcc -O2 -std=gnu11 -Wall -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -pie -Wl,-z,relro,-z,now \
+        -o "$SCRIPT_DIR/payload/sentinel-sweeper" "$SW_C" -lm
+    chmod 755 "$SCRIPT_DIR/payload/sentinel-sweeper"
+    sha256sum "$SW_C" | awk '{print $1}' > "$SCRIPT_DIR/payload/sentinel-sweeper.srchash"
+else
+    echo "[!] gcc tidak ada: biner payload/sentinel-sweeper tidak diperbarui" >&2
+fi
+
 # 1b. Penjaga: update_zip aaPanel memilih folder TERAKHIR (urutan os.walk)
 #     yang berisi info.json + install.sh. Bila payload/ juga punya keduanya,
 #     panel memasang payload/ sebagai plugin dan installer kehilangan payload.
@@ -62,6 +75,7 @@ chmod 755 "$STAGE_DIR/sentinel/payload"/*.sh \
           "$STAGE_DIR/sentinel/payload"/*.py \
           "$STAGE_DIR/sentinel/payload"/guardctl 2>/dev/null || true
 [ -f "$STAGE_DIR/sentinel/payload/guardd" ] && chmod 755 "$STAGE_DIR/sentinel/payload/guardd" || true
+[ -f "$STAGE_DIR/sentinel/payload/sentinel-sweeper" ] && chmod 755 "$STAGE_DIR/sentinel/payload/sentinel-sweeper" || true
 find "$STAGE_DIR/sentinel/payload/systemd" -type f -exec chmod 644 {} + 2>/dev/null || true
 [ -f "$STAGE_DIR/sentinel/payload/init.d/sentinel" ] && chmod 755 "$STAGE_DIR/sentinel/payload/init.d/sentinel" || true
 

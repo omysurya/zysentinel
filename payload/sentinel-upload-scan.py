@@ -220,14 +220,27 @@ def get_vhost_watch_dirs(vhost_name, vhost_info):
     if not os.path.isdir(root):
         return []
 
-    # Cek subdirektori upload yang ada
-    for sub in UPLOAD_SUBDIRS:
-        target = os.path.join(root, sub)
-        if os.path.isdir(target):
-            watch_dirs.append(target)
+    # Cek subdirektori upload yang ada. Bila docroot adalah ".../public" (Laravel dan
+    # framework sejenis), folder upload yang sebenarnya ada di AKAR PROYEK
+    # (storage/app, public/uploads relatif terhadap proyek). Dulu hanya docroot yang
+    # dipakai, sehingga storage/app tidak pernah diawasi.
+    basis = [root]
+    if os.path.basename(root.rstrip('/')) == 'public':
+        basis.append(os.path.dirname(root.rstrip('/')))
+    dilihat = set()
+    di_docroot = False
+    for b in basis:
+        for sub in UPLOAD_SUBDIRS:
+            target = os.path.normpath(os.path.join(b, sub))
+            if os.path.isdir(target) and target not in dilihat:
+                dilihat.add(target)
+                watch_dirs.append(target)
+                if target.startswith(os.path.normpath(root) + '/'):
+                    di_docroot = True
 
-    # Jika tidak ada subdirektori spesifik, awasi root vhost langsung
-    if not watch_dirs:
+    # Docroot tanpa folder upload yang dikenal tetap diawasi utuh (tidak ketat),
+    # walau folder upload proyek ditemukan di luar docroot.
+    if not di_docroot:
         watch_dirs.append(root)
 
     return watch_dirs
@@ -673,7 +686,7 @@ def _etapa1(it):
         release_file(path)
         return False
     try:
-        sigkey = (st.st_ino, st.st_mtime_ns, st.st_size)
+        sigkey = (st.st_ino, st.st_mtime_ns, st.st_size, st.st_ctime_ns)
         with _LOCK:
             sudah = SEEN.get(path) == sigkey and it['attempt'] == 0
         if sudah:
@@ -702,7 +715,7 @@ def _etapa2(it):
         status, sig = etapa_clamd(fd, st, path)
     finally:
         os.close(fd)
-    _putusan(it, status, sig, (st.st_ino, st.st_mtime_ns, st.st_size))
+    _putusan(it, status, sig, (st.st_ino, st.st_mtime_ns, st.st_size, st.st_ctime_ns))
 
 
 def proses_item(it):
@@ -789,14 +802,16 @@ def sapu(dir_info, since, source):
             if not raw:
                 continue
             p = raw.decode('utf-8', 'surrogateescape')
-            if any(x in p for x in EXCLUDE_PATH_PATTERNS):
+            # Pola pengecualian (vendor, .cache, .git, ...) TIDAK berlaku di folder
+            # upload: di sana folder bernama begitu dibuat penyerang (ekstrak zip).
+            if not strict and any(x in p for x in EXCLUDE_PATH_PATTERNS):
                 continue
             if strict and is_exec_name(os.path.basename(p)):
                 fd, st = _open_regular(p)
                 if fd is not None:
                     try:
                         with _LOCK:
-                            baru = SEEN.get(p) != (st.st_ino, st.st_mtime_ns, st.st_size)
+                            baru = SEEN.get(p) != (st.st_ino, st.st_mtime_ns, st.st_size, st.st_ctime_ns)
                         if baru and p not in HELD:
                             hold_file(fd, st, p, vhost, strict)
                     finally:
@@ -868,12 +883,21 @@ def quarantine_vhost_file(vhost_name, filepath, signature):
         # Hitung sha256
         sha = 'unknown'
         try:
+            h = hashlib.sha256()
             with open(filepath, 'rb') as fp:
-                sha = hashlib.sha256(fp.read()).hexdigest()
+                # bertahap: fp.read() utuh pada berkas besar menghabiskan MemoryMax daemon
+                for blok in iter(lambda: fp.read(1 << 20), b''):
+                    h.update(blok)
+            sha = h.hexdigest()
         except Exception:
             pass
 
         base = os.path.basename(filepath)
+        # Nama > ~230 byte membuat os.replace gagal (ENAMETOOLONG) dan webshell tetap
+        # di tempat. Nama asli tetap tersimpan di metadata (original_path).
+        if len(base.encode('utf-8', 'surrogateescape')) > 150:
+            ekst = os.path.splitext(base)[1][:16]
+            base = hashlib.sha256(base.encode('utf-8', 'surrogateescape')).hexdigest()[:24] + ekst
         stat_info = os.stat(filepath)
         orig_mode = oct(stat_info.st_mode)[-3:]
         orig_uid = stat_info.st_uid
@@ -1091,10 +1115,8 @@ class FanGate:
 
     def _tandai(self, fd, d):
         n = 0
+        # Gerbang hanya dipasang di folder upload (ketat): pola pengecualian tidak berlaku.
         for root, subdirs, _ in os.walk(d):
-            if any(x in root + '/' for x in EXCLUDE_PATH_PATTERNS):
-                subdirs[:] = []
-                continue
             r = self.libc.fanotify_mark(fd, FAN_MARK_ADD, FAN_OPEN_PERM | FAN_EVENT_ON_CHILD, -100, root.encode('utf-8', 'surrogateescape'))
             if r != 0:
                 log(f"Gerbang: fanotify_mark {root} gagal: {os.strerror(ctypes.get_errno())}")
@@ -1197,7 +1219,7 @@ class FanGate:
             path = os.readlink('/proc/self/fd/%d' % evfd)
         except OSError:
             return self._jawab(fd, evfd, True)
-        if not is_exec_name(os.path.basename(path)) or any(x in path for x in EXCLUDE_PATH_PATTERNS):
+        if not is_exec_name(os.path.basename(path)):
             return self._jawab(fd, evfd, True)
         if pid == OWN_PID or _ppid(pid) == OWN_PID:
             return self._jawab(fd, evfd, True)
@@ -1210,7 +1232,7 @@ class FanGate:
         except OSError:
             return self._jawab(fd, evfd, True)
         with _LOCK:
-            sudah = SEEN.get(path) == (st.st_ino, st.st_mtime_ns, st.st_size)
+            sudah = SEEN.get(path) == (st.st_ino, st.st_mtime_ns, st.st_size, st.st_ctime_ns)
         if sudah or st.st_size <= 0:
             return self._jawab(fd, evfd, True)
         with _LOCK:
@@ -1236,7 +1258,7 @@ class FanGate:
         if r is None:
             r = etapa_clamd(evfd, st, path)
         status, sig = r
-        sigkey = (st.st_ino, st.st_mtime_ns, st.st_size)
+        sigkey = (st.st_ino, st.st_mtime_ns, st.st_size, st.st_ctime_ns)
         if status == 'INFECTED':
             with _LOCK:
                 STATS['gate_deny'] += 1
@@ -1435,16 +1457,16 @@ def run_watcher():
                 if not found_path:
                     continue
 
-                # Filter eksklusi path
-                if any(p in found_path for p in EXCLUDE_PATH_PATTERNS):
-                    continue
-
                 # Identifikasi vhost pemilik berkas
                 vhost_match, strict = 'unknown', False
                 for d, (vh, st_) in dir_info.items():
                     if found_path.startswith(d):
                         vhost_match, strict = vh, st_
                         break
+
+                # Filter eksklusi path (tidak berlaku di folder upload)
+                if not strict and any(p in found_path for p in EXCLUDE_PATH_PATTERNS):
+                    continue
 
                 if 'ISDIR' in event:
                     if strict:
@@ -1464,7 +1486,7 @@ def run_watcher():
                     if fd is not None:
                         try:
                             with _LOCK:
-                                baru_ = SEEN.get(found_path) != (st.st_ino, st.st_mtime_ns, st.st_size)
+                                baru_ = SEEN.get(found_path) != (st.st_ino, st.st_mtime_ns, st.st_size, st.st_ctime_ns)
                             if baru_:
                                 hold_file(fd, st, found_path, vhost_match, strict)
                         finally:

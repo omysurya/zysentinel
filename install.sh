@@ -630,6 +630,39 @@ siapkan_guardd() {
   return 2
 }
 
+# ------------------------------------------------------------------
+# Sweeper (pemindai webshell): mesin C sentinel-sweeper disusun dari sumber dengan hardening dan stempel hash
+# sumber. Bila gcc tidak ada, biner payload dipakai HANYA bila stempelnya cocok dengan sumber; bila itu juga tidak
+# ada, Sweeper tetap jalan dengan mesin Python (putusan sama, jauh lebih lambat). Tidak pernah membuat install gagal.
+# ------------------------------------------------------------------
+siapkan_sweeper() {
+  local pay="$PAY" src="$BASE/src/sentinel-sweeper.c" want tmp="$BIN/sentinel-sweeper.tmp" py
+  mkdir -p "$BIN" "$BASE/src" "$BASE/sweeper"
+  [ -f "$pay/sentinel-sweeper.c" ] && cp -p "$pay/sentinel-sweeper.c" "$src"
+  [ -f "$src" ] || return 1
+  want="$(sha256sum "$src" 2>/dev/null | awk '{print $1}')"
+  if [ -x "$BIN/sentinel-sweeper" ] && "$BIN/sentinel-sweeper" --version >/dev/null 2>&1 \
+     && [ "$(cat "$BIN/sentinel-sweeper.srchash" 2>/dev/null)" = "$want" ]; then
+    return 1
+  fi
+  py="$PYENV"; [ -x "$py" ] || py="$(command -v python3)"
+  if [ -n "$py" ] && [ -f "$BIN/sentinel-sweeper.py" ] && command -v gcc >/dev/null 2>&1; then
+    say "menyusun mesin Sweeper dari sumber C (hardening: canary, PIE, RELRO)"
+    if "$py" "$BIN/sentinel-sweeper.py" build >>"$LOG_DEPS" 2>&1 && [ -x "$BIN/sentinel-sweeper" ]; then
+      return 0
+    fi
+    err "kompilasi sentinel-sweeper gagal (lihat $LOG_DEPS), mencoba biner payload"
+  fi
+  if [ -f "$pay/sentinel-sweeper" ] && [ "$(cat "$pay/sentinel-sweeper.srchash" 2>/dev/null)" = "$want" ]; then
+    cp -p --remove-destination "$pay/sentinel-sweeper" "$tmp" && chmod 750 "$tmp" && "$tmp" --version >/dev/null 2>&1 \
+      && mv -f "$tmp" "$BIN/sentinel-sweeper" && printf '%s\n' "$want" > "$BIN/sentinel-sweeper.srchash" \
+      && { say "biner Sweeper dipasang dari payload (cocok dengan sumber)"; return 0; }
+    rm -f "$tmp"
+  fi
+  say "mesin C Sweeper tidak tersedia; Sweeper memakai mesin Python (lebih lambat)"
+  return 1
+}
+
 # Restart guardd bila biner diganti (tanpa ini proses lama tetap berjalan dengan kode lama).
 segarkan_guardd() {
   [ "$1" = "0" ] || return 0
@@ -649,7 +682,7 @@ pasang_daemon() {
   # Salin BERKAS yang dibutuhkan dari payload ke tempat kerjanya.
   if [ -d "$pay" ]; then
     mkdir -p "$BIN" "$BASE/src"
-    for f in guardctl sentinel-fw.sh sentinel-waf.sh sentinel-av.sh sentinel-proc.py sentinel-intel.sh sentinel-notify.sh sentinel-ports.py sentinel-upload-scan.py sentinel-selfheal.py sentinel-sage.py sentinel-zyrules.py; do
+    for f in guardctl sentinel-fw.sh sentinel-waf.sh sentinel-av.sh sentinel-proc.py sentinel-intel.sh sentinel-notify.sh sentinel-ports.py sentinel-upload-scan.py sentinel-selfheal.py sentinel-sweeper.py sentinel-sweeplib.py sentinel-sage.py sentinel-zyrules.py; do
       if [ -f "$pay/$f" ]; then
         cp -p "$pay/$f" "$BIN/$f"
         chmod 755 "$BIN/$f"
@@ -706,11 +739,12 @@ EOF
     return 1
   fi
   siapkan_guardd; GUARDD_RC=$?
+  siapkan_sweeper || true
   if [ "$GUARDD_RC" = "2" ]; then
     err "guardd tidak bisa disiapkan"
     return 1
   fi
-  chmod 755 "$BIN/guardd" "$BIN/guardctl" "$BIN/sentinel-fw.sh" "$BIN/sentinel-av.sh" "$BIN/sentinel-proc.py" "$BIN/sentinel-intel.sh" "$BIN/sentinel-notify.sh" "$BIN/sentinel-ports.py" "$BIN/sentinel-upload-scan.py" "$BIN/sentinel-selfheal.py" "$BIN/sentinel-sage.py" "$BIN/sentinel-zyrules.py" 2>/dev/null
+  chmod 755 "$BIN/guardd" "$BIN/guardctl" "$BIN/sentinel-fw.sh" "$BIN/sentinel-av.sh" "$BIN/sentinel-proc.py" "$BIN/sentinel-intel.sh" "$BIN/sentinel-notify.sh" "$BIN/sentinel-ports.py" "$BIN/sentinel-upload-scan.py" "$BIN/sentinel-selfheal.py" "$BIN/sentinel-sweeper.py" "$BIN/sentinel-sweeplib.py" "$BIN/sentinel-sage.py" "$BIN/sentinel-zyrules.py" 2>/dev/null
   return 0
 }
 
@@ -869,8 +903,34 @@ pasang_antivirus() {
       systemctl enable --now sentinel-av.timer 2>/dev/null || true
       say "timer pemindaian antivirus aktif (03:30 harian)"
     fi
+    if [ -f /etc/systemd/system/sentinel-integ.timer ]; then
+      systemctl enable --now sentinel-integ.timer 2>/dev/null || true
+      say "timer integritas berkas web aktif (setiap jam)"
+    fi
   fi
+  pasang_logrotate
   return 0
+}
+
+# Rotasi log plugin. Dulu tidak ada: guardd.out (append dari systemd) dan
+# proc_alerts.log (logging Python, berkas tetap terbuka) tumbuh tanpa batas.
+# copytruncate karena kedua penulis menahan berkasnya tetap terbuka.
+pasang_logrotate() {
+  [ -d /etc/logrotate.d ] || return 0
+  cat > /etc/logrotate.d/zysentinel <<'LR'
+/www/server/sentinel/log/*.log /www/server/sentinel/log/*.out {
+    size 10M
+    rotate 5
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    su root root
+}
+LR
+  chmod 644 /etc/logrotate.d/zysentinel
+  say "rotasi log plugin terpasang (/etc/logrotate.d/zysentinel)"
 }
 
 pasang_defender_elit() {
@@ -1076,7 +1136,7 @@ uninstall_clean() {
 
   # 3. Hentikan & hapus seluruh unit systemd
   if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
-    local units="sentinel-upload-scan.service sentinel-proc.service sentinel-intel.timer sentinel-intel.service sentinel-av.timer sentinel-av.service sentinel-fw.timer sentinel-fw.service sentinel-notify.timer sentinel-selfheal.timer sentinel-selfheal.service sentinel.service"
+    local units="sentinel-upload-scan.service sentinel-proc.service sentinel-intel.timer sentinel-intel.service sentinel-av.timer sentinel-av.service sentinel-integ.timer sentinel-integ.service sentinel-fw.timer sentinel-fw.service sentinel-notify.timer sentinel-selfheal.timer sentinel-selfheal.service sentinel-sweeper.timer sentinel-sweeper.service sentinel.service"
     for u in $units; do
       systemctl stop "$u" 2>/dev/null || true
       systemctl disable "$u" 2>/dev/null || true
@@ -1089,7 +1149,7 @@ uninstall_clean() {
     say "seluruh layanan systemd dihentikan dan unit dicabut"
   else
     [ -x "$BIN/guardctl" ] && "$BIN/guardctl" stop 2>/dev/null || true
-    for u in sentinel-upload-scan.service sentinel-proc.service sentinel-intel.timer sentinel-intel.service sentinel-av.timer sentinel-av.service sentinel-fw.timer sentinel-fw.service sentinel-notify.timer sentinel-notify.service sentinel-selfheal.timer sentinel-selfheal.service sentinel.service; do
+    for u in sentinel-upload-scan.service sentinel-proc.service sentinel-intel.timer sentinel-intel.service sentinel-av.timer sentinel-av.service sentinel-integ.timer sentinel-integ.service sentinel-fw.timer sentinel-fw.service sentinel-notify.timer sentinel-notify.service sentinel-selfheal.timer sentinel-selfheal.service sentinel-sweeper.timer sentinel-sweeper.service sentinel.service; do
       rm -f "/etc/systemd/system/$u" 2>/dev/null || true
     done
     rm -f /etc/init.d/sentinel 2>/dev/null || true
@@ -1101,6 +1161,7 @@ uninstall_clean() {
     rm -f /etc/ld.so.conf.d/sentinel-coraza.conf && command -v ldconfig >/dev/null 2>&1 && ldconfig 2>/dev/null || true
   fi
   rm -f /etc/logrotate.d/zysentinel-waf 2>/dev/null || true
+  rm -f /etc/logrotate.d/zysentinel 2>/dev/null || true
 
   # 4. Hapus seluruh direktori kerja, basis data, dan log Sentinel
   rm -rf "$BASE"
@@ -1130,7 +1191,7 @@ pasang_fresh() {
   rm -f "$ETC/uninstall.lock" 2>/dev/null || true
   # Hentikan layanan lama bila sedang berjalan
   if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
-    local units="sentinel-upload-scan.service sentinel-proc.service sentinel-intel.timer sentinel-intel.service sentinel-av.timer sentinel-av.service sentinel-fw.timer sentinel-fw.service sentinel-notify.timer sentinel-selfheal.timer sentinel-selfheal.service sentinel.service"
+    local units="sentinel-upload-scan.service sentinel-proc.service sentinel-intel.timer sentinel-intel.service sentinel-av.timer sentinel-av.service sentinel-integ.timer sentinel-integ.service sentinel-fw.timer sentinel-fw.service sentinel-notify.timer sentinel-selfheal.timer sentinel-selfheal.service sentinel-sweeper.timer sentinel-sweeper.service sentinel.service"
     for u in $units; do
       systemctl stop "$u" 2>/dev/null || true
     done
@@ -1164,7 +1225,7 @@ perbaiki_mandiri() {
   cek_prasyarat || true
 
   # 2. Periksa skrip biner di BIN
-  for f in guardctl sentinel-fw.sh sentinel-waf.sh sentinel-av.sh sentinel-proc.py sentinel-intel.sh sentinel-notify.sh sentinel-ports.py sentinel-upload-scan.py sentinel-selfheal.py sentinel-sage.py sentinel-zyrules.py; do
+  for f in guardctl sentinel-fw.sh sentinel-waf.sh sentinel-av.sh sentinel-proc.py sentinel-intel.sh sentinel-notify.sh sentinel-ports.py sentinel-upload-scan.py sentinel-selfheal.py sentinel-sweeper.py sentinel-sweeplib.py sentinel-sage.py sentinel-zyrules.py; do
     # Hilang, kosong, ATAU isinya berbeda dari payload (rusak, termodifikasi,
     # atau versi lama setelah pembaruan plugin): payload adalah sumber kebenaran.
     if [ -f "$pay/$f" ] && ! cmp -s "$pay/$f" "$BIN/$f"; then
@@ -1177,6 +1238,7 @@ perbaiki_mandiri() {
 
   # 3. Periksa biner guardd (harus cocok dengan sumber, bukan sekadar bisa jalan)
   siapkan_guardd; local grc=$?
+  siapkan_sweeper || true
   if [ "$grc" = "0" ]; then dipulihkan=$((dipulihkan + 1)); segarkan_guardd 0; fi
   [ "$grc" = "2" ] && err "guardd tidak bisa dipulihkan"
 
@@ -1204,7 +1266,7 @@ perbaiki_mandiri() {
 
   # 6. Periksa dan pulihkan status layanan yang macet/mati
   if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
-    for s in sentinel-fw.service sentinel-fw.timer sentinel.service sentinel-proc.service sentinel-upload-scan.service sentinel-intel.timer sentinel-av.timer sentinel-selfheal.timer; do
+    for s in sentinel-fw.service sentinel-fw.timer sentinel.service sentinel-proc.service sentinel-upload-scan.service sentinel-intel.timer sentinel-av.timer sentinel-integ.timer sentinel-selfheal.timer; do
       if [ -f "/etc/systemd/system/$s" ]; then
         if ! systemctl is-active --quiet "$s"; then
           systemctl restart "$s" 2>/dev/null || true
@@ -1260,7 +1322,7 @@ verifikasi_akhir() {
   say "verifikasi akhir layanan:"
   if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
     for s in sentinel.service sentinel-fw.timer sentinel-proc.service sentinel-upload-scan.service \
-             sentinel-intel.timer sentinel-av.timer sentinel-notify.timer sentinel-selfheal.timer; do
+             sentinel-intel.timer sentinel-av.timer sentinel-integ.timer sentinel-notify.timer sentinel-selfheal.timer; do
       [ -f "/etc/systemd/system/$s" ] || continue
       st="$(systemctl is-active "$s" 2>/dev/null)"
       say "  $(printf '%-30s' "$s") ${st:-tidak-diketahui}"

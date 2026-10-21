@@ -223,11 +223,12 @@ do_q_restore() {
   local meta; meta="$(q_meta)/$1.meta"
   [ -f "$meta" ] || { err "metadata tidak ditemukan: $1"; return 1; }
   local asal; asal="$(sed -n 's/^original_path=//p' "$meta" | head -1)"
-  if [ "$CV_OK" = 1 ] && type cv_restore >/dev/null 2>&1; then
-    cv_restore "$meta" || { err "restore gagal"; return 1; }
-  else
-    cv_restore_fallback "$meta" || { err "restore gagal"; return 1; }
-  fi
+  # SELALU jalur yang diperkeras, juga saat clamav-common.sh tersedia: cv_restore
+  # milik operator memakai "mkdir -p; mv -f" sebagai root tanpa memeriksa
+  # symlink, area situs, atau berkas yang sudah ada. Penyerang yang masih punya
+  # akses www cukup mengganti folder asal dengan symlink (mis. ke /etc/profile.d)
+  # lalu menunggu admin memulihkan berkas.
+  cv_restore_fallback "$meta" || { err "restore gagal"; return 1; }
   say "dikembalikan: $asal"
 }
 
@@ -300,8 +301,10 @@ scan_satu() {
       > "$tmp" 2>/dev/null || rc=$?
   fi
 
-  # pindahkan temuan ke karantina bila ada
-  if [ "$rc" -eq 1 ]; then
+  # pindahkan temuan ke karantina bila ada. Kode 2 (ada galat, mis. berkas cache
+  # hilang di antara find dan pemindaian) TIDAK berarti tidak ada temuan: dulu
+  # satu galat saja membuang semua baris FOUND. Yang diproses hanya baris FOUND.
+  if [ "$rc" -ne 0 ]; then
     while IFS= read -r line; do
       [ -z "$line" ] && continue
       case "$line" in
@@ -366,63 +369,99 @@ do_scan_all() {
 # ==================================================================
 # INTEGRITAS (anti-tamper) -- manifest hash per vhost
 # ==================================================================
-EXT_POLA='\.(php|phtml|php[0-9]|js|html|htm|sh|py|pl|cgi|asp|aspx|jsp)$'
+# Pola berkas yang dijaga. Dulu .phar, .inc, .pht, .htaccess, dan .user.ini terlewat,
+# padahal .user.ini (auto_prepend_file) dan .htaccess (AddHandler) adalah cara persistensi
+# webshell yang paling umum.
+EXT_POLA='(\.(php|phtml|pht|phps|phar|inc|php[0-9]|js|html|htm|shtml|sh|py|pl|cgi|asp|aspx|jsp)|/\.htaccess|/\.user\.ini|/php\.ini)$'
+# Folder yang berubah sendiri saat aplikasi berjalan (cache, log, git, dependensi build).
+INTEG_KECUALI='/(storage/framework|storage/logs|bootstrap/cache|node_modules|\.git|wp-content/cache)/'
+INTEG_DB=/www/server/sentinel/data/guardd.db
 
 baseline_path() { printf '%s' "$BASE_DIR/$1.txt"; }
+
+# "hash  path" untuk semua berkas terjaga di bawah $1, terurut. Satu proses sha256sum per
+# ribuan berkas (xargs), bukan satu per berkas. Path berspasi aman.
+integ_hitung() {
+  find "$1" -type f -regextype posix-extended -regex ".*$EXT_POLA" ! -regex ".*$INTEG_KECUALI.*" -print0 2>/dev/null \
+    | nice -n 10 ionice -c3 xargs -0 -r sha256sum 2>/dev/null | LC_ALL=C sort -k2
+}
+
+# Bandingkan baseline ($1) dengan keadaan sekarang ($2) dalam SATU lintasan awk.
+# Dulu setiap berkas memanggil awk atas seluruh baseline (20 ribu berkas = 400 juta baris
+# dibaca) dan path berspasi selalu dianggap "added" karena hanya kolom ke-2 yang dibaca.
+integ_banding() {
+  awk '
+    { i = index($0, "  "); h = substr($0, 1, i - 1); p = substr($0, i + 2) }
+    NR == FNR { b[p] = h; next }
+    { n[p] = h
+      if (!(p in b)) print "added|" p "|-|" h
+      else if (b[p] != h) print "changed|" p "|" b[p] "|" h }
+    END { for (p in b) if (!(p in n)) print "deleted|" p "|" b[p] "|-" }
+  ' "$1" "$2"
+}
+
+# Antrekan notifikasi (dikirim sentinel-notify.sh) untuk perubahan BARU saja.
+integ_notif() {
+  local label="$1" berkas="$2" n contoh
+  n="$(grep -c . "$berkas" 2>/dev/null)"
+  [ "${n:-0}" -gt 0 ] || return 0
+  command -v sqlite3 >/dev/null 2>&1 && [ -f "$INTEG_DB" ] || return 0
+  label="$(printf '%s' "$label" | tr -dc 'A-Za-z0-9._-')"
+  contoh="$(head -5 "$berkas" | cut -d'|' -f1,2 | tr '\n' ';' | tr -d "'\"\\\\\`" | tr -d '\000-\037' | cut -c1-600)"
+  sqlite3 "$INTEG_DB" "INSERT INTO notif (ts, ip, jenis, isi, terkirim, coba, galat) VALUES ($(date +%s), 0, 'integritas', 'Integritas berkas $label: $n perubahan baru. $contoh', 0, 0, '');" 2>/dev/null || true
+}
 
 do_baseline() {
   [ $# -ge 1 ] || { err "pakai: baseline <path> [label]"; return 1; }
   local path="$1" label="${2:-$(basename "$path")}"
   [ -d "$path" ] || { err "path bukan direktori: $path"; return 1; }
   local out; out="$(baseline_path "$label")"
-  local dir; dir="$(dirname "$out")"; mkdir -p "$dir"
-  : > "$out.tmp"
-  local n=0
-  while IFS= read -r f; do
-    local h; h="$(sha256sum "$f" 2>/dev/null | cut -d' ' -f1)"
-    [ -z "$h" ] && continue
-    printf '%s  %s\n' "$h" "$f" >> "$out.tmp"
-    n=$((n+1))
-  done < <(find "$path" -type f -regextype posix-extended -regex ".*$EXT_POLA" 2>/dev/null || true)
-  mv "$out.tmp" "$out"
-  say "baseline $label: $n berkas direkam"
+  mkdir -p "$(dirname "$out")"
+  integ_hitung "$path" > "$out.tmp" && mv -f "$out.tmp" "$out"
+  rm -f "$LAST_DIR/integ-$label.txt"
+  say "baseline $label: $(grep -c . "$out") berkas direkam"
 }
 
 do_check() {
   [ $# -ge 1 ] || { err "pakai: check <path> [label]"; return 1; }
-  local path="$1" label="${2:-$(basename "$path")}"
+  local path="$1" label="${2:-$(basename "$path")}" notif="${3:-}"
   local base; base="$(baseline_path "$label")"
   [ -f "$base" ] || { err "belum ada baseline untuk $label; jalankan baseline dulu"; return 1; }
   local now; now="$(mktemp /tmp/zysentinel-id.XXXXXX)"
-  while IFS= read -r f; do
-    local h; h="$(sha256sum "$f" 2>/dev/null | cut -d' ' -f1)"
-    [ -z "$h" ] && continue
-    printf '%s  %s\n' "$h" "$f" >> "$now"
-  done < <(find "$path" -type f -regextype posix-extended -regex ".*$EXT_POLA" 2>/dev/null || true)
+  integ_hitung "$path" > "$now"
+  local out="$LAST_DIR/integ-$label.txt" lama
+  lama="$(mktemp /tmp/zysentinel-il.XXXXXX)"
+  [ -f "$out" ] && cp "$out" "$lama"
+  integ_banding "$base" "$now" | LC_ALL=C sort > "$out.tmp" && mv -f "$out.tmp" "$out"
+  if [ -n "$notif" ]; then
+    # hanya perubahan yang belum pernah dilaporkan (supaya tidak berulang tiap jam)
+    LC_ALL=C sort "$lama" -o "$lama"
+    LC_ALL=C comm -13 "$lama" "$out" > "$lama.baru"
+    integ_notif "$label" "$lama.baru"
+    rm -f "$lama.baru"
+  fi
+  rm -f "$now" "$lama"
+  say "integritas $label: $(grep -c . "$out") perubahan"
+}
 
-  local out="$LAST_DIR/integ-$label.txt"
-  : > "$out"
-  # tambah / berubah
-  while IFS= read -r linha; do
-    [ -z "$linha" ] && continue
-    local h f lama
-    h="${linha%%  *}"; f="${linha#*  }"
-    lama="$(awk -v path="$f" '$2 == path { print $1; exit }' "$base" 2>/dev/null || true)"
-    if [ -z "$lama" ]; then
-      printf 'added|%s|-|%s\n' "$f" "$h" >> "$out"
-    elif [ "$lama" != "$h" ]; then
-      printf 'changed|%s|%s|%s\n' "$f" "$lama" "$h" >> "$out"
+# Semua vhost di /www/wwwroot: vhost tanpa baseline dibuatkan baseline (tanpa laporan),
+# sisanya diperiksa dan perubahan BARU dikirim sebagai notifikasi. Dipanggil timer per jam.
+do_check_all() {
+  local d label n=0
+  for d in /www/wwwroot/*; do
+    [ -d "$d" ] || continue
+    label="$(basename "$d" | tr -dc 'A-Za-z0-9._-')"
+    [ -n "$label" ] || continue
+    if [ -f "$(baseline_path "$label")" ]; then
+      do_check "$d" "$label" notif
+    else
+      do_baseline "$d" "$label"
     fi
-  done < "$now"
-  # hapus
-  while IFS= read -r linha; do
-    [ -z "$linha" ] && continue
-    local f; f="${linha#*  }"
-    [ -e "$f" ] || printf 'deleted|%s|%s|-\n' "$f" "${linha%%  *}" >> "$out"
-  done < "$base"
-  rm -f "$now"
-  local n; n="$(wc -l < "$out" | tr -d ' ')"
-  say "integritas $label: $n perubahan"
+    n=$((n + 1))
+  done
+  [ -f "$BASE_DIR/sys-persistence.txt" ] || do_baseline_sys
+  do_check_sys notif
+  say "check-all selesai: $n vhost"
 }
 
 do_integ_list() {
@@ -502,28 +541,19 @@ do_check_sys() {
     fi
   done
 
-  local out="$LAST_DIR/integ-sys-persistence.txt"
-  : > "$out"
-  # tambah / berubah
-  while IFS= read -r linha; do
-    [ -z "$linha" ] && continue
-    local h f lama
-    h="${linha%%  *}"; f="${linha#*  }"
-    lama="$(awk -v path="$f" '$2 == path { print $1; exit }' "$base" 2>/dev/null || true)"
-    if [ -z "$lama" ]; then
-      printf 'added|%s|-|%s\n' "$f" "$h" >> "$out"
-    elif [ "$lama" != "$h" ]; then
-      printf 'changed|%s|%s|%s\n' "$f" "$lama" "$h" >> "$out"
-    fi
-  done < "$now"
-  # hapus
-  while IFS= read -r linha; do
-    [ -z "$linha" ] && continue
-    local f; f="${linha#*  }"
-    [ -e "$f" ] || printf 'deleted|%s|%s|-\n' "$f" "${linha%%  *}" >> "$out"
-  done < "$base"
-  rm -f "$now"
-  local n; n="$(wc -l < "$out" | tr -d ' ')"
+  local out="$LAST_DIR/integ-sys-persistence.txt" lama
+  lama="$(mktemp /tmp/zysentinel-sl.XXXXXX)"
+  [ -f "$out" ] && cp "$out" "$lama"
+  LC_ALL=C sort -k2 "$now" -o "$now"
+  integ_banding "$base" "$now" | LC_ALL=C sort > "$out.tmp" && mv -f "$out.tmp" "$out"
+  if [ -n "${1:-}" ]; then
+    LC_ALL=C sort "$lama" -o "$lama"
+    LC_ALL=C comm -13 "$lama" "$out" > "$lama.baru"
+    integ_notif "sys-persistence" "$lama.baru"
+    rm -f "$lama.baru"
+  fi
+  rm -f "$now" "$lama"
+  local n; n="$(grep -c . "$out")"
   say "integritas sys-persistence: $n perubahan terdeteksi"
 }
 
@@ -596,7 +626,7 @@ do_scan_stream() {
   local t0; t0=$(date +%s)
   local found_malware=0 warnings_count=0 total_files=0
 
-  cat <<EOF > "$ACTIVE_SCAN_JSON"
+  cat <<EOF > "$ACTIVE_SCAN_JSON.tmp"
 {
   "status": "running",
   "pid": $$,
@@ -610,6 +640,8 @@ do_scan_stream() {
   "warnings": 0
 }
 EOF
+  # 644 dan ganti atomik: dulu berkas bisa 666 sehingga user www memalsukan status pindai di panel
+  chmod 644 "$ACTIVE_SCAN_JSON.tmp" 2>/dev/null; mv -f "$ACTIVE_SCAN_JSON.tmp" "$ACTIVE_SCAN_JSON"
 
   echo "======================================================================"
   echo " [ZySentinel] Realtime Security & Threat Scanner"
@@ -670,7 +702,7 @@ EOF
           nice -n 10 ionice -c2 -n7 clamscan --no-summary --infected -f "$flist" > "$tmp" 2>/dev/null || rc=$?
         fi
 
-        if [ "$rc" -eq 1 ]; then
+        if [ "$rc" -ne 0 ]; then
           while IFS= read -r line; do
             [ -z "$line" ] && continue
             case "$line" in
@@ -1032,7 +1064,7 @@ EOF
 }
 EOF
 
-  cat <<EOF > "$ACTIVE_SCAN_JSON"
+  cat <<EOF > "$ACTIVE_SCAN_JSON.tmp"
 {
   "status": "done",
   "pid": $$,
@@ -1048,6 +1080,8 @@ EOF
   "summary": "$status_str"
 }
 EOF
+  # 644 dan ganti atomik: dulu berkas bisa 666 sehingga user www memalsukan status pindai di panel
+  chmod 644 "$ACTIVE_SCAN_JSON.tmp" 2>/dev/null; mv -f "$ACTIVE_SCAN_JSON.tmp" "$ACTIVE_SCAN_JSON"
 
   rm -f "$ACTIVE_SCAN_PID" 2>/dev/null
   say "scan-stream $label selesai dalam $durasi dtk (malware: $found_malware, warn: $warnings_count)"
@@ -1070,7 +1104,8 @@ case "${1:-status}" in
   baseline)           do_baseline "${2:-}" "${3:-}" ;;
   baseline-sys)       do_baseline_sys ;;
   check)              do_check "${2:-}" "${3:-}" ;;
-  check-sys)          do_check_sys ;;
+  check-sys)          do_check_sys "${2:-}" ;;
+  check-all)          do_check_all ;;
   integ-list)         do_integ_list "${2:-}" ;;
   db-update)          do_db_update ;;
   rkhunter-propupd)   do_rkhunter_propupd ;;

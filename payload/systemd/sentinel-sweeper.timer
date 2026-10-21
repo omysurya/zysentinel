@@ -1,0 +1,11 @@
+[Unit]
+Description=Jalankan pemindaian webshell Sweeper setiap hari (bila jadwal dinyalakan)
+
+[Timer]
+OnCalendar=*-*-* 04:20:00
+RandomizedDelaySec=600
+Persistent=true
+Unit=sentinel-sweeper.service
+
+[Install]
+WantedBy=timers.target

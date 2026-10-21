@@ -165,6 +165,20 @@ typedef struct {
     char run_dir[CFG_PATH];
     char log_file[CFG_PATH];
     char allow_file[CFG_PATH];
+    char learn_file[CFG_PATH];   /* pelajaran dari keputusan operator (learned.tsv) */
+
+    /* Ambang kecocokan pelajaran blokir sebelum IP diblokir. Makin sempit
+     * pola yang dipelajari (path + UA), makin sedikit kecocokan yang
+     * dibutuhkan. */
+    int  learn_hits_both;         /* path dan UA sama-sama dipelajari */
+    int  learn_hits_path;         /* hanya path */
+    int  learn_hits_ua;           /* hanya UA */
+
+    /* Flood per IP, dalam permintaan per jendela 64 detik (0 = mati). */
+    int  flood_throttle_req;
+    int  flood_ban_req;
+    /* Penghitung kategori dibagi dua setiap sekian detik. */
+    int  decay_seconds;
 
     /* penemuan dinamis */
     int  rescan_interval;
@@ -227,6 +241,13 @@ static cfg_t cfg = {
     .run_dir = "/www/server/sentinel/run",
     .log_file = "/www/server/sentinel/log/guardd.log",
     .allow_file = "/www/server/sentinel/etc/allowlist.txt",
+    .learn_file = "/www/server/sentinel/etc/learned.tsv",
+    .learn_hits_both = 1,
+    .learn_hits_path = 2,
+    .learn_hits_ua = 3,
+    .flood_throttle_req = 3840,     /* rata-rata 60 permintaan/detik */
+    .flood_ban_req = 12800,         /* rata-rata 200 permintaan/detik */
+    .decay_seconds = 60,
     .rescan_interval = 30,
     .startup_backfill = 0,
     .win_ban = 3600,
@@ -244,7 +265,7 @@ static cfg_t cfg = {
     .w_brute = 6,
     .w_badua = 1,
     .w_distinct = 1,
-    .cap_scan = 10,
+    .cap_scan = 20,      /* 20 x 8 = 160: scanner murni kini mencapai ambang ban 150 */
     .cap_brute = 20,
     .cap_badua = 20,
     .cap_distinct = 20,
@@ -306,6 +327,13 @@ static void cfg_load(const char *path)
         else if (!strcmp(k, "run_dir"))            snprintf(cfg.run_dir, CFG_PATH, "%s", v);
         else if (!strcmp(k, "log_file"))           snprintf(cfg.log_file, CFG_PATH, "%s", v);
         else if (!strcmp(k, "allow_file"))          snprintf(cfg.allow_file, CFG_PATH, "%s", v);
+        else if (!strcmp(k, "learn_file"))          snprintf(cfg.learn_file, CFG_PATH, "%s", v);
+        else if (!strcmp(k, "learn_hits_both"))     cfg.learn_hits_both = atoi(v);
+        else if (!strcmp(k, "learn_hits_path"))     cfg.learn_hits_path = atoi(v);
+        else if (!strcmp(k, "learn_hits_ua"))       cfg.learn_hits_ua = atoi(v);
+        else if (!strcmp(k, "flood_throttle_req"))  cfg.flood_throttle_req = atoi(v);
+        else if (!strcmp(k, "flood_ban_req"))       cfg.flood_ban_req = atoi(v);
+        else if (!strcmp(k, "decay_seconds"))       cfg.decay_seconds = atoi(v);
         else if (!strcmp(k, "conf_dir")) {
             /* entri PERTAMA menggeser daftar bawaan, entri berikutnya
              * menambah. Kalau hanya menambah, mengubah conf_dir di
@@ -328,6 +356,20 @@ static void cfg_load(const char *path)
     if (cfg.cap_brute < 1) cfg.cap_brute = 1;
     if (cfg.cap_badua < 1) cfg.cap_badua = 1;
     if (cfg.cap_distinct < 1) cfg.cap_distinct = 1;
+
+    if (cfg.learn_hits_both < 1) cfg.learn_hits_both = 1;
+    if (cfg.learn_hits_path < 1) cfg.learn_hits_path = 1;
+    if (cfg.learn_hits_ua < 1) cfg.learn_hits_ua = 1;
+    if (cfg.learn_hits_both > 50) cfg.learn_hits_both = 50;
+    if (cfg.learn_hits_path > 50) cfg.learn_hits_path = 50;
+    if (cfg.learn_hits_ua > 50) cfg.learn_hits_ua = 50;
+
+    if (cfg.decay_seconds < 15) cfg.decay_seconds = 15;
+    if (cfg.decay_seconds > 600) cfg.decay_seconds = 600;
+    if (cfg.flood_throttle_req < 0) cfg.flood_throttle_req = 0;
+    if (cfg.flood_ban_req < 0) cfg.flood_ban_req = 0;
+    if (cfg.flood_throttle_req > 65000) cfg.flood_throttle_req = 65000;
+    if (cfg.flood_ban_req > 65000) cfg.flood_ban_req = 65000;
 
     if (cfg.max_ips < 1024) cfg.max_ips = 1024;
     if (cfg.max_ips > MAX_IP) cfg.max_ips = MAX_IP;
@@ -355,6 +397,7 @@ static void cfg_load(const char *path)
  * Allowlist: tidak boleh pernah diblokir.
  * ------------------------------------------------------------------ */
 static uint32_t allow_net[256];
+static uint32_t allow_mask[256];      /* mask prefiks; dulu semua dianggap /24 */
 static int      allow_n = 0;
 static uint32_t *allow_hash = NULL;   /* hash berisi ip persis (self IP) */
 
@@ -370,8 +413,8 @@ static int      allow_sedang_builtin = 0;
 static int net_contains(const uint32_t *net, int n, uint32_t ip)
 {
     for (int i = 0; i < n; i++) {
-        uint32_t base = net[i] & 0xffffff00u;
-        if ((ip & 0xffffff00u) == base) return 1;
+        uint32_t m = allow_mask[i];
+        if ((ip & m) == (net[i] & m)) return 1;
     }
     return 0;
 }
@@ -392,16 +435,19 @@ static void allow_load_file(const char *path);
  * tanpa perlu me-restart daemon. */
 static void allow_load_file(const char *path)
 {
-    static uint32_t allow_base[256];
+    static uint32_t allow_base[256], allow_base_mask[256];
     static int      allow_base_n = 0;
     static int      first = 1;
 
     if (first) {
         /* salinan builtin saat allow_init sudah selesai bekerja */
         memcpy(allow_base, allow_net, sizeof(allow_net));
+        memcpy(allow_base_mask, allow_mask, sizeof(allow_mask));
         allow_base_n = allow_n;
         first = 0;
     }
+    memcpy(allow_net, allow_base, sizeof(allow_net));
+    memcpy(allow_mask, allow_base_mask, sizeof(allow_mask));
     allow_n = allow_base_n;
     /* Bangun ulang tabel IP persis dari nol. Tanpa langkah ini, IP yang
      * dihapus dari allowlist.txt tetap terbaca sebagai putih selamanya,
@@ -449,17 +495,36 @@ static int allow_exact(uint32_t ip)
     return 0;
 }
 
-/* Tambahkan satu CIDR ke daftar putih jaringan (disimpan per /24). */
+static uint32_t prefix_mask(int len)
+{
+    if (len <= 0) return 0;
+    if (len >= 32) return 0xffffffffu;
+    return 0xffffffffu << (32 - len);
+}
+
+/* Tambahkan satu CIDR ke daftar putih jaringan, dengan prefiks sebenarnya.
+ * Dulu setiap entri dibandingkan per /24: "103.127.134.23/32" memutihkan
+ * seluruh 103.127.134.0/24, sedangkan "10.0.0.0/8" hanya 10.0.0.0/24. */
 static void allow_add(const char *cidr)
 {
     char buf[64];
     char *slash;
+    int len = 32;
     snprintf(buf, sizeof(buf), "%s", cidr);
     slash = strchr(buf, '/');
-    if (slash) *slash = '\0';
+    if (slash) {
+        *slash = '\0';
+        char *e = NULL;
+        long v = strtol(slash + 1, &e, 10);
+        if (!e || *e || v < 8 || v > 32) return;   /* prefiks rusak/terlalu lebar: tolak */
+        len = (int)v;
+    }
     uint32_t ip = ip2u(buf);
     if (!ip) return;
-    if (allow_n < 256) allow_net[allow_n++] = ip;
+    if (allow_n < 256) {
+        allow_mask[allow_n] = prefix_mask(len);
+        allow_net[allow_n++] = ip & prefix_mask(len);
+    }
 }
 
 static void allow_add_exact(uint32_t ip)
@@ -487,12 +552,12 @@ static void allow_init(void)
     allow_sedang_builtin = 1;
 
     /* jaringan internal selalu aman: 127/8, 10/8, 172.16/12, 192.168/16 */
-    allow_net[allow_n++] = 0x7f000000u;   /* 127.0.0.0 */
-    allow_net[allow_n++] = 0x0a000000u;   /* 10.0.0.0   */
-    allow_net[allow_n++] = 0xac100000u;  /* 172.16.0.0 */
-    allow_net[allow_n++] = 0xc0a80000u;  /* 192.168.0.0 */
-    allow_net[allow_n++] = 0xa9fe0000u;  /* 169.254.0.0 */
-    allow_net[allow_n++] = 0x64400000u;  /* 100.64.0.0 */
+    allow_mask[allow_n] = prefix_mask(8);  allow_net[allow_n++] = 0x7f000000u;   /* 127.0.0.0/8 */
+    allow_mask[allow_n] = prefix_mask(8);  allow_net[allow_n++] = 0x0a000000u;   /* 10.0.0.0/8 */
+    allow_mask[allow_n] = prefix_mask(12); allow_net[allow_n++] = 0xac100000u;   /* 172.16.0.0/12 */
+    allow_mask[allow_n] = prefix_mask(16); allow_net[allow_n++] = 0xc0a80000u;   /* 192.168.0.0/16 */
+    allow_mask[allow_n] = prefix_mask(16); allow_net[allow_n++] = 0xa9fe0000u;   /* 169.254.0.0/16 */
+    allow_mask[allow_n] = prefix_mask(10); allow_net[allow_n++] = 0x64400000u;   /* 100.64.0.0/10 */
 
     /* alamat publik milik server ini sendiri */
     struct ifaddrs *ifa = NULL, *p;
@@ -569,17 +634,19 @@ static int is_allowed(uint32_t ip)
  * ------------------------------------------------------------------ */
 static const char *PAT_SCANNER[] = {
     /* WordPress */
-    "/wp-login", "/wp-admin", "/wp-content", "/wp-includes", "/wp-json",
-    "/wp-cron", "/wp-config", "/wp-login.php", "/xmlrpc.php", "/wordpress/",
+    /* /wp-content, /wp-includes, /wp-json SENGAJA tidak ada: itu jalur aset
+     * dan API yang dipakai setiap pengunjung situs WordPress. Penjelajahan
+     * plugin rentan di bawahnya sudah tertangkap oleh hitungan path 4xx. */
+    "/wp-login", "/wp-admin", "/wp-config", "/xmlrpc.php", "/wordpress/",
     /* config & secret bocor */
     "/.env", "/.git", "/.svn", "/.hg", "/.aws", "/.ssh", "/.docker",
-    "/.vscode", "/.idea", "/.zsh_history", "/.bash_history", "/.DS_Store",
+    "/.vscode", "/.idea", "/.zsh_history", "/.bash_history", "/.ds_store",
     "/config.json", "/config.yaml", "/config.php.bak", "/web.config",
     "/database.yml", "/.htpasswd", "/.npmrc", "/.netrc",
     /* webshell & RCE marker */
     "/shell.php", "/shell/", "/c99.php", "/r57.php", "/b374k.php", "/cgi-bin/",
     "/.ssh/authorized_keys", "/vendor/phpunit", "/eval-stdin", "/base64_decode",
-    "/boaform", "/HNAP1", "/favicon.ico.bak", "/.php5", "/.php7",
+    "/boaform", "/hnap1", "/favicon.ico.bak", "/.php5", "/.php7",
     /* app server & infra generik */
     "/manager/html", "/jmx-console", "/solr/", "/actuator", "/druid/",
     "/server-status", "/server-info", "/elmah.axd", "/web-console",
@@ -593,8 +660,8 @@ static const char *PAT_SCANNER[] = {
     "/_ignition", "/telescope", "/artisan", "/laravel.log", "/storage/logs",
     "/vendor/autoload", "/elmah.axd.axd", "/error_log",
     /* reverse proxy & infra */
-    "/zremotescheduler", "/invoker/JMXInvokerServlet", "/cluster/domain",
-    "/solr/admin", "/api/v1/../", "/%2e%2e/", "/boa", "/HNAP",
+    "/zremotescheduler", "/invoker/jmxinvokerservlet", "/cluster/domain",
+    "/solr/admin", "/api/v1/../", "/../", "/boa", "/hnap",
     NULL
 };
 
@@ -614,8 +681,8 @@ static const char *UA_TOOL[] = {
     "gobuster", "dirb", "wpscan", "joomscan", "nuclei", "xsstrike",
     "havij", "acunetix", "nessus", "openvas", "arachni", "w3af",
     "python-requests", "python-urllib", "go-http-client", "curl/", "wget",
-    "libwww-perl", "lwp::simple", "apachebench", "siege", "ab -", "jMeter",
-    "Apache-HttpClient", "Java/", "okhttp", "axios/", "node-fetch",
+    "libwww-perl", "lwp::simple", "apachebench", "siege", "ab -", "jmeter",
+    "apache-httpclient", "java/", "okhttp", "axios/", "node-fetch",
     "got (", "puppeteer", "playwright", "phantomjs", "headlesschrome",
     "scrapy", "http_request", "ruby", "dart:io", "lua-resty-http",
     "aiohttp", "urllib3", "httpie", "postmanruntime", "insomnia",
@@ -633,12 +700,49 @@ static int in_list(const char *const *list, const char *needle, size_t nlen)
     return 0;
 }
 
-static int path_is_scanner(const char *path, size_t len)
+/* Path dinormalkan seperti nginx sebelum dicocokkan: %XX didekode, huruf
+ * kecil, "//" dan "/./" diringkas, garis miring penutup dibuang. Tanpa ini
+ * "//.env", "/./.env", "/%2eenv" dan "/.ENV" lolos dari daftar padahal
+ * nginx melayani berkas yang sama. */
+static size_t path_norm(const char *p, size_t n, char *out, size_t cap)
 {
-    /* normalisasi sedikit: buang garis miring di akhir */
-    size_t n = len;
-    while (n > 1 && path[n - 1] == '/') n--;
-    return in_list(PAT_SCANNER, path, n);
+    size_t o = 0;
+    for (size_t i = 0; i < n && o + 1 < cap; i++) {
+        unsigned char c = (unsigned char)p[i];
+        if (c == '%' && i + 2 < n && isxdigit((unsigned char)p[i + 1])
+            && isxdigit((unsigned char)p[i + 2])) {
+            char hx[3] = { p[i + 1], p[i + 2], 0 };
+            c = (unsigned char)strtol(hx, NULL, 16);
+            i += 2;
+        }
+        c = (unsigned char)tolower(c);
+        if (c == '/' && o > 0 && out[o - 1] == '/') continue;               /* // */
+        if (c == '/' && o > 1 && out[o - 1] == '.' && out[o - 2] == '/') {   /* /./ */
+            o--;
+            continue;
+        }
+        out[o++] = (char)c;
+    }
+    while (o > 1 && out[o - 1] == '/') o--;
+    out[o] = '\0';
+    return o;
+}
+
+/* Berkas rahasia/dotfile dicari di SEGMEN mana pun ("/blog/.env",
+ * "/app/.git/config"); entri lain cukup sebagai awalan. */
+static int path_is_scanner(const char *np, size_t n)
+{
+    if (in_list(PAT_SCANNER, np, n)) return 1;
+    for (int i = 0; PAT_SCANNER[i]; i++) {
+        const char *pt = PAT_SCANNER[i];
+        if (pt[0] == '/' && (pt[1] == '.' || !strncmp(pt, "/wp-login", 9)
+                             || !strncmp(pt, "/wp-config", 10)
+                             || !strncmp(pt, "/etc/passwd", 11)
+                             || !strncmp(pt, "/vendor/phpunit", 15))
+            && memmem(np, n, pt, strlen(pt)))
+            return 1;
+    }
+    return 0;
 }
 
 static int path_is_brute(const char *path, size_t len)
@@ -650,7 +754,11 @@ static int ua_is_tool(const char *ua, size_t len)
 {
     if (len == 0) return 0;
     if (len < 5) return 1;                     /* UA sangat pendek = bukan browser */
-    return in_list(UA_TOOL, ua, len);
+    /* Di mana saja dalam UA, bukan hanya awalan: "Mozilla/5.0 (... Nuclei)"
+     * dan "Mozilla/5.0 (compatible; GPTBot/1.0)" harus tetap tertangkap. */
+    for (int i = 0; UA_TOOL[i]; i++)
+        if (memmem(ua, len, UA_TOOL[i], strlen(UA_TOOL[i]))) return 1;
+    return 0;
 }
 
 /* ------------------------------------------------------------------ *
@@ -670,6 +778,9 @@ typedef struct ip_ent {
     uint64_t bytes;
     uint16_t s2, s3, s4, s5, s429;
     uint16_t scan, brute, badua, e404, distinct;
+    uint8_t  learn_n;                 /* kecocokan pelajaran blokir dalam jendela 60 detik */
+    uint8_t  reviewed;                /* sudah masuk antrean review; jangan kueri ulang tiap detak */
+    uint32_t learn_ts;                /* kecocokan terakhir; jendela dihitung dari sini */
     uint8_t  path_hash[MAX_DISTINCT_PATHS];
     uint8_t  npath;
     uint8_t  level;
@@ -736,6 +847,8 @@ static uint64_t g_stat_lines = 0;
 static uint64_t g_stat_dropped_cap = 0;  /* line dilewati karena pagu tick */
 static uint64_t g_stat_bans_total = 0;
 static uint64_t g_stat_throttles_total = 0;
+static uint64_t g_stat_long_lines = 0;    /* baris > SENT_LINE_MAX: kepala dinilai */
+static int      g_line_truncated = 0;     /* baris yang sedang diproses terpotong */
 
 /* daftar ban */
 typedef struct {
@@ -845,6 +958,20 @@ static int ip_evict_one(uint32_t now)
     }
     if (best) { ip_unlink_bucket(best->ip); return 1; }
 
+    /* Lapis 3: tabel penuh oleh IP berlevel (mis. ribuan IP yang sengaja
+     * menyentuh ambang WATCH). Entri yang sudah diam >= 10 menit dan tidak
+     * punya ban aktif boleh digusur; tanpa ini IP baru tidak pernah
+     * dinilai sama sekali. */
+    best = NULL;
+    scanned = 0;
+    for (ip_ent *e = g_lru_head; e && scanned < 4096; e = e->lru_next, scanned++) {
+        if ((uint32_t)(now - e->last_seen) < 600) continue;
+        ban_t *b = ban_find(e->ip);
+        if (b && b->until >= (time_t)now) continue;
+        if (!best || e->last_seen < best->last_seen) best = e;
+    }
+    if (best) { ip_unlink_bucket(best->ip); return 1; }
+
     return 0;
 }
 
@@ -892,8 +1019,9 @@ typedef struct {
      * sisanya dibaca lagi sebagai "baris baru" pada siklus berikutnya.
      * Gejalanya: jumlah baris terproses melebihi jumlah baris sebenarnya
      * dan ribuan parse gagal palsu. */
-    char     carry[SENT_LINE_MAX];
+    char     carry[SENT_LINE_MAX + 1];
     size_t   carry_len;
+    int      skip_nl;       /* sedang membuang ekor baris kepanjangan */
 } tailer_t;
 
 static tailer_t g_tail[MAX_TAILERS];
@@ -1225,7 +1353,7 @@ static int path_unlisted(const char *p, size_t n)
     static const char *OKP[] = {
         "/favicon.ico", "/robots.txt", "/sitemap", "/app-ads.txt", "/ads.txt",
         "/apple-touch-icon", "/manifest.json", "/service-worker", "/sw.js",
-        "/health", "/ping", "/pong", "/up", "/readyz", "/livez",
+        "/health", "/ping", "/pong", "/up/", "/readyz", "/livez",
         "/uploads/", "/assets/", "/storage/", "/images/", "/img/", "/css/",
         "/js/", "/fonts/", "/media/", "/uploads", "/assets", "/api/pong",
         NULL
@@ -1307,7 +1435,7 @@ static int parse_line(const char *s, size_t len, parsed_t *r)
     r->ua = "";
     r->ua_len = 0;
     const char *lastq = NULL;
-    for (const char *q = end; q > s; q--) {
+    for (const char *q = end - 1; q > s; q--) {
         if (*q == '"') { lastq = q; break; }
     }
     if (lastq && lastq > s) {
@@ -1323,7 +1451,7 @@ static int parse_line(const char *s, size_t len, parsed_t *r)
     return 1;
 }
 
-static int g_ua_lower_buf[256];
+static char g_ua_lower_buf[256];
 
 static int ua_is_tool_copy(const char *ua, size_t n)
 {
@@ -1619,6 +1747,12 @@ static void aksi_catat(uint32_t ip, const char *aksi, const char *sumber,
     sqlite3_bind_int64(st, 6, (sqlite3_int64)detik);
     if (sqlite3_step(st) != SQLITE_DONE) saverr(g_db, "aksi insert");
     sqlite3_finalize(st);
+}
+
+/* Entri g_ban dipakai juga untuk throttle (alasan tetap di bawah). */
+static int ban_is_throttle(const ban_t *b)
+{
+    return b && !strcmp(b->reason, "batas-laju-5rps");
 }
 
 static void ban_remove_src(uint32_t ip, int permanent,
@@ -1944,6 +2078,13 @@ static void db_prune(void)
         { "DELETE FROM minute WHERE ts < ?1", t - 30 * 86400 },
         { "DELETE FROM ip_minute WHERE ts < ?1", t - 3 * 86400 },
         { "DELETE FROM bans WHERE until < ?1 AND until > 0", t - 30 * 86400 },
+        /* Dulu lima tabel ini tumbuh tanpa batas. */
+        { "DELETE FROM aksi WHERE ts < ?1", t - 90 * 86400 },
+        { "DELETE FROM notif WHERE ts < ?1 AND terkirim <> 0", t - 30 * 86400 },
+        { "DELETE FROM notif WHERE ts < ?1", t - 90 * 86400 },
+        { "DELETE FROM review WHERE ts < ?1 AND status <> 'tunggu'", t - 30 * 86400 },
+        { "DELETE FROM verdict WHERE last_kill < ?1", t - 30 * 86400 },
+        { "DELETE FROM watch WHERE ts < ?1", t - 30 * 86400 },
     };
     for (size_t i = 0; i < sizeof(jobs) / sizeof(jobs[0]); i++) {
         st = NULL;
@@ -2174,6 +2315,11 @@ static void ctl_reply(int fd, const char *msg)
     (void)w;
 }
 
+/* Keadaan modul pelajaran (definisi lengkap ada di bagian PELAJARAN). */
+static int      g_les_n = 0, g_les_block = 0, g_les_allow = 0;
+static uint64_t g_stat_learn_bans = 0;
+static void learn_load(const char *path);
+
 static void handle_ctl(int cfd)
 {
     char buf[512];
@@ -2217,6 +2363,9 @@ static void handle_ctl(int cfd)
         verdict_bump(ip, t);
         /* paksa = 1: perintah operator berlaku juga saat enforce = 0 */
         ipset_add_ex("sentinel_ban", ip, d, 1);
+        /* Disetujui dari antrean review: keluarkan dari set review supaya
+         * penanda review tidak lagi dianggap "menunggu". */
+        ipset_del("sentinel_review", ip);
         g_stat_bans_total++;
         aksi_catat(ip, "ban", "panel", "diblokir manual dari panel", d);
         char b[32]; u2ip(ip, b, sizeof(b));
@@ -2272,6 +2421,17 @@ static void handle_ctl(int cfd)
         return;
     }
 
+    if (!strcmp(cmd, "learnload")) {
+        learn_load(cfg.learn_file);
+        char lb[160];
+        snprintf(lb, sizeof(lb),
+                 "{\"ok\":true,\"lessons\":%d,\"block\":%d,\"allow\":%d,\"bans\":%llu}",
+                 g_les_n, g_les_block, g_les_allow,
+                 (unsigned long long)g_stat_learn_bans);
+        ctl_reply(cfd, lb);
+        return;
+    }
+
     if (!strcmp(cmd, "rescan")) { g_rescan = 1; ctl_reply(cfd, "{\"ok\":true}"); return; }
     if (!strcmp(cmd, "flush"))   { db_flush(); min_roll(t); write_status(t); ctl_reply(cfd, "{\"ok\":true}"); return; }
     if (!strcmp(cmd, "stop"))    { g_stop = 1; ctl_reply(cfd, "{\"ok\":true}"); return; }
@@ -2315,12 +2475,189 @@ static void on_hup(int s)  { (void)s; g_rescan = 1; }
  * ------------------------------------------------------------------ */
 static char g_readbuf[SENT_READ_CHUNK];
 
+/* ------------------------------------------------------------------ *
+ * PELAJARAN DARI KEPUTUSAN OPERATOR
+ * ------------------------------------------------------------------ *
+ * Saat operator menekan Blokir atau Izinkan pada Event Feed, panel
+ * menurunkan satu pola (path dan/atau user-agent) dari kejadian itu dan
+ * menuliskannya ke learned.tsv. Daemon hanya MEMBACA berkas ini; seluruh
+ * siklus hidup pelajaran (membuat, menggabungkan, mencabut) ada di panel.
+ *
+ *   B  pelajaran blokir: kecocokan memblokir IP pengirimnya, tanpa
+ *      menunggu skor mencapai ambang. Hanya berlaku untuk permintaan
+ *      yang dijawab 4xx (server menolaknya = tanda meraba-raba), supaya
+ *      pengunjung sah yang kebetulan memakai path/UA yang sama tidak
+ *      kena.
+ *   A  pelajaran izinkan: permintaan yang cocok tidak dihitung sebagai
+ *      scanner/enumerasi (path) atau UA alat (user-agent). Tidak pernah
+ *      menjadikan IP kebal; itu urusan allowlist.
+ *
+ * Bila pelajaran izinkan dan blokir sama-sama cocok, izinkan menang.
+ * Pelajaran blokir juga mengikuti enforce: saat enforce = 0 kecocokan
+ * masuk antrian review, bukan ipset.
+ *
+ * Format satu baris (dipisah TAB): id aksi kategori path ua
+ * path/ua kosong ditulis "-". Baris tidak valid dilewati satu per satu.
+ */
+#define MAX_LESSONS 512
+typedef struct {
+    char     id[12];
+    char     aksi;            /* 'B' atau 'A' */
+    uint8_t  kind;
+    uint8_t  need;            /* kecocokan sebelum IP diblokir */
+    char     path[192];
+    size_t   plen;
+    char     ua[48];
+    size_t   ulen;
+} lesson_t;
+
+static lesson_t g_les[MAX_LESSONS];
+
+static uint8_t kind_from_name(const char *s)
+{
+    for (int i = 1; i < 7; i++)
+        if (!strcmp(KIND_NAME[i], s)) return (uint8_t)i;
+    return K_MIXED;
+}
+
+/* path tanpa query/fragmen, huruf kecil, tanpa garis miring penutup */
+static size_t norm_path(const char *p, size_t n, char *out, size_t cap)
+{
+    size_t o = 0;
+    for (size_t i = 0; i < n && o + 1 < cap; i++) {
+        char c = p[i];
+        if (c == '?' || c == '#') break;
+        out[o++] = (char)tolower((unsigned char)c);
+    }
+    while (o > 1 && out[o - 1] == '/') o--;
+    out[o] = '\0';
+    return o;
+}
+
+static void learn_load(const char *path)
+{
+    static lesson_t tmp[MAX_LESSONS];
+    int n = 0, nb = 0, na = 0, skipped = 0;
+    FILE *f = fopen(path, "re");
+    char line[640];
+
+    if (!f) {
+        if (errno != ENOENT) logmsg("pelajaran: %s tidak terbaca (%s)", path, strerror(errno));
+        n = 0;
+    }
+    while (f && fgets(line, sizeof(line), f)) {
+        char *fld[5] = { NULL, NULL, NULL, NULL, NULL };
+        size_t l = strlen(line);
+        while (l > 0 && (line[l - 1] == '\n' || line[l - 1] == '\r')) line[--l] = '\0';
+        if (!l || line[0] == '#') continue;
+        int nf = 0;
+        char *q = line;
+        fld[nf++] = q;
+        while (*q && nf < 5) {
+            if (*q == '\t') { *q = '\0'; fld[nf++] = q + 1; }
+            q++;
+        }
+        if (nf < 5) { skipped++; continue; }
+        if (n >= MAX_LESSONS) { skipped++; continue; }
+
+        lesson_t *L = &tmp[n];
+        memset(L, 0, sizeof(*L));
+        size_t il = strlen(fld[0]);
+        int ok = il >= 4 && il < sizeof(L->id);
+        for (size_t i = 0; ok && i < il; i++)
+            if (!isxdigit((unsigned char)fld[0][i])) ok = 0;
+        if (!ok) { skipped++; continue; }
+        snprintf(L->id, sizeof(L->id), "%s", fld[0]);
+        if (fld[1][0] != 'B' && fld[1][0] != 'A') { skipped++; continue; }
+        L->aksi = fld[1][0];
+        L->kind = kind_from_name(fld[2]);
+
+        if (strcmp(fld[3], "-")) {
+            size_t pl = strlen(fld[3]);
+            if (fld[3][0] != '/' || pl > sizeof(L->path) - 1) { skipped++; continue; }
+            for (size_t i = 0; i < pl; i++) {
+                unsigned char c = (unsigned char)fld[3][i];
+                if (c < 0x21 || c == 0x7f) { ok = 0; break; }
+                L->path[i] = (char)tolower(c);
+            }
+            if (!ok) { skipped++; continue; }
+            L->plen = pl;
+        }
+        if (strcmp(fld[4], "-")) {
+            size_t ul = strlen(fld[4]);
+            if (ul < 4 || ul > sizeof(L->ua) - 1) { skipped++; continue; }
+            for (size_t i = 0; i < ul; i++) {
+                unsigned char c = (unsigned char)fld[4][i];
+                if (c < 0x20 || c == 0x7f) { ok = 0; break; }
+                L->ua[i] = (char)tolower(c);
+            }
+            if (!ok) { skipped++; continue; }
+            L->ulen = ul;
+        }
+        /* Tanpa pola tidak ada yang bisa dicocokkan. Pelajaran blokir
+         * pada path "/" akan memblokir pengunjung biasa, jadi ditolak. */
+        if (!L->plen && !L->ulen) { skipped++; continue; }
+        if (L->aksi == 'B' && L->plen == 1 && !L->ulen) { skipped++; continue; }
+        L->need = (uint8_t)((L->plen && L->ulen) ? cfg.learn_hits_both
+                            : (L->plen ? cfg.learn_hits_path : cfg.learn_hits_ua));
+        if (L->aksi == 'B') nb++; else na++;
+        n++;
+    }
+    if (f) fclose(f);
+    memcpy(g_les, tmp, sizeof(lesson_t) * (size_t)n);
+    g_les_n = n; g_les_block = nb; g_les_allow = na;
+    if (n || skipped)
+        logmsg("pelajaran: %d dimuat (%d blokir, %d izinkan), %d baris dilewati",
+               n, nb, na, skipped);
+}
+
+typedef struct { int skip_path, skip_ua, skip_distinct, block_idx; } learn_res_t;
+
+static void learn_match(const parsed_t *r, learn_res_t *out)
+{
+    out->skip_path = out->skip_ua = out->skip_distinct = 0;
+    out->block_idx = -1;
+    if (!g_les_n) return;
+
+    char np[256];
+    size_t nl = norm_path(r->path, r->path_len, np, sizeof(np));
+    char lu[160];
+    size_t un = r->ua_len > sizeof(lu) - 1 ? sizeof(lu) - 1 : r->ua_len;
+    for (size_t i = 0; i < un; i++) lu[i] = (char)tolower((unsigned char)r->ua[i]);
+    int probing = (r->status >= 400 && r->status < 500);
+    int best = -1;
+    uint8_t best_need = 255;
+
+    for (int i = 0; i < g_les_n; i++) {
+        const lesson_t *L = &g_les[i];
+        if (L->plen && (nl != L->plen || memcmp(np, L->path, nl))) continue;
+        if (L->ulen && !memmem(lu, un, L->ua, L->ulen)) continue;
+        if (L->aksi == 'A') {
+            /* Izin berbasis klien (UA saja) hanya menghapus penilaian
+             * UA alat dan enumerasi path (perilaku perayap sah). Pola
+             * scanner dan brute force tetap dihitung, supaya UA yang
+             * ditiru penyerang tidak menjadi jalan pintas. */
+            if (L->plen) out->skip_path = 1;
+            if (L->ulen) { out->skip_ua = 1; if (!L->plen) out->skip_distinct = 1; }
+        } else if (probing && L->need < best_need) {
+            best = i; best_need = L->need;
+        }
+    }
+    out->block_idx = (out->skip_path || out->skip_ua || out->skip_distinct) ? -1 : best;
+}
+
+static void learn_ban(ip_ent *e, const lesson_t *L, const char *host,
+                      const char *path, size_t plen, const char *ua,
+                      size_t ulen, time_t now);
+
 static void process_line(tailer_t *t, const char *s, size_t len, time_t now);
 
 static void process_line(tailer_t *t, const char *s, size_t len, time_t now)
 {
     parsed_t r;
     if (!parse_line(s, len, &r)) { g_stat_parse_fail++; return; }
+    /* Kepala baris kepanjangan: kutipan terakhir bukan UA, jangan dinilai. */
+    if (g_line_truncated) { r.ua = ""; r.ua_len = 0; }
 
     if (r.ip == 0) return;
 
@@ -2380,11 +2717,15 @@ static void process_line(tailer_t *t, const char *s, size_t len, time_t now)
     else                                         { g_cur.s5++; if (hi>=0) g_host[hi].s5++; e->s5++; }
     if (r.status == 429) { g_cur.s429++; if (hi>=0) g_host[hi].s429++; e->s429++; }
 
+    /* --- pelajaran dari keputusan operator --- */
+    learn_res_t lr;
+    learn_match(&r, &lr);
+
     /* --- klasifikasi --- */
     if (r.status == 404 || r.status == 400 || r.status == 401 ||
         r.status == 403 || r.status == 429 || r.status == 499) {
         if (e->e404 < 65535) e->e404++;
-        if (path_unlisted(r.path, r.path_len)) {
+        if (!lr.skip_path && !lr.skip_distinct && path_unlisted(r.path, r.path_len)) {
             /* path berbeda dari yang sudah tercatat -> indikasi enumerasi */
             uint8_t h = (uint8_t)(fnv1a(r.path, r.path_len) & 0xff);
             int seen = 0;
@@ -2396,16 +2737,37 @@ static void process_line(tailer_t *t, const char *s, size_t len, time_t now)
         }
     }
 
-    if (path_is_scanner(r.path, r.path_len)) {
+    char np[256];
+    size_t npl = path_norm(r.path, r.path_len, np, sizeof(np));
+    /* Scanner dihitung hanya bila server MENOLAK (4xx), kecuali dotfile/
+     * berkas rahasia yang tidak pernah diminta pengunjung sah. Dulu semua
+     * status dihitung, termasuk aset 200 di jalur yang mirip. */
+    if (!lr.skip_path && path_is_scanner(np, npl)
+        && ((r.status >= 400 && r.status < 500) || memmem(np, npl, "/.", 2))) {
         if (e->scan < 65535) e->scan++;
     }
-    if (path_is_brute(r.path, r.path_len) &&
+    if (!lr.skip_path && path_is_brute(np, npl) &&
         (r.status == 401 || r.status == 403 || r.status == 429 ||
-         r.status == 400 || r.status == 404 || r.status == 499)) {
+         r.status == 400 || r.status == 404 || r.status == 499 ||
+         /* login WordPress gagal menjawab 200; POST ke sana selalu dihitung */
+         (!strcmp(r.method, "POST") && !strncmp(np, "/wp-login", 9)))) {
         if (e->brute < 65535) e->brute++;
     }
-    if (ua_is_tool_copy(r.ua, r.ua_len)) {
+    if (!lr.skip_ua && ua_is_tool_copy(r.ua, r.ua_len)) {
         if (e->badua < 65535) e->badua++;
+    }
+
+    /* Kecocokan pelajaran blokir dihitung dalam jendela 60 detik; begitu
+     * cukup, IP diblokir seketika (tidak menunggu sweep berikutnya). */
+    if (lr.block_idx >= 0 && !is_allowed(r.ip) && r.ip != g_self_ip) {
+        const lesson_t *L = &g_les[lr.block_idx];
+        if ((uint32_t)now - e->learn_ts > 60) e->learn_n = 0;
+        e->learn_ts = (uint32_t)now;
+        if (e->learn_n < 255) e->learn_n++;
+        if (e->learn_n >= L->need) {
+            learn_ban(e, L, t->host, r.path, r.path_len, r.ua, r.ua_len, now);
+            e->learn_n = 0;
+        }
     }
 
     /* --- ip_minute --- */
@@ -2588,13 +2950,55 @@ static void review_tambah(uint32_t ip, uint32_t skor, const char *alasan)
            b, skor, alasan ? alasan : "-");
 }
 
+/* Eksekusi satu pelajaran blokir. Jalurnya sama dengan ban otomatis di
+ * sweep(): enforce = 1 memasang ban, enforce = 0 hanya mengantrekan
+ * review. Alasan selalu diawali "dipelajari:<id>" supaya panel dapat
+ * menghitung berapa kali sebuah pelajaran bekerja. */
+static void learn_ban(ip_ent *e, const lesson_t *L, const char *host,
+                      const char *path, size_t plen, const char *ua,
+                      size_t ulen, time_t now)
+{
+    char reason[140];
+    char b[32];
+    u2ip(e->ip, b, sizeof(b));
+    snprintf(reason, sizeof(reason), "dipelajari:%s kategori=%s", L->id,
+             KIND_NAME[L->kind]);
+
+    if (cfg.enforce) {
+        ban_t *ex = ban_find(e->ip);
+        if (ex && ex->until >= now && !ban_is_throttle(ex)) return;
+        uint32_t secs = ban_secs_for(e->ip, now);
+        ban_upsert(e->ip, L->kind, (uint32_t)cfg.ban_score, reason, now, secs);
+        verdict_bump(e->ip, now);
+        ipset_add("sentinel_ban", e->ip, secs);
+        g_stat_bans_total++;
+        g_stat_learn_bans++;
+        aksi_catat(e->ip, "ban", "belajar", reason, secs);
+        notif_ban(e->ip, secs, reason);
+        ev_push((uint32_t)now, e->ip, (uint16_t)cfg.ban_score, LVL_BAN, L->kind,
+                host, path, plen, ua, ulen);
+        e->level = LVL_BAN;
+        e->score = 0;
+        e->scan = e->brute = e->badua = e->distinct = e->e404 = 0;
+        logmsg("BAN-BELAJAR %s -> %u detik | %s", b, secs, reason);
+    } else {
+        if (review_punya(e->ip)) return;
+        review_tambah(e->ip, (uint32_t)cfg.ban_score, reason);
+        aksi_catat(e->ip, "belajar", "belajar", reason, 0);
+        g_stat_learn_bans++;
+        ev_push((uint32_t)now, e->ip, (uint16_t)cfg.ban_score, LVL_WATCH, L->kind,
+                host, path, plen, ua, ulen);
+        e->level = LVL_WATCH;
+    }
+}
+
 static void sweep(time_t now)
 {
     /* redam penghitung berkala: setengah setiap 15 detik supaya IP yang
      * sudah berhenti langsung kehilangan skor tanpa perlu dihapus dari tabel */
     static time_t last_decay = 0;
-    if (now - last_decay >= 15) {
-        int steps = (int)((now - last_decay) / 15);
+    if (now - last_decay >= cfg.decay_seconds) {
+        int steps = (int)((now - last_decay) / cfg.decay_seconds);
         if (steps < 1) steps = 1;
         if (steps > 10) steps = 10;
         for (int b = 0; b < IP_BUCKETS; b++) {
@@ -2604,6 +3008,7 @@ static void sweep(time_t now)
                     e->scan >>= 1; e->brute >>= 1; e->badua >>= 1;
                     e->distinct >>= 1; e->e404 >>= 1;
                 }
+                e->npath = 0;
                 e->score = 0;
             }
         }
@@ -2622,8 +3027,32 @@ static void sweep(time_t now)
                 if (slot_now - e->slot_ts[i] < RATE_SLOTS) e->req_window += e->slot_cnt[i];
 
             e->score = (uint16_t)score_of(e);
-            if (e->score > e->peak) e->peak = e->score;
             uint8_t kind = kind_of(e);
+
+            /* FLOOD per IP. Dulu laju hanya membuat event dan tidak pernah
+             * menambah skor: 200 permintaan/detik "GET /" tetap skor 0.
+             * Batas dihitung dari jendela 64 detik (rata-rata), jadi
+             * lonjakan sesaat halaman berat tidak terkena. 0 = mati. */
+            if (cfg.flood_ban_req > 0 && e->req_window >= (uint32_t)cfg.flood_ban_req) {
+                e->score += (uint32_t)cfg.ban_score;
+                kind = K_FLOOD;
+            } else if (cfg.flood_throttle_req > 0
+                       && e->req_window >= (uint32_t)cfg.flood_throttle_req) {
+                e->score += (uint32_t)cfg.throttle_score;
+                if (kind == K_NONE) kind = K_FLOOD;
+            }
+            if (e->score > 60000) e->score = 60000;
+            if (e->score > e->peak) e->peak = e->score;
+
+            /* Level turun lagi begitu skor reda dan tidak ada ban/throttle
+             * yang masih berlaku. Dulu level hanya pernah naik: IP yang
+             * pernah WATCH tidak bisa digusur dari tabel (penyerang bisa
+             * memenuhinya dan membutakan daemon) dan IP yang pernah di-
+             * throttle tidak pernah di-throttle lagi. */
+            if (e->score < (uint32_t)cfg.watch_score && e->level != LVL_NORMAL) {
+                ban_t *bx = ban_find(e->ip);
+                if (!bx || bx->until < now) { e->level = LVL_NORMAL; e->reviewed = 0; }
+            }
 
             /* rps Detik */
             uint32_t rps = e->slot_cnt[cur_slot] / RATE_SLOT_SEC;
@@ -2661,7 +3090,7 @@ static void sweep(time_t now)
                 e->level = LVL_NORMAL;
             } else if (cfg.review_score > 0
                        && e->score >= (uint32_t)cfg.review_score
-                       && !cfg.enforce) {
+                       && !cfg.enforce && !e->reviewed) {
                 /* Hanya saat pemblokiran otomatis dimatikan. Kalau
                    enforce = 1, ambang ban sudah lebih tinggi dan
                    antrian hanya menambah langkah yang tidak perlu. */
@@ -2671,9 +3100,12 @@ static void sweep(time_t now)
                          e->score, KIND_NAME[kind], rps, e->req_window, e->s4);
                 review_tambah(e->ip, e->score, alasan);
                 e->level = LVL_WATCH;
+                e->reviewed = 1;
             } else if (cfg.enforce && e->score >= (uint32_t)cfg.ban_score) {
                 ban_t *ex = ban_find(e->ip);
-                if (!ex || ex->until < now) {
+                /* Throttle yang masih berlaku TIDAK boleh menahan ban: dulu
+                 * IP yang sudah di-throttle kebal ban selama 30 menit. */
+                if (!ex || ex->until < now || ban_is_throttle(ex)) {
                     uint32_t secs = ban_secs_for(e->ip, now);
                     char reason[140];
                     snprintf(reason, sizeof(reason),
@@ -2682,6 +3114,7 @@ static void sweep(time_t now)
                     ban_upsert(e->ip, kind, e->score, reason, now, secs);
                     verdict_bump(e->ip, now);
                     ipset_add("sentinel_ban", e->ip, secs);
+                    ipset_del("sentinel_throttle", e->ip);
                     g_stat_bans_total++;
                     aksi_catat(e->ip, "ban", "auto", reason, secs);
                     notif_ban(e->ip, secs, reason);
@@ -2785,6 +3218,7 @@ int main(int argc, char **argv)
     g_buckets = xcalloc(IP_BUCKETS, sizeof(ip_ent *));
     allow_init();
     allow_load_file(cfg.allow_file);
+    learn_load(cfg.learn_file);
 
     /* alamat publik utama dipakai untuk menandai request dari diri sendiri */
     g_self_ip = 0;
@@ -2831,6 +3265,9 @@ int main(int argc, char **argv)
     /* Pastikan set ipset siap sebelumapa pun dipakai. */
     ipset_ensure("sentinel_ban", (uint32_t)cfg.win_ban);
     ipset_ensure("sentinel_throttle", (uint32_t)(cfg.win_ban / 2));
+    /* Set review juga dipastikan ada: tanpa set ini penanda review gagal
+     * diam-diam bila daemon mulai sebelum sentinel-fw.sh. */
+    ipset_ensure("sentinel_review", 43200);
 
     rediscover();
 
@@ -2889,6 +3326,7 @@ int main(int argc, char **argv)
              * yang ditambahkan lewat panel langsung berlaku tanpa
              * perlu me-restart daemon. */
             allow_load_file(cfg.allow_file);
+            learn_load(cfg.learn_file);
             /* Cabut juga dari ipset. Aturan iptables whitelist baru
              * dipasang ulang oleh sentinel-fw.timer (tiap 5 menit),
              * jadi tanpa langkah ini IP yang baru di-whitelist tetap
@@ -2976,29 +3414,51 @@ int main(int argc, char **argv)
                 t->off += n;
                 bytes += n;
 
-                /* Sisa baris sebelumnya sudah tidak mungkin dilengkapi
-                 * dalam satu baris log yang wajar: buang, hitung sekali
-                 * sebagai baris rusak, lalu mulai baris baru. */
-                if (t->carry_len + (size_t)n > SENT_LINE_MAX) {
-                    g_stat_parse_fail++;
-                    t->carry_len = 0;
-                }
-                memcpy(t->carry + t->carry_len, g_readbuf, (size_t)n);
-                size_t len = t->carry_len + (size_t)n;
+                /* Baris yang lebih panjang dari SENT_LINE_MAX (Referer atau
+                 * UA raksasa, sepenuhnya dikendalikan klien) dulu dibuang
+                 * utuh, sehingga penyerang cukup menambah header 4 KB untuk
+                 * tidak pernah dinilai. Sekarang KEPALA baris (IP, request,
+                 * status ada di awal) tetap dinilai dan ekornya dilewati
+                 * sampai baris baru. */
+                size_t off = 0;
+                while (off < (size_t)n) {
+                    if (t->skip_nl) {
+                        char *nl = memchr(g_readbuf + off, '\n', (size_t)n - off);
+                        if (!nl) { off = (size_t)n; break; }
+                        off = (size_t)(nl - g_readbuf) + 1;
+                        t->skip_nl = 0;
+                        continue;
+                    }
+                    size_t room = SENT_LINE_MAX - t->carry_len;
+                    size_t take = (size_t)n - off < room ? (size_t)n - off : room;
+                    memcpy(t->carry + t->carry_len, g_readbuf + off, take);
+                    off += take;
+                    size_t len = t->carry_len + take;
 
-                /* Pisahkan baris lengkap; sisanya ditahan. */
-                size_t cur = 0;
-                for (;;) {
-                    char *nl = memchr(t->carry + cur, '\n', len - cur);
-                    if (!nl) break;
-                    size_t llen = (size_t)(nl - (t->carry + cur));
-                    if (llen > 0) process_line(t, t->carry + cur, llen, now);
-                    lines++; lines_file++;
-                    cur += llen + 1;
+                    /* Pisahkan baris lengkap; sisanya ditahan. */
+                    size_t cur = 0;
+                    for (;;) {
+                        char *nl = memchr(t->carry + cur, '\n', len - cur);
+                        if (!nl) break;
+                        size_t llen = (size_t)(nl - (t->carry + cur));
+                        if (llen > 0) process_line(t, t->carry + cur, llen, now);
+                        lines++; lines_file++;
+                        cur += llen + 1;
+                    }
+                    t->carry_len = len - cur;
+                    if (t->carry_len)
+                        memmove(t->carry, t->carry + cur, t->carry_len);
+                    if (t->carry_len == SENT_LINE_MAX) {
+                        t->carry[SENT_LINE_MAX] = '\0';
+                        g_line_truncated = 1;
+                        process_line(t, t->carry, SENT_LINE_MAX, now);
+                        g_line_truncated = 0;
+                        g_stat_long_lines++;
+                        lines++; lines_file++;
+                        t->carry_len = 0;
+                        t->skip_nl = 1;
+                    }
                 }
-                t->carry_len = len - cur;
-                if (t->carry_len)
-                    memmove(t->carry, t->carry + cur, t->carry_len);
                 if (lines >= cfg.max_lines_per_tick || bytes >= cfg.max_bytes_per_tick) {
                     capped = 1;
                     break;
