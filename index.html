@@ -159,13 +159,7 @@
 .sn-bar i{display:block;height:100%;border-radius:4px;background:linear-gradient(90deg, #10b981 0%, #00f0ff 100%);
   box-shadow:0 0 10px rgba(16,185,129,0.5);transition:width .4s ease}
 
-/* ---- DEFCON Banner CyberMatrix ---- */
-.sn-defcon-banner{border-radius:var(--radius);padding:14px 20px;display:flex;align-items:center;justify-content:space-between;gap:16px;box-shadow:var(--shadow);transition:var(--transition)}
-.sn-defcon-banner.defcon-1{background:linear-gradient(135deg, rgba(239,68,68,0.3) 0%, rgba(185,28,28,0.45) 100%);border:1px solid rgba(239,68,68,0.5);box-shadow:0 0 25px rgba(239,68,68,0.3);color:#fff}
-.sn-defcon-banner.defcon-2{background:linear-gradient(135deg, rgba(245,158,11,0.3) 0%, rgba(194,65,12,0.45) 100%);border:1px solid rgba(245,158,11,0.5);box-shadow:0 0 25px rgba(245,158,11,0.3);color:#fff}
-.sn-defcon-banner.defcon-3{background:linear-gradient(135deg, rgba(16,185,129,0.22) 0%, rgba(0,240,255,0.15) 100%);border:1px solid var(--border-accent);box-shadow:0 0 25px rgba(16,185,129,0.25);color:#fff}
-.sn-defcon-banner.defcon-4{background:linear-gradient(135deg, rgba(245,158,11,0.2) 0%, rgba(180,83,9,0.35) 100%);border:1px solid rgba(245,158,11,0.4);color:#fff}
-.sn-defcon-banner.defcon-5{background:linear-gradient(135deg, rgba(71,85,105,0.3) 0%, rgba(30,41,59,0.45) 100%);border:1px solid rgba(255,255,255,0.1);color:#fff}
+/* ---- DEFCON (lencana di kartu dan dialog) ---- */
 .sn-defcon-badge{font-family:var(--mono-font);font-size:14px;font-weight:800;letter-spacing:1.5px;padding:6px 14px;border-radius:6px;background:rgba(3,7,18,0.7);color:#fff;border:1px solid var(--border-accent);box-shadow:var(--accent-green-glow)}
 
 /* ---- Sub-Tab Dalam ---- */
@@ -189,6 +183,15 @@ table.sn-tb th.r,table.sn-tb td.r{text-align:right}
 .sn-mono{font-family:var(--mono-font);font-size:12px}
 .sn-clip{max-width:330px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .sn-ell{display:inline-block;max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}
+/* Event Feed: lebar kolom tetap kecuali URI dan User Agent yang berbagi sisa ruang
+   dan dipotong dengan elipsis, sehingga kolom Action (dua tombol) tidak pernah
+   terdorong keluar area tabel. Di layar sempit, pembungkus yang menggulir. */
+.sn-feedwrap{width:100%;overflow-x:auto}
+table.sn-tb.sn-feedtb{table-layout:fixed;min-width:1000px}
+table.sn-feedtb td,table.sn-feedtb th{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+table.sn-feedtb td.sn-clip{max-width:none}
+table.sn-feedtb .sn-ell{display:block;max-width:100%}
+table.sn-feedtb td.sn-act{overflow:visible}
 
 /* ---- Tombol (CyberMatrix Button System) ---- */
 button.sn-btn, input[type="button"].sn-btn, a.sn-btn, span.sn-btn, .sn-btn{
@@ -292,11 +295,31 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 .sn-note.warn{background:rgba(35,20,5,0.9);border-color:rgba(245,158,11,0.45);color:#fde68a}
 .sn-note.dgr{background:rgba(35,10,10,0.9);border-color:rgba(239,68,68,0.45);color:#fca5a5}
 .sn-grid2{display:flex;gap:14px;flex-wrap:wrap}
+.sn-tiles{display:grid;gap:10px}
+.sn-tiles2{grid-template-columns:repeat(2,minmax(0,1fr))}
+.sn-tiles4{grid-template-columns:repeat(4,minmax(0,1fr))}
+@media (max-width:640px){.sn-tiles4{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.sn-tile{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;padding:12px 10px;min-height:64px;border-radius:10px;cursor:pointer;text-align:center;
+  border:1px solid var(--border-subtle);background:rgba(255,255,255,0.03);color:var(--text-main);font-weight:600;transition:border-color .15s,background .15s,transform .1s}
+.sn-tile:hover{border-color:var(--accent-cyan);background:rgba(0,240,255,0.06)}
+.sn-tile:active{transform:scale(.98)}
+.sn-tile.on{border-color:#10b981;background:rgba(16,185,129,0.12);box-shadow:inset 0 0 0 1px #10b981}
+#tileBlock.on{border-color:#ef4444;background:rgba(239,68,68,0.10);box-shadow:inset 0 0 0 1px #ef4444}
+.sn-tile-ikon{font-size:20px;line-height:1}
+.sn-tile-judul{font-size:13px}
+.sn-tile-ket{font-size:11px;font-weight:400;color:var(--ink-2);line-height:1.35}
+button.sn-tile{font-size:13px}
 .sn-grid2>*{flex:1 1 440px;min-width:0}
 .sn-grid3{display:flex;gap:14px;flex-wrap:wrap}
+@keyframes snSwSlide{from{margin-left:0}to{margin-left:65%}}
+.sn-swrule{display:inline-block;margin:1px 3px 1px 0;padding:1px 6px;border-radius:3px;background:rgba(255,255,255,0.06);font-size:11px;font-family:var(--mono-font)}
 .sn-grid3>*{flex:1 1 300px;min-width:0}
 .sn-grid3>.sn-w2{flex:2 1 440px}
 .sn-donut{width:100%;height:300px}
+.sn-peta{width:100%;height:250px}
+.sn-peta-top{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;font-size:11.5px}
+.sn-peta-top span{background:rgba(255,255,255,0.04);border:1px solid var(--border-subtle);border-radius:6px;padding:2px 8px;color:var(--ink-2);white-space:nowrap}
+.sn-peta-top b{color:var(--text-main);font-family:var(--mono-font)}
 .sn-fl{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 .sn-empty{padding:26px;text-align:center;color:var(--text-dim);font-family:var(--mono-font);font-size:12.5px}
 .sn-chart{width:100%;height:300px}
@@ -365,7 +388,7 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 		<div class="sn-mhead">
 			<h2>
 				<div class="sn-brand">
-					<div class="sn-brand-icon" data-i18n-title="tip_brand_logo" title="ZySentinel CyberMatrix Defense Logo">
+					<div class="sn-brand-icon" data-i18n-title="tip_brand_logo" title="ZySentinel Cyber Defense">
 						<img src="/static/img/soft_ico/ico-sentinel.png?v=1.6.2" alt="ZySentinel" width="34" height="34" onerror="this.style.display='none';this.nextElementSibling.style.display='block';">
 						<svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none">
 							<path d="M12 2L3 7v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-9-5z"/>
@@ -398,6 +421,7 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 			<!-- STATUS BAR OPERASIONAL (BODY PANEL PALING ATAS) -->
 			<div class="sn-status-strip" id="snStatusStrip">
 				<div class="sn-status-list">
+					<span id="bMode" class="sn-badge sn-off" style="cursor:pointer;font-weight:700" onclick="snModeDetail()" data-i18n-title="tip_b_mode" title="Blocking mode of every defence layer (click for details)">🛡️ Mode: -</span>
 					<span id="bGuard" class="sn-badge sn-off" style="cursor:pointer" onclick="snClickGuardBadge()" data-i18n-title="tip_b_guard_inact" title="Daemon Guardd: Pemantau log akses & mitigasi anomali realtime (Klik untuk kelola layanan)">🛡️ Guardd: Inactive</span>
 					<span id="bAv" class="sn-badge sn-off" style="cursor:pointer" onclick="snTop('antivirus',$('.sn-mtabs span[onclick*=\'antivirus\']')[0])" data-i18n-title="tip_b_av" title="Antivirus ClamAV: Pemindaian streaming berkas & karantina malware">🦠 ClamAV: Inactive</span>
 					<span id="bFw" class="sn-badge sn-off" style="cursor:pointer" onclick="snTop('firewall',$('.sn-mtabs span[onclick*=\'firewall\']')[0])" data-i18n-title="tip_b_fw_inact" title="Kernel Firewall: Rantai iptables & ipset perlindungan paket jaringan">🔥 Firewall: Inactive</span>
@@ -425,20 +449,6 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 
 			<!-- ============================ DASHBOARD ============================ -->
 			<div class="sn-page on" id="top-dash">
-
-				<!-- DEFCON POSTURE BANNER -->
-				<div id="snDefconBanner" class="sn-defcon-banner defcon-3" style="margin-bottom:14px">
-					<div style="display:flex;align-items:center;gap:14px">
-						<div id="snDefconBadge" class="sn-defcon-badge">DEFCON 3</div>
-						<div>
-							<div id="snDefconTitle" style="font-size:15px;font-weight:700;color:#fff;letter-spacing:-.2px" data-i18n="defcon_loading_title">SECURITY POSTURE INITIALIZING...</div>
-							<div id="snDefconDesc" style="font-size:12.5px;color:rgba(255,255,255,.9);margin-top:2px" data-i18n="defcon_loading_desc">Connecting to kernel defense and runtime telemetry...</div>
-						</div>
-					</div>
-					<div style="text-align:right;flex:0 0 auto">
-						<span id="btnDefconRefresh" class="sn-btn" onclick="snDefconRefreshManual(this)" style="background:rgba(255,255,255,.2);color:#fff;border:1px solid rgba(255,255,255,.3)" data-i18n-title="tip_refresh" title="Refresh Security Posture & Defense Indicators"><i class="layui-icon layui-icon-refresh"></i> <span data-i18n="btn_refresh">Refresh</span></span>
-					</div>
-				</div>
 
 				<!-- TACTICAL DEFENSE CONTROLS (SAKELAR OPERASIONAL DEFENDER ELIT) -->
 				<div class="sn-card" style="margin-bottom:14px;padding:12px 18px">
@@ -497,8 +507,10 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 					</div>
 
 					<div class="sn-card">
-						<h3 data-i18n="sec_sys_info">System Information</h3>
-						<div class="sn-sys" id="snSys"></div>
+						<h3><span data-i18n="sec_attack_map">Attack Origin Map</span></h3>
+						<div id="petaKosong" class="sn-empty" style="display:none" data-i18n="peta_kosong">No attacks with a known origin in this timeframe.</div>
+						<div id="petaSerangan" class="sn-peta"></div>
+						<div id="petaTop" class="sn-peta-top"></div>
 					</div>
 				</div>
 
@@ -512,6 +524,7 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 						<span onclick="snSub('notif',this)" data-i18n="sub_notif" data-i18n-title="tip_sub_notif" title="Webhook Notification Settings & Alert Queue">Notifications</span>
 						<span onclick="snSub('geo',this)" data-i18n="sub_geo" data-i18n-title="tip_sub_geo" title="Attacker Origin Statistics by Country (GeoIP)">Origin</span>
 						<span onclick="snSub('feed',this)" data-i18n="sub_feed" data-i18n-title="tip_sub_feed" title="Real-Time Attack Event Stream">Event Feed</span>
+						<span onclick="snSub('learned',this)" data-i18n="sub_learned" data-i18n-title="tip_sub_learned" title="Rules the plugin learned from your Block/Allow decisions">Learned Rules</span>
 						<span onclick="snSub('aksi',this)" data-i18n="sub_aksi" data-i18n-title="tip_sub_aksi" title="System & Operator Action Audit Log">Action Log</span>
 						<span onclick="snSub('riwayat',this)" data-i18n="sub_riwayat" data-i18n-title="tip_sub_riwayat" title="Historical IP Reputation Score Tracking">IP Timeline</span>
 						<span onclick="snSub('log',this)" data-i18n="sub_log" data-i18n-title="tip_sub_log" title="Guardd Daemon Operational Log">Daemon Log</span>
@@ -715,8 +728,8 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 						<div class="sn-note" id="geoNote" style="display:none"></div>
 						<table class="sn-tb">
 							<thead><tr>
-								<th>Code</th><th>Country</th><th class="r">Attacker IPs</th>
-								<th class="r">Events</th><th class="r">Peak Score</th><th></th><th></th>
+								<th data-i18n="geo_th_code">Code</th><th data-i18n="geo_th_country">Country</th><th class="r" data-i18n="geo_th_ips">Attacker IPs</th>
+								<th class="r" data-i18n="geo_th_events">Events</th><th class="r" data-i18n="geo_th_peak">Peak Score</th><th></th><th></th>
 							</tr></thead>
 							<tbody id="tbGeo"><tr><td colspan="7" class="sn-empty">loading</td></tr></tbody>
 						</table>
@@ -776,13 +789,43 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 							<span class="sn-refresh" data-i18n="action_sub_title">Latest 300 events</span>
 							<span class="sn-btn" onclick="snFeed()" data-i18n="btn_refresh" data-i18n-title="tip_refresh_feed" title="Refresh Event Stream">Refresh</span>
 						</div>
-						<table class="sn-tb">
+						<div class="sn-feedwrap">
+						<table class="sn-tb sn-feedtb">
+							<colgroup>
+								<col style="width:140px"><col style="width:120px"><col style="width:72px"><col style="width:105px">
+								<col style="width:60px"><col style="width:130px"><col><col><col style="width:175px">
+							</colgroup>
 							<thead><tr>
 								<th>Time</th><th>IP Address</th><th>Level</th><th>Category</th>
 								<th class="r">Score</th><th>Site</th><th>URI</th><th>User Agent</th>
 								<th>Action</th>
 							</tr></thead>
 							<tbody id="tbFeed"><tr><td colspan="9" class="sn-empty">loading</td></tr></tbody>
+						</table>
+						</div>
+					</div>
+
+					<div class="sn-subpage" id="sub-learned">
+						<div class="sn-fl" style="margin-bottom:11px;justify-content:space-between;flex-wrap:wrap;gap:8px">
+							<span style="font-size:13px;color:var(--ink-2);max-width:760px" data-i18n="lrn_desc">When you press Block or Allow in Event Feed, the pattern of that event (URI and/or user agent) is remembered. A learned block rule blocks the same pattern at once (only for requests the server rejected with 4xx); a learned allow rule stops that client from being flagged as an enumerator. A rule stays until you revoke it, or until you unblock / remove from allow list the IP it came from.</span>
+							<span class="sn-fl">
+								<span class="sn-btn pri" onclick="snLearnedModal()" data-i18n="btn_lrn_add" data-i18n-title="tip_lrn_add" title="Add a learned rule manually">+ Add Rule</span>
+								<span class="sn-btn" id="btnLrnToggle" onclick="snLearnedToggle()" data-i18n-title="tip_lrn_toggle" title="Pause or resume applying learned rules"><span id="lrnToggleTxt">Pause learning</span></span>
+								<span class="sn-btn" onclick="snLearned(this)" data-i18n="btn_refresh" data-i18n-title="tip_refresh_lrn" title="Refresh learned rules">Refresh</span>
+							</span>
+						</div>
+						<div class="sn-note" id="lrnInfo" style="margin-bottom:11px;display:none"></div>
+						<table class="sn-tb">
+							<thead><tr>
+								<th style="width:90px" data-i18n="lrn_th_rule">Rule</th>
+								<th data-i18n="lrn_th_pattern">Pattern</th>
+								<th style="width:110px" data-i18n="th_category">Category</th>
+								<th data-i18n="lrn_th_source">Learned from</th>
+								<th style="width:135px" data-i18n="th_time">Time</th>
+								<th class="r" style="width:90px" data-i18n="lrn_th_hits">Applied</th>
+								<th style="width:90px" data-i18n="th_action">Action</th>
+							</tr></thead>
+							<tbody id="tbLearned"><tr><td colspan="7" class="sn-empty">loading</td></tr></tbody>
 						</table>
 					</div>
 
@@ -848,8 +891,9 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 						<span class="on" onclick="snAvSub('vhost',this)" data-i18n-title="tip_av_vhosts" title="Vhosts List &amp; Scan Status"><span data-i18n="av_sub_vhosts">Vhosts</span> (<b id="avVhostCount">0</b>)</span>
 						<span onclick="snAvSub('integ',this)" data-i18n-title="tip_av_integ" title="Web Code Integrity Monitor (Anti-Tamper)"><span data-i18n="av_sub_integ">Integrity Monitor</span> (<b id="avIntegCount">0</b>)</span>
 						<span onclick="snAvSub('quar',this)" data-i18n-title="tip_av_quar" title="Quarantined Files List"><span data-i18n="av_sub_quar">Quarantine</span> (<b id="avQuarCount">0</b>)</span>
-						<span onclick="snAvSub('live',this)" data-i18n="av_sub_live" data-i18n-title="tip_av_live" title="Realtime Scan Streaming Console">Realtime Console</span>
-						<span onclick="snAvSub('logs',this)" data-i18n="av_sub_logs" data-i18n-title="tip_av_logs" title="Historical Scan Logs">Scan Logs</span>
+						<span onclick="snAvSub('sweeper',this)" data-i18n-title="tip_av_sweeper" title="Webshell Sweeper (ShellSweep logic, native scanner)"><span data-i18n="av_sub_sweeper">Sweeper</span> (<b id="avSweepCount">0</b>)</span>
+						<span onclick="snAvSub('live',this)" data-i18n-title="tip_av_live" title="Realtime Scan Streaming Console"><span data-i18n="av_sub_live">Realtime Console</span></span>
+						<span onclick="snAvSub('logs',this)" data-i18n-title="tip_av_logs" title="Historical Scan Logs"><span data-i18n="av_sub_logs">Scan Logs</span></span>
 					</div>
 
 					<!-- Subpage 1: Vhosts Scan -->
@@ -923,6 +967,53 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 								<tr><td colspan="5" class="sn-empty">loading</td></tr>
 							</tbody>
 						</table>
+					</div>
+
+					<!-- Subpage: Sweeper (pemindai webshell) -->
+					<div class="sn-subpage" id="avsub-sweeper">
+						<div class="sn-fl" style="margin-bottom:11px;flex-wrap:wrap;gap:8px">
+							<span class="sn-refresh" data-i18n="sw_desc">Native webshell scanner (ShellSweep logic, calibrated to avoid false flags) for all vhosts and custom folders</span>
+							<span style="flex:1"></span>
+							<span id="swEngineBadge" class="sn-badge sn-off">-</span>
+							<span class="sn-btn pri" id="btnSwAll" onclick="snSwStart('vhosts','auto')" data-i18n="btn_sw_scan_all" data-i18n-title="tip_sw_scan_all" title="Scan all vhosts and custom folders; webshells are quarantined automatically">Scan All Vhosts</span>
+							<span class="sn-btn" id="btnSwReport" onclick="snSwStart('vhosts','report')" data-i18n="btn_sw_report" data-i18n-title="tip_sw_report" title="Scan and report only, quarantine nothing">Report Only</span>
+							<span class="sn-btn" id="btnSwPath" onclick="snSwStartPath()" data-i18n="btn_sw_path" data-i18n-title="tip_sw_path" title="Scan one folder (must be inside a vhost or custom folder)">Scan Folder...</span>
+							<span class="sn-btn dgr" id="swBtnAbort" style="display:none" onclick="snSwAbort()" data-i18n="btn_sw_abort" data-i18n-title="tip_sw_abort" title="Stop the running scan">Stop</span>
+							<span class="sn-btn" onclick="snSwConfig()" data-i18n="btn_sw_settings" data-i18n-title="tip_sw_settings" title="Sweeper settings: custom folders, exclusions, thresholds, schedule, allowlist">Settings</span>
+							<span class="sn-btn" id="btnSwRefresh" onclick="snSwMuat(this, true)" data-i18n-title="tip_sw_refresh" title="Refresh Sweeper status and findings"><i class="layui-icon layui-icon-refresh"></i> <span data-i18n="btn_refresh">Refresh</span></span>
+						</div>
+						<div class="sn-sys" id="swInfo"></div>
+						<div id="swProg" style="display:none;margin:10px 0">
+							<div style="height:8px;background:rgba(255,255,255,0.08);border-radius:4px;overflow:hidden"><div id="swProgBar" style="height:100%;width:35%;background:var(--accent-cyan,#00f0ff);animation:snSwSlide 1.4s ease-in-out infinite alternate"></div></div>
+							<div class="sn-mono" id="swProgTxt" style="font-size:11.5px;margin-top:4px;color:var(--muted);word-break:break-all"></div>
+						</div>
+						<div class="sn-fl" style="margin:12px 0 8px;gap:8px">
+							<select id="swFilter" class="sn-inp" onchange="snSwFindings()" style="width:230px">
+								<option value="open" data-i18n="sw_flt_open">Open findings</option>
+								<option value="webshell" data-i18n="sw_flt_web">Webshell (high confidence)</option>
+								<option value="suspicious" data-i18n="sw_flt_susp">Suspicious (review)</option>
+								<option value="quarantined" data-i18n="sw_flt_quar">Quarantined</option>
+								<option value="ignored" data-i18n="sw_flt_ign">Ignored</option>
+								<option value="" data-i18n="sw_flt_all">All</option>
+							</select>
+							<span class="sn-refresh" id="swLastTime"></span>
+						</div>
+						<table class="sn-tb">
+							<thead>
+								<tr>
+									<th style="width:110px" data-i18n="sw_th_level">Level</th>
+									<th data-i18n="sw_th_file">File</th>
+									<th class="r" style="width:60px" data-i18n="sw_th_score">Score</th>
+									<th data-i18n="sw_th_rules">Indicators</th>
+									<th class="r" style="width:70px" data-i18n="sw_th_entropy">Entropy</th>
+									<th class="r" style="width:210px" data-i18n="sw_th_action">Action</th>
+								</tr>
+							</thead>
+							<tbody id="tbSweep">
+								<tr><td colspan="6" class="sn-empty">loading</td></tr>
+							</tbody>
+						</table>
+						<div class="sn-note" style="margin-top:11px" data-i18n="sw_note">Webshell level (score 90+) is quarantined automatically (can be disabled in Settings) and appears in the Quarantine tab. Suspicious findings are never quarantined automatically: review them, then Quarantine, Mark as safe, or Ignore.</div>
 					</div>
 
 					<!-- Subpage 4: Realtime Console Tab -->
@@ -1349,6 +1440,55 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 					</div>
 
 					<div class="sn-subpage on" id="c-atur">
+						<!-- Paling atas: mode blokir dan layanan daemon sebagai kartu bertombol -->
+						<div class="sn-grid2" style="margin-bottom:14px">
+							<div class="sn-card" id="cardBlockMode" style="margin:0;border-left:4px solid #f59e0b;background:var(--bg-card)">
+								<div style="display:flex;align-items:center;gap:8px;font-weight:600;font-size:13.5px;color:var(--ink);margin-bottom:6px">
+									<span data-i18n="set_blocking_mode">Blocking Mode</span>
+									<span id="badgeEnforce" class="sn-badge sn-off" style="font-weight:700">-</span>
+								</div>
+								<div class="sn-note" style="margin:0 0 8px;font-size:12px" data-i18n="note_blocking_mode">
+							<b>Monitor only (enforce = 0)</b> means ZySentinel only counts and logs threats, never blocking anyone. Kernel throttle rules remain active, but no IPs are added to the ban set. Recommended for the first few days after installation. <b>Enable blocking (enforce = 1)</b> after reviewing blocked candidate IPs and verifying they are indeed malicious.
+						</div>
+								<div id="modeNow" class="sn-note" style="margin:0 0 10px;display:none"></div>
+								<div class="sn-tiles sn-tiles2">
+									<div class="sn-tile" id="tileMonitor" role="button" tabindex="0" onclick="snSetConf('enforce','0',this)" data-i18n-title="tip_mode_monitor_only" title="Switch Mode to Monitor: Log Without Blocking">
+										<div class="sn-tile-ikon">👁️</div>
+										<div class="sn-tile-judul" data-i18n="btn_monitor_only">Monitor Only</div>
+										<div class="sn-tile-ket" data-i18n="tile_monitor_desc">Log and count threats, never block (enforce = 0)</div>
+									</div>
+									<div class="sn-tile" id="tileBlock" role="button" tabindex="0" onclick="snSetConf('enforce','1',this)" data-i18n-title="tip_mode_enable_blocking" title="Switch Mode to Enforce: Block Violators in Kernel">
+										<div class="sn-tile-ikon">🛡️</div>
+										<div class="sn-tile-judul" data-i18n="btn_enable_blocking">Enable Blocking</div>
+										<div class="sn-tile-ket" data-i18n="tile_block_desc">Ban and throttle attackers in the kernel (enforce = 1)</div>
+									</div>
+								</div>
+							</div>
+							<div class="sn-card" id="cardDaemonSvc" style="margin:0;border-left:4px solid #10b981;background:var(--bg-card)">
+								<div style="display:flex;align-items:center;gap:8px;font-weight:600;font-size:13.5px;color:var(--ink);margin-bottom:6px;flex-wrap:wrap">
+									<span data-i18n="svc_guardd_title">ZySentinel Daemon (guardd)</span>
+									<span id="badgeGuarddSvc" class="sn-badge sn-ok" style="font-weight:700">RUNNING</span>
+									<span id="txtGuarddPid" class="sn-mono" style="font-size:11.5px;color:var(--ink-3)">PID: -</span>
+								</div>
+								<p style="font-size:12px;color:var(--ink-2);margin:0 0 10px;line-height:1.5" data-i18n="svc_guardd_desc">
+									Controls the core background monitoring daemon. Reload re-scans active vhost logs &amp; allowlists with zero downtime.
+								</p>
+								<div class="sn-tiles sn-tiles4">
+									<button id="btnSvcStart" class="sn-btn ok sn-tile" onclick="snSvc('start')" data-i18n="btn_start_svc" data-i18n-title="tip_start_svc" title="Start ZySentinel Daemon Service">
+										▶ Start
+									</button>
+									<button id="btnSvcStop" class="sn-btn dgr sn-tile" onclick="snSvc('stop')" data-i18n="btn_stop_svc" data-i18n-title="tip_stop_svc" title="Stop ZySentinel Daemon Service">
+										⏹ Stop
+									</button>
+									<button id="btnSvcRestart" class="sn-btn sn-tile" onclick="snSvc('restart')" data-i18n="btn_restart_svc" data-i18n-title="tip_restart_svc" title="Restart ZySentinel Daemon Service">
+										🔄 Restart
+									</button>
+									<button id="btnSvcReload" class="sn-btn pri sn-tile" onclick="snSvc('reload')" data-i18n="btn_reload_svc" data-i18n-title="tip_reload_svc" title="Reload Configuration &amp; Sites via SIGHUP (Zero Downtime)">
+										⚡ Reload
+									</button>
+								</div>
+							</div>
+						</div>
 						<div class="sn-note" data-i18n="note_threshold_calib">
 							The thresholds below are calibrated from this server's production traffic logs, not guessed. Changes are written to <span class="sn-mono">guardd.conf</span> then daemon is reloaded. <b>Notice the safety margin:</b> highest legitimate crawler score was 117, while verified attackers scored 153 to 240. The 150 ban threshold sits safely in between.
 						</div>
@@ -1362,45 +1502,6 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 								<table class="sn-tb" id="tbBobot"></table>
 							</div>
 						</div>
-						<div style="font-weight:600;margin:14px 0 7px" data-i18n="set_blocking_mode">Blocking Mode</div>
-						<div class="sn-note" data-i18n="note_blocking_mode">
-							<b>Monitor only (enforce = 0)</b> means ZySentinel only counts and logs threats, never blocking anyone. Kernel throttle rules remain active, but no IPs are added to the ban set. Recommended for the first few days after installation. <b>Enable blocking (enforce = 1)</b> after reviewing blocked candidate IPs and verifying they are indeed malicious.
-						</div>
-						<div class="sn-fl">
-							<span class="sn-btn pri" onclick="snSetConf('enforce','0',this)" data-i18n="btn_monitor_only" data-i18n-title="tip_mode_monitor_only" title="Switch Mode to Monitor: Log Without Blocking">Monitor Only</span>
-							<span class="sn-btn dgr" onclick="snSetConf('enforce','1',this)" data-i18n="btn_enable_blocking" data-i18n-title="tip_mode_enable_blocking" title="Switch Mode to Enforce: Block Violators in Kernel">Enable Blocking</span>
-						</div>
-
-						<div style="font-weight:600;margin:18px 0 7px" data-i18n="sec_service_ctrl">Daemon Service Lifecycle</div>
-						<div class="sn-card" style="margin-bottom:14px;border-left:4px solid #10b981;background:var(--bg-card)">
-							<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
-								<div style="flex:1;min-width:260px">
-									<div style="display:flex;align-items:center;gap:8px;font-weight:600;font-size:13.5px;color:var(--ink)">
-										<span data-i18n="svc_guardd_title">ZySentinel Daemon (guardd)</span>
-										<span id="badgeGuarddSvc" class="sn-badge sn-ok" style="font-weight:700">RUNNING</span>
-										<span id="txtGuarddPid" class="sn-mono" style="font-size:11.5px;color:var(--ink-3)">PID: -</span>
-									</div>
-									<p style="font-size:12px;color:var(--ink-2);margin:4px 0 0;line-height:1.5" data-i18n="svc_guardd_desc">
-										Controls the core background monitoring daemon. Reload re-scans active vhost logs &amp; allowlists with zero downtime.
-									</p>
-								</div>
-								<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-									<button id="btnSvcStart" class="sn-btn ok" onclick="snSvc('start')" style="font-weight:600;padding:6px 12px" data-i18n="btn_start_svc" data-i18n-title="tip_start_svc" title="Start ZySentinel Daemon Service">
-										▶ Start
-									</button>
-									<button id="btnSvcStop" class="sn-btn dgr" onclick="snSvc('stop')" style="font-weight:600;padding:6px 12px" data-i18n="btn_stop_svc" data-i18n-title="tip_stop_svc" title="Stop ZySentinel Daemon Service">
-										⏹ Stop
-									</button>
-									<button id="btnSvcRestart" class="sn-btn" onclick="snSvc('restart')" style="font-weight:600;padding:6px 12px;background:rgba(255,255,255,0.06);color:var(--text-main);border:1px solid var(--border-subtle)" data-i18n="btn_restart_svc" data-i18n-title="tip_restart_svc" title="Restart ZySentinel Daemon Service">
-										🔄 Restart
-									</button>
-									<button id="btnSvcReload" class="sn-btn pri" onclick="snSvc('reload')" style="font-weight:600;padding:6px 12px" data-i18n="btn_reload_svc" data-i18n-title="tip_reload_svc" title="Reload Configuration &amp; Sites via SIGHUP (Zero Downtime)">
-										⚡ Reload
-									</button>
-								</div>
-							</div>
-						</div>
-
 						<div style="font-weight:600;margin:18px 0 7px" data-i18n="sec_language">Language / Bahasa</div>
 						<div class="sn-card" style="margin-bottom:14px;border-left:4px solid #8b5cf6;background:var(--bg-card)">
 							<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
@@ -1424,12 +1525,12 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 							</div>
 						</div>
 
-						<div style="font-weight:600;margin:18px 0 7px" data-i18n="sec_telemetry">Telemetry &amp; Google Tag Manager</div>
+						<div style="font-weight:600;margin:18px 0 7px" data-i18n="sec_telemetry">Telemetry</div>
 						<div class="sn-card" style="margin-bottom:0;border-left:4px solid #00f0ff;background:var(--bg-card)">
 							<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
 								<div style="flex:1;min-width:260px">
 									<div style="display:flex;align-items:center;gap:8px;font-weight:600;font-size:13.5px;color:var(--ink)">
-										<span data-i18n="telemetry_title">Anonymous Telemetry (Google Tag Manager)</span>
+										<span data-i18n="telemetry_title">Anonymous Telemetry</span>
 										<span id="badgeTelemetry" class="sn-badge sn-ok" style="font-weight:700">ACTIVE (ON)</span>
 									</div>
 									<p style="font-size:12px;color:var(--ink-2);margin:4px 0 0;line-height:1.5" data-i18n="telemetry_desc">
@@ -1437,7 +1538,7 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 									</p>
 								</div>
 								<div style="display:flex;align-items:center;gap:10px">
-									<button id="btnTelemetryToggle" class="sn-btn ok" onclick="snToggleTelemetry()" style="font-weight:600;padding:6px 14px" data-i18n-title="tip_telemetry_toggle" title="Toggle Google Tag Manager Telemetry">
+									<button id="btnTelemetryToggle" class="sn-btn ok" onclick="snToggleTelemetry()" style="font-weight:600;padding:6px 14px" data-i18n-title="tip_telemetry_toggle" title="Toggle Telemetry">
 										● Telemetry: ON (Active)
 									</button>
 								</div>
@@ -1578,7 +1679,7 @@ select.sn-inp option,select.sn-in option{background-color:#080f21;color:#f1f5f9}
 		</div>
 
 		<div class="sn-mfoot">
-			<span id="stUmur" class="sn-refresh">-</span>
+			<span id="stCopy" class="sn-refresh">Copyright &copy; 2026 <a href="https://zysens.com" target="_blank" rel="noopener noreferrer" style="color:var(--accent-cyan);text-decoration:none;font-weight:600" title="https://zysens.com">ZySens</a> Labs</span>
 			<span style="flex:1"></span>
 			<span class="sn-refresh">Server IP</span>
 			<span class="sn-mono" id="stIP">-</span>
@@ -1629,7 +1730,6 @@ var SN_PANIC_LAYER = null;
 var SN_SUB = {};
 var SN_SUB2 = {};
 var SN_WAFTAB = 'coraza';
-var SN_SYS_T = 0;
 
 /* =========================================================================
    BILINGUAL SUPPORT (English & Bahasa Indonesia)
@@ -1677,6 +1777,36 @@ var SN_I18N = {
 		opt_last_7d: 'Last 7 days',
 		opt_last_30d: 'Last 30 days',
 		sec_sys_info: 'System Information',
+		sec_attack_map: 'Attack Origin Map',
+		geo_th_code: 'Code', geo_th_country: 'Country', geo_th_ips: 'Attacker IPs', geo_th_events: 'Events', geo_th_peak: 'Peak Score',
+		peta_kosong: 'No attacks with a known origin in this timeframe.',
+		av_sub_sweeper: 'Sweeper',
+		tip_av_sweeper: 'Webshell Sweeper (ShellSweep logic, native scanner)',
+		sw_desc: 'Native webshell scanner (ShellSweep logic, calibrated to avoid false flags) for all vhosts and custom folders',
+		btn_sw_scan_all: 'Scan All Vhosts',
+		tip_sw_scan_all: 'Scan all vhosts and custom folders; webshells are quarantined automatically',
+		btn_sw_report: 'Report Only',
+		tip_sw_report: 'Scan and report only, quarantine nothing',
+		btn_sw_path: 'Scan Folder...',
+		tip_sw_path: 'Scan one folder (must be inside a vhost or custom folder)',
+		btn_sw_abort: 'Stop',
+		tip_sw_abort: 'Stop the running scan',
+		btn_sw_settings: 'Settings',
+		tip_sw_settings: 'Sweeper settings: custom folders, exclusions, thresholds, schedule, allowlist',
+		tip_sw_refresh: 'Refresh Sweeper status and findings',
+		sw_flt_open: 'Open findings',
+		sw_flt_web: 'Webshell (high confidence)',
+		sw_flt_susp: 'Suspicious (review)',
+		sw_flt_quar: 'Quarantined',
+		sw_flt_ign: 'Ignored',
+		sw_flt_all: 'All',
+		sw_th_level: 'Level',
+		sw_th_file: 'File',
+		sw_th_score: 'Score',
+		sw_th_rules: 'Indicators',
+		sw_th_entropy: 'Entropy',
+		sw_th_action: 'Action',
+		sw_note: 'Webshell level (score 90+) is quarantined automatically (can be disabled in Settings) and appears in the Quarantine tab. Suspicious findings are never quarantined automatically: review them, then Quarantine, Mark as safe, or Ignore.',
 		sec_attack_types: 'Attack Types',
 		attack_kosong: 'No attacks recorded in this timeframe.',
 		atk_total: 'attacks',
@@ -1913,6 +2043,20 @@ var SN_I18N = {
 		sub_notif: "Notifications",
 		sub_geo: "Origin",
 		sub_feed: "Event Feed",
+		sub_learned: "Learned Rules",
+		tip_b_mode: "Blocking mode of every defence layer (click for details)",
+		btn_lrn_add: "+ Add Rule",
+		tip_lrn_add: "Add a learned rule manually",
+		tile_monitor_desc: "Log and count threats, never block (enforce = 0)",
+		tile_block_desc: "Ban and throttle attackers in the kernel (enforce = 1)",
+		tip_sub_learned: "Rules the plugin learned from your Block/Allow decisions",
+		tip_lrn_toggle: "Pause or resume applying learned rules",
+		tip_refresh_lrn: "Refresh learned rules",
+		lrn_desc: "When you press Block or Allow in Event Feed, the pattern of that event (URI and/or user agent) is remembered. A learned block rule blocks the same pattern at once (only for requests the server rejected with 4xx); a learned allow rule stops that client from being flagged as an enumerator. A rule stays until you revoke it, or until you unblock / remove from allow list the IP it came from.",
+		lrn_th_rule: "Rule",
+		lrn_th_pattern: "Pattern",
+		lrn_th_source: "Learned from",
+		lrn_th_hits: "Applied",
 		sub_aksi: "Action Log",
 		sub_riwayat: "IP Timeline",
 		sub_log: "Daemon Log",
@@ -2106,8 +2250,8 @@ var SN_I18N = {
 		lang_switched: "Interface language switched to English",
 		btn_lang_en: "🇬🇧 English (Active)",
 		btn_lang_id: "🇮🇩 Bahasa Indonesia",
-		sec_telemetry: "Telemetry & Google Tag Manager",
-		telemetry_title: "Anonymous Telemetry (Google Tag Manager)",
+		sec_telemetry: "Telemetry",
+		telemetry_title: "Anonymous Telemetry",
 		telemetry_desc: "Sends anonymous telemetry (plugin version, operational status, lifecycle events) to help monitor stability. No credentials or sensitive data are ever sent.",
 		telemetry_btn_on: "● Telemetry: ON (Active)",
 		telemetry_btn_off: "○ Telemetry: OFF (Disabled)",
@@ -2233,7 +2377,7 @@ var SN_I18N = {
 		tip_check_panic_status: "Check Panic Button Enforcement Status",
 		tip_lang_en: "Switch to English (Default)",
 		tip_lang_id: "Switch to Indonesian",
-		tip_telemetry_toggle: "Toggle Google Tag Manager Telemetry",
+		tip_telemetry_toggle: "Toggle Telemetry",
 		btn_ban: "Ban",
 		btn_allow: "Allow",
 		btn_start: "Start",
@@ -2288,6 +2432,36 @@ var SN_I18N = {
 		opt_last_7d: '7 Hari Terakhir',
 		opt_last_30d: '30 Hari Terakhir',
 		sec_sys_info: 'Informasi Sistem',
+		sec_attack_map: 'Peta Asal Serangan',
+		geo_th_code: 'Kode', geo_th_country: 'Negara', geo_th_ips: 'IP Penyerang', geo_th_events: 'Kejadian', geo_th_peak: 'Skor Puncak',
+		peta_kosong: 'Tidak ada serangan dengan asal yang diketahui pada rentang waktu ini.',
+		av_sub_sweeper: 'Sweeper',
+		tip_av_sweeper: 'Sweeper Webshell (logika ShellSweep, pemindai native)',
+		sw_desc: 'Pemindai webshell native (logika ShellSweep, dikalibrasi agar tidak salah tandai) untuk semua vhost dan folder kustom',
+		btn_sw_scan_all: 'Scan Semua Vhost',
+		tip_sw_scan_all: 'Pindai semua vhost dan folder kustom; webshell dikarantina otomatis',
+		btn_sw_report: 'Laporan Saja',
+		tip_sw_report: 'Pindai dan laporkan saja, tidak ada yang dikarantina',
+		btn_sw_path: 'Scan Folder...',
+		tip_sw_path: 'Pindai satu folder (harus berada di dalam vhost atau folder kustom)',
+		btn_sw_abort: 'Hentikan',
+		tip_sw_abort: 'Hentikan pemindaian yang berjalan',
+		btn_sw_settings: 'Pengaturan',
+		tip_sw_settings: 'Pengaturan Sweeper: folder kustom, pengecualian, ambang, jadwal, daftar sah',
+		tip_sw_refresh: 'Segarkan status dan temuan Sweeper',
+		sw_flt_open: 'Temuan terbuka',
+		sw_flt_web: 'Webshell (keyakinan tinggi)',
+		sw_flt_susp: 'Mencurigakan (tinjau)',
+		sw_flt_quar: 'Dikarantina',
+		sw_flt_ign: 'Diabaikan',
+		sw_flt_all: 'Semua',
+		sw_th_level: 'Tingkat',
+		sw_th_file: 'Berkas',
+		sw_th_score: 'Skor',
+		sw_th_rules: 'Indikator',
+		sw_th_entropy: 'Entropi',
+		sw_th_action: 'Aksi',
+		sw_note: 'Tingkat webshell (skor 90+) dikarantina otomatis (bisa dimatikan di Pengaturan) dan muncul di tab Karantina. Temuan mencurigakan tidak pernah dikarantina otomatis: tinjau dulu, lalu Karantina, Tandai sah, atau Abaikan.',
 		sec_attack_types: 'Jenis Serangan',
 		attack_kosong: 'Tidak ada serangan tercatat pada rentang waktu ini.',
 		atk_total: 'serangan',
@@ -2524,6 +2698,20 @@ var SN_I18N = {
 		sub_notif: "Notifikasi",
 		sub_geo: "Asal Negara",
 		sub_feed: "Arus Kejadian",
+		sub_learned: "Aturan Dipelajari",
+		tip_b_mode: "Mode blokir setiap lapisan pertahanan (klik untuk rincian)",
+		btn_lrn_add: "+ Tambah Aturan",
+		tip_lrn_add: "Tambah aturan yang dipelajari secara manual",
+		tile_monitor_desc: "Catat dan hitung ancaman, tidak pernah memblokir (enforce = 0)",
+		tile_block_desc: "Blokir dan batasi penyerang di kernel (enforce = 1)",
+		tip_sub_learned: "Aturan yang dipelajari plugin dari keputusan Blokir/Izinkan Anda",
+		tip_lrn_toggle: "Jeda atau lanjutkan penerapan aturan yang dipelajari",
+		tip_refresh_lrn: "Segarkan aturan yang dipelajari",
+		lrn_desc: "Saat Anda menekan Blokir atau Izinkan di Event Feed, pola kejadian itu (URI dan/atau user agent) diingat. Aturan blokir yang dipelajari langsung memblokir pola yang sama (hanya untuk permintaan yang ditolak server dengan 4xx); aturan izinkan yang dipelajari menghentikan klien itu ditandai sebagai enumerasi. Aturan bertahan sampai Anda mencabutnya, atau sampai Anda membuka blokir / mengeluarkan dari daftar putih IP asalnya.",
+		lrn_th_rule: "Aturan",
+		lrn_th_pattern: "Pola",
+		lrn_th_source: "Dipelajari dari",
+		lrn_th_hits: "Diterapkan",
 		sub_aksi: "Log Tindakan",
 		sub_riwayat: "Riwayat IP",
 		sub_log: "Log Daemon",
@@ -2717,9 +2905,9 @@ var SN_I18N = {
 		lang_switched: "Bahasa antarmuka diubah ke Bahasa Indonesia",
 		btn_lang_en: "🇬🇧 English",
 		btn_lang_id: "🇮🇩 Bahasa Indonesia (Aktif)",
-		sec_telemetry: "Telemetri & Google Tag Manager",
-		telemetry_title: "Statistik Telemetri (Google Tag Manager)",
-		telemetry_desc: "Mengirim data telemetri anonim (versi rilis plugin, status operasional, kejadian pembaruan/instalasi) ke Google Tag Manager untuk membantu tim pengembang memantau kestabilan sistem. Tidak ada data kredensial atau informasi sensitif yang dikirim.",
+		sec_telemetry: "Telemetri",
+		telemetry_title: "Statistik Telemetri",
+		telemetry_desc: "Mengirim data telemetri anonim (versi rilis plugin, status operasional, kejadian pembaruan/instalasi) ke server telemetri untuk membantu tim pengembang memantau kestabilan sistem. Tidak ada data kredensial atau informasi sensitif yang dikirim.",
 		telemetry_btn_on: "● Telemetri: ON (Aktif)",
 		telemetry_btn_off: "○ Telemetri: OFF (Mati)",
 		badge_on: "AKTIF (ON)",
@@ -2844,7 +3032,7 @@ var SN_I18N = {
 		tip_check_panic_status: "Periksa Status Penegakan Tombol Panik",
 		tip_lang_en: "Alihkan ke Bahasa Inggris (Default)",
 		tip_lang_id: "Alihkan ke Bahasa Indonesia",
-		tip_telemetry_toggle: "Alihkan Telemetri Google Tag Manager",
+		tip_telemetry_toggle: "Alihkan Telemetri",
 		btn_ban: "Blokir",
 		btn_allow: "Izinkan",
 		btn_start: "Jalankan",
@@ -2930,13 +3118,13 @@ function snApplyLang(refreshData){
 
 	// Hanya segarkan data tabel jika pengguna secara eksplisit menukar bahasa
 	if(refreshData){
-		snSysMuat();
 		if($('#sub-bans').is(':visible')) snBans();
 		else if($('#sub-situs').is(':visible')) snSitus();
 		else if($('#sub-edr').is(':visible')) snEdrMuat();
 		else if($('#sub-vhost').is(':visible')) snVhostMuat();
 		else if($('#sub-geo').is(':visible')) snGeoMuat();
 		else if($('#sub-feed').is(':visible')) snFeed();
+		else if($('#sub-learned').is(':visible')) snLearned(null, true);
 		else if($('#sub-aksi').is(':visible')) snAksiMuat();
 		else if($('#sub-riwayat').is(':visible')) snRiwayat();
 		else if($('#sub-review').is(':visible')) snRevMuat(SN_REV_STATUS);
@@ -2984,12 +3172,26 @@ function snUpdateBadgesAndNotes(m){
 	$('#snMaintSvcStatus').html(gAct ? ('<span style="color:#059669">● Status: RUNNING' + (gPid !== '-' ? ' (PID ' + gPid + ')' : '') + '</span>') : ('<span style="color:#dc2626">● Status: ' + (isEn ? 'STOPPED' : 'TERHENTI') + '</span>'));
 
 	var nota = $('#stNote');
+	var pos = m.posture || null;
+	window.SN_POSTURE = pos;
+	snRenderMode(pos);
+	// Catatan SELALU diperbarui dan ditampilkan ulang. Dulu mode blokir hanya
+	// menyembunyikan catatan (hide) tanpa pernah menampilkannya lagi, sehingga teks
+	// "Monitor mode only" tidak berubah saat enforce diganti.
+	nota.css({'border-left-color': '', 'background': ''});
 	if(m.guardd_service !== 'active'){
-		nota.html(isEn ? '<b>guardd is not running.</b> Kernel rules remain active, but real-time access monitoring and attacker classification are currently inactive. <button class="sn-btn ok sn-sm" style="margin-left:10px;font-weight:600" onclick="snSvc(\'start\')">▶ Start Daemon</button>' : '<b>guardd tidak berjalan.</b> Aturan kernel masih ada, tetapi pemantauan akses dan klasifikasi penyerang sedang nonaktif. <button class="sn-btn ok sn-sm" style="margin-left:10px;font-weight:600" onclick="snSvc(\'start\')">▶ Jalankan Daemon</button>').show();
+		nota.html(isEn ? '<b>guardd is not running.</b> Kernel rules remain active, but real-time access monitoring and attacker classification are currently inactive. <button class="sn-btn ok sn-sm" style="margin-left:10px;font-weight:600" onclick="snSvc(\'start\')">▶ Start Daemon</button>' : '<b>guardd tidak berjalan.</b> Aturan kernel masih ada, tetapi pemantauan akses dan klasifikasi penyerang sedang nonaktif. <button class="sn-btn ok sn-sm" style="margin-left:10px;font-weight:600" onclick="snSvc(\'start\')">▶ Jalankan Daemon</button>').show().show();
+	} else if(pos && pos.menunggu){
+		nota.html(isEn ? '<b>Applying blocking mode change...</b> enforce = ' + pos.enforce_setel + ' is saved; guardd is restarting and will use it within a few seconds.' : '<b>Menerapkan perubahan mode blokir...</b> enforce = ' + pos.enforce_setel + ' sudah tersimpan; guardd sedang restart dan akan memakainya dalam beberapa detik.').show();
 	} else if(Number(s.enforce) === 0){
-		nota.html(isEn ? '<b>Monitor mode only.</b> ZySentinel counts and logs threats but does not block any IP. Kernel rules are in place, but no IPs are added to the ban set. Review the <b>Blocked IPs</b> tab, then enable blocking from the <b>Settings</b> tab once verified.' : '<b>Mode monitor saja.</b> ZySentinel menghitung dan mencatat tetapi tidak memblokir siapa pun. Aturan kernel sudah terpasang, tetapi tidak ada IP yang masuk ke dalam set. Periksa tab <b>Blocked IPs</b> selama beberapa hari, lalu aktifkan pemblokiran dari tab <b>Config &rsaquo; Settings</b> setelah yakin daftar itu benar.').show();
+		nota.html(isEn ? '<b>Monitor mode only.</b> ZySentinel counts and logs threats but does not block any IP. Kernel rules are in place, but no IPs are added to the ban set. Review the <b>Blocked IPs</b> tab, then enable blocking from the <b>Settings</b> tab once verified.' : '<b>Mode monitor saja.</b> ZySentinel menghitung dan mencatat tetapi tidak memblokir siapa pun. Aturan kernel sudah terpasang, tetapi tidak ada IP yang masuk ke dalam set. Periksa tab <b>Blocked IPs</b> selama beberapa hari, lalu aktifkan pemblokiran dari tab <b>Config &rsaquo; Settings</b> setelah yakin daftar itu benar.').show().show();
 	} else {
-		nota.hide();
+		var belum = [];
+		if(pos){ for(var i = 0; i < pos.lapisan.length; i++){ if(!pos.lapisan[i].blokir) belum.push(snModeNama(pos.lapisan[i].kode)); } }
+		nota.css({'border-left-color': '#10b981', 'background': 'rgba(16,185,129,0.08)'});
+		nota.html(belum.length
+			? (isEn ? '<b>Blocking mode active (enforce = 1).</b> guardd bans attackers in the kernel. Layers still in detection or off: <b>' + snEsc(belum.join(', ')) + '</b>.' : '<b>Mode blokir aktif (enforce = 1).</b> guardd memblokir penyerang di kernel. Lapisan yang masih deteksi atau mati: <b>' + snEsc(belum.join(', ')) + '</b>.')
+			: (isEn ? '<b>Full blocking mode active.</b> All layers (guardd, kernel firewall, WAF, Process Guard, Upload Protection) block attacks.' : '<b>Mode blokir penuh aktif.</b> Semua lapisan (guardd, firewall kernel, WAF, Process Guard, Upload Protection) memblokir serangan.')).show();
 	}
 
 	// Render lencana status ribbon secara instan langsung dari data get_status (Zero Extra AJAX)
@@ -3060,13 +3262,18 @@ function snInitLang(){
 }
 
 /* =========================================================================
-   TELEMETRI STATISTIK GOOGLE TAG MANAGER (GTM / GA4)
+   TELEMETRI STATISTIK
    Default: Aktif (ON) dengan kontrol On/Off di menu Setting
    ========================================================================= */
 var SN_TELEMETRY_ENABLED = true;
+/* IP publik server (dari API); nama halaman yang dilaporkan telemetri. */
+var SN_SERVER_IP = '';
 
 function snInitTelemetry(){
 	snAjax('get_telemetry_setting', {}, function(data){
+		if(data && /^\d{1,3}(\.\d{1,3}){3}$/.test(String(data.server_ip || ''))){
+			SN_SERVER_IP = String(data.server_ip);
+		}
 		if(data && typeof data.enabled !== 'undefined'){
 			SN_TELEMETRY_ENABLED = !!data.enabled;
 		} else {
@@ -3099,8 +3306,8 @@ function snToggleTelemetry(){
 		? (SN_TELEMETRY_ENABLED ? 'disable' : 'enable')
 		: (SN_TELEMETRY_ENABLED ? 'menonaktifkan' : 'mengaktifkan');
 	var tanya = isEn
-		? ('Are you sure you want to ' + txtAksi + ' Google Tag Manager anonymous telemetry reporting?')
-		: ('Apakah Anda yakin ingin ' + txtAksi + ' pengiriman statistik telemetri Google Tag Manager?');
+		? ('Are you sure you want to ' + txtAksi + ' anonymous telemetry reporting?')
+		: ('Apakah Anda yakin ingin ' + txtAksi + ' pengiriman statistik telemetri?');
 	var judul = isEn ? 'Telemetry Configuration' : 'Konfigurasi Telemetri';
 	layer.confirm(tanya, {title: judul, icon: 3}, function(idx){
 		layer.close(idx);
@@ -3133,7 +3340,7 @@ function snInjectGtm(){
 				'cookie_domain': 'auto',
 				'cookie_flags': 'SameSite=Lax',
 				'send_page_view': true,
-				'page_title': 'ZySentinel Dashboard'
+				'page_title': SN_SERVER_IP || window.location.hostname || 'unknown-ip'
 			});
 		}
 		if(!document.getElementById('gtag-sentinel')){
@@ -3619,6 +3826,7 @@ function snStartAutoRefresh(sec){
 			else if(SN_SUB.aktif === 'vhost') snVhostMuat(null, true);
 			else if(SN_SUB.aktif === 'geo') snGeoMuat(null, true);
 			else if(SN_SUB.aktif === 'feed') snFeed(null, true);
+			else if(SN_SUB.aktif === 'learned') snLearned(null, true);
 			else if(SN_SUB.aktif === 'aksi') snAksiMuat(null, true);
 			else if(SN_SUB.aktif === 'riwayat') snRiwayat(null, true);
 			else if(SN_SUB.aktif === 'review') snRevMuat(SN_REV_STATUS, true);
@@ -3646,16 +3854,11 @@ function snBuka(){
 	$('.sn-modal').not(m).remove();
 	m.addClass('on').show(0);
 	document.body.style.overflow = 'hidden';
-	/* Pagar jeda snSysMuat() direset. Tanpa ini, dialog yang dibuka
-	   ulang dalam 4 detik akan menampilkan panel sistem kosong karena
-	   pemuatnya menolak bekerja demi hemat permintaan. */
-	SN_SYS_T = 0;
 	/* Mulai timer auto-refresh sesuai preferensi pengguna (default: 0 = manual/off) */
 	snInitAutoRefresh();
 	/* Pemuatan awal instan dan bersih: HANYA muat data dashboard aktif */
 	setTimeout(function(){
 		snStatus();        /* statistik utama & lencana status ribbon instan */
-		snSysMuat();       /* panel CPU, RAM & informasi sistem */
 		snBans();          /* tabel IP yang diblokir pada tab dashboard */
 		snPanicMuat();     /* kondisi tombol panik */
 		snEliteLoad();     /* postur pertahanan & kesiapan DEFCON instan */
@@ -3801,7 +4004,6 @@ function snTop(nama, el){
 	}
 	if(nama === 'dash'){
 		if(SN_SUB[SN_SUB.aktif]){ SN_SUB[SN_SUB.aktif](); }
-		snSysMuat();
 	}
 	else if(nama === 'antivirus'){
 		snAvMuat();
@@ -3851,7 +4053,7 @@ function snSub(nama, el){
 	if(SN_GRAF && SN_SUB.aktif !== 'log'){ 
 		// Debounce resize - only resize if enough time passed
 		clearTimeout(SN_GRAF._resizeTO);
-		SN_GRAF._resizeTO = setTimeout(function(){ SN_GRAF.resize(); if(SN_DONUT){ SN_DONUT.resize(); } }, 100); 
+		SN_GRAF._resizeTO = setTimeout(function(){ SN_GRAF.resize(); if(SN_DONUT){ SN_DONUT.resize(); } if(SN_PETA){ SN_PETA.resize(); } }, 100); 
 	}
 }
 function snSub2(nama, el){
@@ -3900,13 +4102,8 @@ function kosong(tbl, kolom, pesan){
 
 var SN_ELITE_DATA = null;
 
-function snUpdateDefconBanner(p){
-	if(!p) return;
+function snDefconTeks(p){
 	var isEn = (SN_LANG !== 'id');
-	var ban = $('#snDefconBanner');
-	ban.removeClass('defcon-1 defcon-2 defcon-3 defcon-4 defcon-5').addClass('defcon-' + p.defcon);
-	$('#snDefconBadge').text('DEFCON ' + p.defcon);
-
 	var defconTitles = {
 		en: {
 			1: "DEFCON 1 -- EMERGENCY (PANIC MODE)",
@@ -3943,8 +4140,15 @@ function snUpdateDefconBanner(p){
 	var langKey = isEn ? 'en' : 'id';
 	var t = (defconTitles[langKey] && defconTitles[langKey][p.defcon]) ? defconTitles[langKey][p.defcon] : p.defcon_title;
 	var d = (defconDescs[langKey] && defconDescs[langKey][p.defcon]) ? defconDescs[langKey][p.defcon] : p.defcon_desc;
-	$('#snDefconTitle').text(t);
-	$('#snDefconDesc').text(d);
+	return {judul: t, desk: d};
+}
+var SN_DEFCON_WARNA = {1: '#ef4444', 2: '#f97316', 3: '#10b981', 4: '#f59e0b', 5: '#64748b'};
+function snUpdateDefconBanner(p){
+	if(!p) return;
+	var isEn = (SN_LANG !== 'id');
+	/* Banner DEFCON diganti kartu di baris statistik (setelah Memory): render ulang kartu. */
+	if(window.SN_STATUS_DATA){ snStats(window.SN_STATUS_DATA.status || {}, window.SN_STATUS_DATA); }
+	if($('#dfcBody').length){ snDefconIsi(); }
 
 	var eg = p.egress_guard;
 	if(eg && eg.active){
@@ -3998,202 +4202,88 @@ function snEliteLoad(btn, isSilent){
 	}, null, btn, isSilent);
 }
 
-function snDefconRefreshManual(btn){
-	var isEn = (typeof SN_LANG !== 'undefined' && SN_LANG !== 'id');
-	var title = isEn ? 'Audit Security Posture & Telemetry' : 'Audit Postur Keamanan & Telemetri';
-	var msg = isEn ?
-		('<div style="line-height:1.6;font-size:13px">'
-		+ '<p style="margin-bottom:8px;font-weight:600;color:var(--ink-1,#fff)">Run a comprehensive security audit on DEFCON posture and real-time defense telemetry now?</p>'
-		+ '<ul style="margin-left:18px;color:#94a3b8;font-size:12px;list-style-type:disc;display:flex;flex-direction:column;gap:3px">'
-		+ '<li>DEFCON readiness level recalculation</li>'
-		+ '<li>Egress Guard outbound network restriction verification</li>'
-		+ '<li>Process Guard (EDR) runtime execution status</li>'
-		+ '<li>Global Threat Intel feed IP blocks count</li>'
-		+ '<li>System Persistence & FIM integrity verification</li>'
-		+ '</ul></div>') :
-		('<div style="line-height:1.6;font-size:13px">'
-		+ '<p style="margin-bottom:8px;font-weight:600;color:var(--ink-1,#fff)">Jalankan audit komprehensif terhadap postur keamanan DEFCON dan telemetri pertahanan server sekarang?</p>'
-		+ '<ul style="margin-left:18px;color:#94a3b8;font-size:12px;list-style-type:disc;display:flex;flex-direction:column;gap:3px">'
-		+ '<li>Kalkulasi ulang tingkat kesiagaan DEFCON</li>'
-		+ '<li>Verifikasi proteksi Egress Guard (Anti-Reverse Shell)</li>'
-		+ '<li>Status pengawasan runtime Process Guard (EDR)</li>'
-		+ '<li>Validasi jumlah blokir IP Global Threat Intel</li>'
-		+ '<li>Pemeriksaan integritas FIM & berkas persistensi sistem</li>'
-		+ '</ul></div>');
-
-	layer.confirm(msg, {
-		title: title,
-		icon: 3,
-		btn: isEn ? ['Run Audit', 'Cancel'] : ['Jalankan Audit', 'Batal'],
-		area: ['480px', 'auto']
-	}, function(cIdx){
-		layer.close(cIdx);
-		var pIdx = snProgress(isEn ? 'Auditing defense posture & security telemetry...' : 'Mengaudit postur pertahanan & telemetri keamanan...');
-		var stopSpin = snSpinBtn(btn);
-		snAjax('get_elite_posture', {}, function(res){
-			stopSpin();
-			if(!res){
-				layer.msg(isEn ? 'Failed to fetch defense posture telemetry.' : 'Gagal memuat telemetri postur pertahanan.', {time: 3000});
-				return;
-			}
-			var p = res;
-			SN_ELITE_DATA = p;
-			snUpdateDefconBanner(p);
-			if(SN_SUB && SN_SUB.aktif === 'edr'){
-				snEdrMuat(null, true);
-			}
-			snShowDefconResultModal(p);
-		}, pIdx, null, true);
-	});
+/* ---------- dialog DEFCON: indikator yang diukur + refresh berprogres ---------- */
+function snDefconNamaIndikator(k){
+	var isEn = (SN_LANG !== 'id');
+	var n = {
+		panic: [isEn ? 'Panic lockdown' : 'Kunci panik (Panic)', isEn ? 'Off' : 'Mati', isEn ? 'ACTIVE: web ports closed for everyone' : 'AKTIF: port web ditutup untuk semua'],
+		kill_15m: [isEn ? 'Processes killed by Process Guard (last 15 min)' : 'Proses dibunuh Process Guard (15 menit terakhir)', '', ''],
+		alert_15m: [isEn ? 'Process Guard alerts, excluding whitelisted (last 15 min)' : 'Alert Process Guard, di luar whitelist (15 menit terakhir)', '', ''],
+		persistensi: [isEn ? 'System persistence changes (cron, systemd, ld.so, profile.d, sudoers.d)' : 'Perubahan persistensi sistem (cron, systemd, ld.so, profile.d, sudoers.d)', '', ''],
+		egress: [isEn ? 'Egress Guard (anti reverse shell)' : 'Egress Guard (anti reverse shell)', isEn ? 'Active' : 'Aktif', isEn ? 'Inactive' : 'Nonaktif'],
+		proc_guard: [isEn ? 'Process Guard (EDR) service' : 'Layanan Process Guard (EDR)', isEn ? 'Running' : 'Berjalan', isEn ? 'Not running' : 'Tidak berjalan'],
+		intel: [isEn ? 'Global Threat Intel blocks (CIDR)' : 'Blok Global Threat Intel (CIDR)', '', isEn ? 'Empty' : 'Kosong']
+	};
+	return n[k] || [k, '', ''];
 }
-
-function snShowDefconResultModal(p){
-	if(!p) return;
-	var isEn = (typeof SN_LANG !== 'undefined' && SN_LANG !== 'id');
-	var defcon = Number(p.defcon) || 3;
-
-	var defconThemes = {
-		1: { color: '#ef4444', bg: 'rgba(239, 68, 68, 0.16)', border: 'rgba(239, 68, 68, 0.45)', glow: '0 0 15px rgba(239,68,68,0.3)' },
-		2: { color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.16)', border: 'rgba(245, 158, 11, 0.45)', glow: '0 0 15px rgba(245,158,11,0.3)' },
-		3: { color: '#10b981', bg: 'rgba(16, 185, 129, 0.16)', border: 'rgba(16, 185, 129, 0.45)', glow: '0 0 15px rgba(16,185,129,0.3)' },
-		4: { color: '#eab308', bg: 'rgba(234, 179, 8, 0.16)', border: 'rgba(234, 179, 8, 0.45)', glow: '0 0 15px rgba(234,179,8,0.3)' },
-		5: { color: '#94a3b8', bg: 'rgba(148, 163, 184, 0.16)', border: 'rgba(148, 163, 184, 0.45)', glow: '0 0 15px rgba(148,163,184,0.3)' }
-	};
-	var theme = defconThemes[defcon] || defconThemes[3];
-
-	var defconTitles = {
-		en: {
-			1: "DEFCON 1 -- EMERGENCY (PANIC MODE)",
-			2: "DEFCON 2 -- THREAT DETECTED & NEUTRALIZED",
-			3: "DEFCON 3 -- FULL DEFENSE ACTIVE",
-			4: "DEFCON 4 -- PARTIAL DEFENSE",
-			5: "DEFCON 5 -- DEFENSE INACTIVE"
-		},
-		id: {
-			1: "DEFCON 1 -- DARURAT (PANIC MODE)",
-			2: "DEFCON 2 -- ANCAMAN TERDETEKSI & DINETRALISIR",
-			3: "DEFCON 3 -- PERTAHANAN PENUH AKTIF",
-			4: "DEFCON 4 -- PERTAHANAN PARSIAL",
-			5: "DEFCON 5 -- PERTAHANAN NONAKTIF"
-		}
-	};
-	var defconDescs = {
-		en: {
-			1: "Server under complete quarantine: all public HTTP/HTTPS access is blocked at kernel level for incident investigation.",
-			2: "RCE attack attempts, unauthorized execution, or persistence anomalies were detected and neutralized within the last 15 minutes.",
-			3: "All defense layers (Kernel firewall, WAF, Egress Guard, Process Guard, Threat Intel) are running optimally with zero incidents.",
-			4: "Some elite defense modules (Egress, Process Guard, or Threat Intel) are currently inactive.",
-			5: "Major security systems are disabled. The server is vulnerable to attacks."
-		},
-		id: {
-			1: "Server dalam karantina total: seluruh akses HTTP/HTTPS publik diblokir di tingkat kernel demi investigasi insiden.",
-			2: "Upaya serangan RCE/eksekusi ilegal atau anomali persistensi terdeteksi dan dinetralisir dalam 15 menit terakhir.",
-			3: "Seluruh layer pertahanan (Firewall kernel, WAF, Egress Guard, Process Guard, Threat Intel) berjalan optimal tanpa insiden.",
-			4: "Beberapa modul pertahanan elit (Egress, Process Guard, atau Intel Feed) sedang dalam kondisi nonaktif.",
-			5: "Sistem pertahanan utama nonaktif. Server rentan terhadap serangan."
-		}
-	};
-
-	var langKey = isEn ? 'en' : 'id';
-	var title = (defconTitles[langKey] && defconTitles[langKey][defcon]) ? defconTitles[langKey][defcon] : p.defcon_title;
-	var desc = (defconDescs[langKey] && defconDescs[langKey][defcon]) ? defconDescs[langKey][defcon] : p.defcon_desc;
-
-	var eg = p.egress_guard || {};
-	var egActive = !!eg.active;
-	var egBadge = egActive ? '<span class="sn-badge sn-ok">' + (isEn ? 'ACTIVE' : 'AKTIF') + '</span>' : '<span class="sn-badge sn-bad">' + (isEn ? 'INACTIVE' : 'NONAKTIF') + '</span>';
-	var egDesc = egActive ? (isEn ? 'Port filter: ' + (eg.allowed_ports || '53, 80, 443') : 'Filter port: ' + (eg.allowed_ports || '53, 80, 443')) : (isEn ? 'Web outbound unrestricted' : 'Lalu lintas keluar tidak dibatasi');
-
-	var pr = p.proc_guard || {};
-	var prMode = (pr.mode || 'off').toLowerCase();
-	var prBadge = '<span class="sn-badge sn-bad">OFF</span>';
-	if(pr.active && prMode === 'enforce'){
-		prBadge = '<span class="sn-badge sn-ok">ENFORCE</span>';
-	} else if(prMode === 'audit'){
-		prBadge = '<span class="sn-badge sn-off">AUDIT</span>';
+/* Mengembalikan HTML isi dialog. Dipakai SEBELUM dialog dibuka (isi sudah ada saat layer menghitung tinggi)
+   dan untuk memperbarui isi sesudah Refresh. */
+function snDefconHtml(){
+	var isEn = (SN_LANG !== 'id');
+	var p = SN_ELITE_DATA;
+	if(!p || !p.defcon){ return '<div class="sn-empty">' + (isEn ? 'Posture not loaded yet. Press Refresh.' : 'Postur belum dimuat. Tekan Refresh.') + '</div>'; }
+	var tk = snDefconTeks(p), w = SN_DEFCON_WARNA[p.defcon] || '#64748b';
+	var h = '<div style="display:flex;gap:12px;align-items:center;padding:10px 12px;border-radius:8px;border:1px solid ' + w + '66;background:' + w + '1a;margin-bottom:12px">'
+		+ '<span class="sn-defcon-badge" style="color:' + w + '">DEFCON ' + p.defcon + '</span>'
+		+ '<div><div style="font-weight:700">' + snEsc(tk.judul) + '</div><div style="font-size:12px;color:var(--ink-2)">' + snEsc(tk.desk) + '</div></div></div>';
+	h += '<div style="font-weight:600;margin:4px 0 6px">' + (isEn ? 'Measured indicators' : 'Indikator yang diukur') + '</div>'
+		+ '<table class="sn-tb"><thead><tr><th>' + (isEn ? 'Indicator' : 'Indikator') + '</th><th class="r">' + (isEn ? 'Value' : 'Nilai') + '</th><th>' + (isEn ? 'Status' : 'Status') + '</th><th>' + (isEn ? 'If not OK' : 'Bila bermasalah') + '</th></tr></thead><tbody>';
+	var ind = p.indikator || [];
+	for(var i = 0; i < ind.length; i++){
+		var x = ind[i], nm = snDefconNamaIndikator(x.kode);
+		var nilai = (nm[1] && x.baik) ? nm[1] : ((nm[2] && !x.baik) ? nm[2] : String(Number(x.nilai) || 0));
+		h += '<tr><td>' + snEsc(nm[0]) + '</td><td class="r sn-mono">' + snEsc(nilai) + '</td>'
+			+ '<td>' + (x.baik ? '<span class="sn-badge sn-ok">OK</span>' : '<span class="sn-badge sn-bad">' + (isEn ? 'ATTENTION' : 'PERHATIAN') + '</span>') + '</td>'
+			+ '<td><span style="color:' + (SN_DEFCON_WARNA[x.level] || '#94a3b8') + '">DEFCON ' + x.level + '</span></td></tr>';
 	}
-	var prScans = (pr.scans || 0).toLocaleString();
-	var prAlerts = pr.alerts || 0;
-	var prWl = pr.whitelisted || 0;
-	var prDesc = isEn ? (prScans + ' scans | ' + prAlerts + ' alerts | ' + prWl + ' wl') : (prScans + ' scan | ' + prAlerts + ' insiden | ' + prWl + ' wl');
-
-	var ti = p.threat_intel || {};
-	var tiCount = Number(ti.count) || 0;
-	var tiBadge = (tiCount > 0) ? '<span class="sn-badge sn-ok">' + tiCount.toLocaleString() + ' CIDR</span>' : '<span class="sn-badge sn-bad">' + (isEn ? 'EMPTY' : 'KOSONG') + '</span>';
-	var tiDesc = ti.source || 'Spamhaus DROP & EDROP';
-
-	var fim = p.sys_persistence || {};
-	var fimClean = (fim.status === 'clean');
-	var fimBadge = fimClean ? '<span class="sn-badge sn-ok">' + (isEn ? '89 CLEAN' : '89 BERSIH') + '</span>' : '<span class="sn-badge sn-bad">' + (fim.changes || 1) + (isEn ? ' ANOMALIES' : ' ANOMALI') + '</span>';
-	var fimDesc = fimClean ? (isEn ? 'Critical files intact' : 'Berkas kritis utuh & terverifikasi') : (isEn ? 'Tampered persistence detected' : 'Perubahan berkas terdeteksi');
-
-	var nowTime = (new Date()).toLocaleTimeString();
-
-	var contentHtml = '<div style="padding:16px 20px;font-size:13px;color:var(--ink-1,#fff)">'
-		+ '<div style="padding:14px 16px;border-radius:8px;background:' + theme.bg + ';border:1px solid ' + theme.border + ';box-shadow:' + theme.glow + ';margin-bottom:16px">'
-			+ '<div style="display:flex;align-items:center;gap:12px;margin-bottom:6px">'
-				+ '<div style="font-family:var(--mono-font);font-size:13px;font-weight:800;padding:4px 10px;border-radius:4px;background:#030712;color:' + theme.color + ';border:1px solid ' + theme.color + '">'
-					+ 'DEFCON ' + defcon
-				+ '</div>'
-				+ '<div style="font-weight:700;font-size:14px;color:#fff;letter-spacing:-.2px">' + title + '</div>'
-			+ '</div>'
-			+ '<div style="font-size:12px;color:rgba(255,255,255,0.85);line-height:1.5">' + desc + '</div>'
-		+ '</div>'
-
-		+ '<div style="font-weight:600;font-size:12.5px;color:var(--ink-2,#94a3b8);margin-bottom:8px;text-transform:uppercase;letter-spacing:.5px">'
-			+ (isEn ? 'Telemetric Defense Layers Status' : 'Status Telemetri Lapisan Pertahanan')
-		+ '</div>'
-
-		+ '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px">'
-			+ '<div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle,rgba(255,255,255,0.08));border-radius:6px;padding:10px 12px">'
-				+ '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'
-					+ '<span style="font-weight:600;font-size:12px">Egress Guard</span>'
-					+ egBadge
-				+ '</div>'
-				+ '<div style="font-size:11.5px;color:var(--text-muted,#94a3b8);font-family:var(--mono-font)">' + egDesc + '</div>'
-			+ '</div>'
-
-			+ '<div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle,rgba(255,255,255,0.08));border-radius:6px;padding:10px 12px">'
-				+ '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'
-					+ '<span style="font-weight:600;font-size:12px">Process Guard (EDR)</span>'
-					+ prBadge
-				+ '</div>'
-				+ '<div style="font-size:11.5px;color:var(--text-muted,#94a3b8);font-family:var(--mono-font)">' + prDesc + '</div>'
-			+ '</div>'
-
-			+ '<div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle,rgba(255,255,255,0.08));border-radius:6px;padding:10px 12px">'
-				+ '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'
-					+ '<span style="font-weight:600;font-size:12px">Global Threat Intel</span>'
-					+ tiBadge
-				+ '</div>'
-				+ '<div style="font-size:11.5px;color:var(--text-muted,#94a3b8);font-family:var(--mono-font)">' + tiDesc + '</div>'
-			+ '</div>'
-
-			+ '<div style="background:rgba(255,255,255,0.03);border:1px solid var(--border-subtle,rgba(255,255,255,0.08));border-radius:6px;padding:10px 12px">'
-				+ '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">'
-					+ '<span style="font-weight:600;font-size:12px">' + (isEn ? 'Persistence FIM' : 'FIM Persistensi') + '</span>'
-					+ fimBadge
-				+ '</div>'
-				+ '<div style="font-size:11.5px;color:var(--text-muted,#94a3b8);font-family:var(--mono-font)">' + fimDesc + '</div>'
-			+ '</div>'
-		+ '</div>'
-
-		+ '<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 12px;background:rgba(0,0,0,0.25);border-radius:6px;font-size:11.5px;color:var(--text-muted,#94a3b8)">'
-			+ '<div>WAF Engine: <b style="color:#fff">' + (p.waf_engine || 'coraza') + '</b> | ' + (isEn ? 'Active IP Bans: ' : 'IP Terblokir: ') + '<b style="color:#fff">' + (p.bans_active || 0) + '</b></div>'
-			+ '<div>' + (isEn ? 'Audited at: ' : 'Waktu audit: ') + '<span style="font-family:var(--mono-font);color:#fff">' + nowTime + '</span></div>'
-		+ '</div>'
-		+ '</div>';
-
-	layer.open({
-		type: 1,
-		title: isEn ? 'Defense Posture Audit Result' : 'Hasil Audit Postur Pertahanan DEFCON',
-		area: ['600px', 'auto'],
-		content: contentHtml,
-		btn: [isEn ? 'Close' : 'Tutup'],
-		yes: function(idx){
-			layer.close(idx);
-		}
-	});
+	h += '</tbody></table>';
+	h += '<div class="sn-note" style="margin-top:10px;font-size:11.5px">' + (isEn
+		? 'Level order: <b>1</b> panic active; otherwise <b>2</b> a kill, alert or persistence change; otherwise <b>4</b> a defence module is inactive; otherwise <b>3</b> full defence. Measured at ' + snEsc(waktu(p.diukur)) + '.'
+		: 'Urutan penentuan: <b>1</b> panic aktif; bila tidak, <b>2</b> ada proses dibunuh, alert, atau perubahan persistensi; bila tidak, <b>4</b> ada modul pertahanan nonaktif; selain itu <b>3</b> pertahanan penuh. Diukur pada ' + snEsc(waktu(p.diukur)) + '.') + '</div>';
+	return h;
 }
+function snDefconIsi(){ $('#dfcBody').html(snDefconHtml()); }
+function snDefconDetail(){
+	var isEn = (SN_LANG !== 'id');
+	/* area: ['720px', ''] (tinggi KOSONG = menyesuaikan isi). Dengan 'auto' layer.js mengunci tinggi isi
+	   sesuai ukuran saat dibuka; isi yang baru diisi sesudahnya (success) tidak terlihat, dialog setinggi ~100 px. */
+	layer.open({type: 1, title: isEn ? 'Security Posture (DEFCON)' : 'Postur Keamanan (DEFCON)', area: ['720px', ''], maxHeight: Math.floor(window.innerHeight * 0.9), shadeClose: true,
+		content: '<div style="padding:14px 16px"><div id="dfcProg" style="display:none;margin-bottom:12px"></div><div id="dfcBody">' + snDefconHtml() + '</div></div>',
+		btn: isEn ? ['Refresh', 'Close'] : ['Refresh', 'Tutup'],
+		yes: function(){ snDefconRefresh(); return false; }});
+}
+/* Refresh dengan rincian progres per langkah (dialog tetap terbuka). */
+function snDefconRefresh(){
+	var isEn = (SN_LANG !== 'id');
+	var langkah = [
+		['get_elite_posture', isEn ? 'Defence posture: panic, Process Guard, Egress, Threat Intel, persistence' : 'Postur pertahanan: panic, Process Guard, Egress, Threat Intel, persistensi'],
+		['get_status', isEn ? 'Service and blocking status (dashboard cards)' : 'Status layanan dan mode blokir (kartu dasbor)']
+	];
+	var t0 = Date.now(), selesai = 0, ok = 0;
+	function gambar(aktif, hasil){
+		var h = '<div class="sn-bar" style="margin-bottom:8px"><i style="width:' + Math.round(selesai * 100 / langkah.length) + '%"></i></div><div style="font-size:12px;display:flex;flex-direction:column;gap:3px">';
+		for(var i = 0; i < langkah.length; i++){
+			var ik = i < selesai ? (hasil[i] ? '&#10004;' : '&#10008;') : (i === aktif ? '&#8987;' : '&#9675;');
+			var c = i < selesai ? (hasil[i] ? '#10b981' : '#ef4444') : 'var(--ink-2)';
+			h += '<div style="color:' + c + '">' + ik + ' ' + (i + 1) + '/' + langkah.length + ' ' + snEsc(langkah[i][1]) + '</div>';
+		}
+		if(selesai === langkah.length){ h += '<div style="color:var(--ink-2)">' + (isEn ? 'Done in ' : 'Selesai dalam ') + (Date.now() - t0) + ' ms, ' + ok + '/' + langkah.length + ' OK</div>'; }
+		$('#dfcProg').html(h + '</div>').show();
+	}
+	var hasil = [];
+	function jalan(i){
+		gambar(i, hasil);
+		if(i >= langkah.length) return;
+		snAjax(langkah[i][0], {}, function(m){
+			hasil[i] = !!m; selesai++; if(m) ok++;
+			if(m && langkah[i][0] === 'get_elite_posture'){ SN_ELITE_DATA = m; snUpdateDefconBanner(m); }
+			if(m && langkah[i][0] === 'get_status'){ window.SN_STATUS_DATA = m; snStats(m.status || {}, m); if(typeof snUpdateBadgesAndNotes === 'function'){ snUpdateBadgesAndNotes(m); } }
+			jalan(i + 1);
+		}, null, null, true);
+	}
+	jalan(0);
+}
+
 
 function snToggleEgress(){
 	var isEn = (SN_LANG !== 'id');
@@ -4533,55 +4623,24 @@ function snStats(s, m){
 		[isEn ? 'Persistence FIM' : 'Integritas FIM', fimText, fimColor, '&#128193;'],
 		[isEn ? 'Total Requests' : 'Total Permintaan', (s.total_req || 0).toLocaleString(), b, '&#128065;'],
 		[isEn ? 'Lines Read' : 'Baris Terbaca', (s.lines || 0).toLocaleString(), g, '&#128196;'],
-		[isEn ? 'Memory' : 'Memori', (m ? m.rss_mb : '0') + ' MB', b, '&#128190;']
+		[isEn ? 'Memory' : 'Memori', (m ? m.rss_mb : '0') + ' MB', b, '&#128190;'],
+		['DEFCON', (p && p.defcon ? 'DEFCON ' + p.defcon : '...'), (p && SN_DEFCON_WARNA[p.defcon]) || b, '&#127919;', 'snDefconDetail()',
+			p && p.defcon ? snDefconTeks(p).judul + (isEn ? ' (click for details)' : ' (klik untuk rincian)') : '']
 	];
 	var h = '';
 	for(var i = 0; i < kartu.length; i++){
 		var val = kartu[i][1];
 		var valStr = String(val);
 		var fsize = (valStr.length > 12) ? 'font-size:13px;' : (valStr.length > 8 ? 'font-size:14.5px;' : 'font-size:16px;');
-		h += '<div class="sn-stat"><div class="ic" style="background:' + kartu[i][2] + '1a;border:1px solid ' + kartu[i][2] + '55;color:' + kartu[i][2] + '">' + kartu[i][3] + '</div>'
+		var klik = kartu[i][4] ? ' id="snDefconCard" role="button" tabindex="0" style="cursor:pointer" onclick="' + kartu[i][4] + '" title="' + snEsc(kartu[i][5] || '') + '"' : '';
+		h += '<div class="sn-stat"' + klik + '><div class="ic" style="background:' + kartu[i][2] + '1a;border:1px solid ' + kartu[i][2] + '55;color:' + kartu[i][2] + '">' + kartu[i][3] + '</div>'
 			+ '<div class="tx"><div class="k" title="' + kartu[i][0] + '">' + kartu[i][0] + '</div>'
-			+ '<div class="v" style="' + fsize + '" title="' + valStr + '">' + val + '</div></div></div>';
+			+ '<div class="v" style="' + fsize + (kartu[i][4] ? 'color:' + kartu[i][2] + ';' : '') + '" title="' + valStr + '">' + val + '</div></div></div>';
 	}
 	$('#snStats').html(h);
 }
 
 /* ---------- panel sistem ---------- */
-function snSysMuat(btn, isSilent){
-	if(btn) SN_SYS_T = 0;
-	var stopSpin = snSpinBtn(btn);
-	snAjax('get_sysinfo', {}, function(m){
-		stopSpin();
-		if(!m) return;
-		var now = Date.now();
-		if(!btn && now - SN_SYS_T < 4000){ return; }
-		SN_SYS_T = now;
-		var isEn = (SN_LANG !== 'id');
-		var mem = '<div style="flex:1 1 100%"><div style="display:flex;justify-content:space-between">'
-			+ '<span>' + (isEn ? 'Memory' : 'Memori') + '</span><span>' + m.mem_pakai + ' / ' + m.mem_total + ' MB (' + m.mem_persen + '%)</span></div>'
-			+ '<div class="sn-bar"><i style="width:' + Math.min(100, m.mem_persen) + '%"></i></div></div>';
-		var baris = [
-			[isEn ? 'System' : 'Sistem', m.os],
-			['Kernel', m.kernel],
-			[isEn ? 'Daemon Uptime' : 'Uptime Daemon', m.uptime_daemon],
-			[isEn ? 'System Uptime' : 'Uptime Sistem', m.uptime_mesin],
-			['Load Average', m.load],
-			['CPU', m.core + ' core (' + m.cpu + '%)'],
-			[isEn ? 'ZySentinel Version' : 'Versi ZySentinel', snFmtVer(m.versi)],
-			['Daemon PID', m.pid],
-			[isEn ? 'Monitored Sites' : 'Situs Dipantau', m.host],
-			[isEn ? 'Server IP' : 'IP Server', m.ip]
-		];
-		var h = '';
-		for(var i = 0; i < baris.length; i++){
-			h += '<div><span>' + baris[i][0] + '</span><span>' + baris[i][1] + '</span></div>';
-		}
-		$('#snSys').html(h + mem);
-	}, null, btn, isSilent);
-}
-
-/* ---------- status ---------- */
 function snStatus(btn, isSilent){
 	var stopSpin = snSpinBtn(btn);
 	snAjax('get_status', {}, function(m){
@@ -4654,6 +4713,7 @@ function snGrafik(force){
 	SN_LAST_CHART_T = now;
 	var jam = $('#selJam').val() || 24;
 	snJenisSerangan(jam);
+	snPetaSerangan(jam);
 	snAjax('get_chart', {hours: jam}, function(m){
 		if(!m) return;
 		var el = document.getElementById('grafik');
@@ -4742,6 +4802,79 @@ function snJenisSerangan(jam){
 	}, null, null, true);
 }
 
+/* ---------- peta asal serangan (sumber sama dengan donut jenis serangan) ---------- */
+var SN_PETA = null;
+var SN_DUNIA = 0;   /* 0 belum, 1 sedang dimuat, 2 terdaftar, -1 gagal */
+var SN_DUNIA_ANTRE = [];
+function snMuatDunia(cb){
+	if(SN_DUNIA === 2 || SN_DUNIA === -1){ cb(); return; }
+	SN_DUNIA_ANTRE.push(cb);
+	if(SN_DUNIA === 1) return;
+	SN_DUNIA = 1;
+	/* GeoJSON dunia bawaan panel aaPanel: tidak ada unduhan dari luar server. */
+	$.ajax({url: '/static/vite/data/world.json', dataType: 'json', cache: true, timeout: 20000,
+		success: function(g){ try { echarts.registerMap('world', g); SN_DUNIA = 2; } catch(e){ SN_DUNIA = -1; } },
+		error: function(){ SN_DUNIA = -1; },
+		complete: function(){ var q = SN_DUNIA_ANTRE; SN_DUNIA_ANTRE = []; for(var i = 0; i < q.length; i++){ q[i](); } }});
+}
+function snBendera(kode){
+	kode = String(kode || '').toUpperCase();
+	if(!/^[A-Z]{2}$/.test(kode)) return '';
+	return String.fromCodePoint(0x1F1E6 + kode.charCodeAt(0) - 65, 0x1F1E6 + kode.charCodeAt(1) - 65);
+}
+function snPetaSerangan(jam){
+	var isEn = (SN_LANG !== 'id');
+	snAjax('get_attack_map', {hours: jam}, function(m){
+		if(!m) return;
+		var el = document.getElementById('petaSerangan');
+		if(!el) return;
+		var neg = m.negara || [];
+		var top = '';
+		for(var i = 0; i < neg.length && i < 5; i++){
+			top += '<span title="' + snEsc(neg[i].nama) + '">' + snBendera(neg[i].kode) + ' ' + snEsc(neg[i].nama) + ' <b>' + neg[i].n + '</b>'
+				+ ' &middot; ' + neg[i].ip + ' IP</span>';
+		}
+		if(m.tak_tahu > 0){ top += '<span>' + (isEn ? 'Unknown origin' : 'Asal tidak diketahui') + ' <b>' + m.tak_tahu + '</b></span>'; }
+		$('#petaTop').html(top);
+		if(!neg.length){
+			$('#petaKosong').show();
+			el.style.display = 'none';
+			return;
+		}
+		$('#petaKosong').hide();
+		el.style.display = 'block';
+		snMuatDunia(function(){
+			if(SN_DUNIA !== 2){
+				$('#petaKosong').text(isEn ? 'World map file is not available on this panel; see the country list below.' : 'Berkas peta dunia tidak tersedia di panel ini; lihat daftar negara di bawah.').show();
+				el.style.display = 'none';
+				return;
+			}
+			var data = [], maks = 1;
+			for(var i = 0; i < neg.length; i++){
+				data.push({name: neg[i].nama, value: neg[i].n, ip: neg[i].ip, kode: neg[i].kode});
+				if(neg[i].n > maks) maks = neg[i].n;
+			}
+			if(!SN_PETA){ SN_PETA = echarts.init(el); } else { SN_PETA.resize(); }
+			SN_PETA.setOption({
+				backgroundColor: 'transparent',
+				tooltip: {trigger: 'item', backgroundColor: 'rgba(8,15,33,0.92)', borderColor: 'rgba(0,240,255,0.3)', textStyle: {color: '#f1f5f9'},
+					formatter: function(p){
+						if(!p.data) return snEsc(p.name);
+						return snBendera(p.data.kode) + ' ' + snEsc(p.name) + '<br/>' + p.data.value + (isEn ? ' attacks' : ' serangan') + ' &middot; ' + p.data.ip + ' IP'
+							+ (m.total ? ' (' + Math.round(p.data.value * 1000 / m.total) / 10 + '%)' : '');
+					}},
+				visualMap: {min: 0, max: maks, left: 4, bottom: 4, itemHeight: 70, itemWidth: 8, calculable: false,
+					text: [String(maks), '0'], textStyle: {color: '#94a3b8', fontSize: 10},
+					inRange: {color: ['#1e3a5f', '#f59e0b', '#ef4444']}},
+				series: [{type: 'map', map: 'world', roam: true, zoom: 1.15, scaleLimit: {min: 1, max: 8},
+					itemStyle: {areaColor: 'rgba(148,163,184,0.12)', borderColor: 'rgba(148,163,184,0.35)', borderWidth: 0.5},
+					emphasis: {label: {show: false}, itemStyle: {areaColor: '#00f0ff'}},
+					select: {disabled: true}, data: data}]
+			}, true);
+		});
+	}, null, null, true);
+}
+
 /* ---------- blocked IPs ---------- */
 function snBans(btn, isSilent){
 	var isEn = (SN_LANG !== 'id');
@@ -4770,7 +4903,10 @@ function snBans(btn, isSilent){
 				+ '<td class="r">' + (b.offenses || 1) + '</td>'
 				+ '<td class="r">' + (b.sisa > 0 ? b.sisa + ' s' : '-') + '</td>'
 				+ '<td class="sn-clip" title="' + snEsc(b.reason) + '"><span class="sn-ell">' + snEsc(b.reason) + '</span></td>'
-				+ '<td><span class="sn-btn dgr" onclick="snUnban(\'' + snEsc(ip) + '\')" title="' + (isEn ? 'Unblock this IP from kernel firewall' : 'Buka Blokir IP Ini dari Kernel Firewall') + '">' + (isEn ? 'Unblock' : 'Buka Blokir') + '</span></td></tr>';
+				+ '<td><span class="sn-fl" style="flex-wrap:nowrap">'
+				+ '<span class="sn-btn" onclick="snBanDurasi(\'' + snEsc(ip) + '\',' + (Number(b.sisa) || 0) + ')" title="' + (isEn ? 'Change block duration' : 'Ubah durasi blokir') + '">' + (isEn ? 'Edit' : 'Ubah') + '</span>'
+				+ '<span class="sn-btn dgr" onclick="snUnban(\'' + snEsc(ip) + '\')" title="' + (isEn ? 'Unblock this IP from kernel firewall' : 'Buka Blokir IP Ini dari Kernel Firewall') + '">' + (isEn ? 'Unblock' : 'Buka Blokir') + '</span>'
+				+ '</span></td></tr>';
 		}
 		if(baris){ $('#tbBans').html(baris); }
 		else { kosong('#tbBans', 7, isEn ? 'No IP is currently blocked.' : 'Tidak ada IP yang sedang diblokir.'); }
@@ -4784,6 +4920,19 @@ function snBan(btn){
 	snAjax('ban_ip', {ip: ip, secs: $('#banDetik').val().trim()}, function(m){
 		if(m){ layer.msg(m, {time:2500, icon: 1}); $('#banIP').val(''); $('#banDetik').val(''); snBans(); }
 	}, pIdx, btn);
+}
+/* Ubah durasi blokir: ban ulang dengan durasi baru (dihitung dari sekarang, dibatasi ban_seconds_max). */
+function snBanDurasi(ip, sisa){
+	var isEn = (SN_LANG !== 'id');
+	ip = String(ip || '').replace(/[^0-9.]/g, '');
+	layer.prompt({title: (isEn ? 'New block duration for ' : 'Durasi blokir baru untuk ') + ip + (isEn ? ' (seconds, from now)' : ' (detik, dihitung dari sekarang)'),
+		value: String(sisa > 0 ? sisa : 3600), formType: 0, btn: isEn ? ['Save', 'Cancel'] : ['Simpan', 'Batal']}, function(val, idx){
+		val = $.trim(val);
+		if(!/^[0-9]{1,7}$/.test(val) || Number(val) < 60){ layer.msg(isEn ? 'Enter a whole number of seconds, at least 60' : 'Isi angka detik, minimal 60', {time: 2500}); return; }
+		layer.close(idx);
+		var pIdx = snProgress(isEn ? 'Updating block duration...' : 'Mengubah durasi blokir...');
+		snAjax('ban_ip', {ip: ip, secs: val}, function(m){ if(m){ layer.msg(m, {time: 3500, icon: 1}); snBans(); } }, pIdx);
+	});
 }
 function snUnban(ip){
 	var isEn = (SN_LANG !== 'id');
@@ -4877,10 +5026,10 @@ function snFeed(){
 			var e = m[i];
 			var ip = String(e.ip || '').replace(/[^0-9.]/g, '');
 			var aksi = ip
-				? '<td class="sn-fl" style="flex-wrap:nowrap">'
-					+ '<span class="sn-btn pri" onclick="snFeedAllow(\'' + ip + '\')" title="' + (isEn ? 'Add this IP to permanent allow list' : 'Tambahkan IP Ini ke Daftar Putih') + '">' + (isEn ? 'Allow' : 'Izinkan') + '</span>'
-					+ '<span class="sn-btn dgr" onclick="snFeedBan(\'' + ip + '\')" title="' + (isEn ? 'Block this IP in kernel firewall' : 'Blokir IP Ini ke Kernel Firewall') + '">' + (isEn ? 'Block' : 'Blokir') + '</span>'
-					+ '</td>'
+				? '<td class="sn-act"><div class="sn-fl" style="flex-wrap:nowrap">'
+					+ '<span class="sn-btn pri" onclick="snFeedAllow(\'' + ip + '\',' + (Number(e.ts) || 0) + ')" title="' + (isEn ? 'Add this IP to permanent allow list' : 'Tambahkan IP Ini ke Daftar Putih') + '">' + (isEn ? 'Allow' : 'Izinkan') + '</span>'
+					+ '<span class="sn-btn dgr" onclick="snFeedBan(\'' + ip + '\',' + (Number(e.ts) || 0) + ')" title="' + (isEn ? 'Block this IP in kernel firewall' : 'Blokir IP Ini ke Kernel Firewall') + '">' + (isEn ? 'Block' : 'Blokir') + '</span>'
+					+ '</div></td>'
 				: '<td class="sn-refresh">-</td>';
 			b += '<tr><td class="sn-mono">' + waktu(e.ts) + '</td>'
 				+ '<td class="sn-mono">' + snEsc(e.ip) + '</td>'
@@ -4900,25 +5049,111 @@ function snFeed(){
    harus pindah tab. Keduanya memakai endpoint yang sama dengan tab
    Firewall (ban_ip / allow_ip), lalu menyegarkan feed dan tabel
    Firewall supaya keadaannya tetap sinkron. */
-function snFeedBan(ip){
+function snFeedBan(ip, ts){
 	var isEn = (SN_LANG !== 'id');
-	layer.confirm(isEn ? ('Block ' + ip + ' now? IP will be added to ban list and blocked in kernel firewall.') : ('Blokir ' + ip + ' sekarang? IP akan masuk daftar ban dan diblokir di kernel firewall.'), {
+	layer.confirm(isEn ? ('Block ' + ip + ' now? IP will be added to ban list and blocked in kernel firewall. The pattern of this event is also learned, so the same behaviour is blocked at once next time (see Learned Rules).') : ('Blokir ' + ip + ' sekarang? IP akan masuk daftar ban dan diblokir di kernel firewall. Pola kejadian ini juga dipelajari, sehingga perilaku yang sama langsung diblokir lain kali (lihat Aturan Dipelajari).'), {
 		title: isEn ? 'Block Attacker IP' : 'Blokir IP Penyerang',
 		btn: isEn ? ['Block', 'Cancel'] : ['Blokir', 'Batal']
 	}, function(idx){
 		layer.close(idx);
-		snAjax('ban_ip', {ip: ip, secs: ''}, function(m){ if(m){ layer.msg(m, {time:3000}); snFeed(); snBans(); } });
+		snAjax('ban_ip', {ip: ip, secs: '', ev_ts: ts || ''}, function(m){ if(m){ layer.msg(m, {time:5000}); snFeed(); snBans(); snLearned(null, true); } });
 	});
 }
-function snFeedAllow(ip){
+function snFeedAllow(ip, ts){
 	var isEn = (SN_LANG !== 'id');
-	layer.confirm(isEn ? ('Allow ' + ip + '? IP will be added to allow list and never blocked.') : ('Izinkan ' + ip + '? IP akan masuk daftar putih dan tidak akan pernah diblokir.'), {
+	layer.confirm(isEn ? ('Allow ' + ip + '? IP will be added to allow list and never blocked. If its user agent is identifiable, similar clients are also learned as legitimate and stop being flagged as enumerators (see Learned Rules).') : ('Izinkan ' + ip + '? IP akan masuk daftar putih dan tidak akan pernah diblokir. Bila user agent-nya dapat dikenali, klien serupa juga dipelajari sebagai sah dan tidak lagi ditandai sebagai enumerasi (lihat Aturan Dipelajari).'), {
 		title: isEn ? 'Allow IP' : 'Izinkan IP',
 		btn: isEn ? ['Allow', 'Cancel'] : ['Izinkan', 'Batal']
 	}, function(idx){
 		layer.close(idx);
-		snAjax('allow_ip', {ip: ip}, function(m){ if(m){ layer.msg(m, {time:3000}); snFeed(); snAllowMuat(); } });
+		snAjax('allow_ip', {ip: ip, ev_ts: ts || ''}, function(m){ if(m){ layer.msg(m, {time:5000}); snFeed(); snAllowMuat(); snLearned(null, true); } });
 	});
+}
+
+/* ---------- aturan yang dipelajari dari keputusan operator ---------- */
+var SN_LRN_ON = true;
+function snLearned(btn, isSilent){
+	var isEn = (SN_LANG !== 'id');
+	var stopSpin = snSpinBtn(btn);
+	snAjax('get_learned', {}, function(m){
+		stopSpin();
+		if(!m) return;
+		SN_LRN_ON = !!m.enabled;
+		$('#lrnToggleTxt').text(SN_LRN_ON ? (isEn ? 'Pause learning' : 'Jeda pembelajaran') : (isEn ? 'Resume learning' : 'Lanjutkan pembelajaran'));
+		var info = '';
+		if(!SN_LRN_ON){
+			info = isEn ? 'Learning is paused: saved rules are kept but not applied, and new Block/Allow decisions are not learned.' : 'Pembelajaran dijeda: aturan tersimpan dipertahankan tetapi tidak diterapkan, dan keputusan Blokir/Izinkan baru tidak dipelajari.';
+		} else if(!Number(m.enforce)){
+			info = isEn ? 'Detection-only mode (enforce = 0): a matching client goes to the Review Queue instead of being blocked.' : 'Mode deteksi saja (enforce = 0): klien yang cocok masuk Review Queue, tidak langsung diblokir.';
+		}
+		if(info){ $('#lrnInfo').text(info).show(); } else { $('#lrnInfo').hide().text(''); }
+		var b = '';
+		var d = m.lessons || [];
+		SN_LRN_DATA = d;
+		for(var i = 0; i < d.length; i++){
+			var r = d[i];
+			var blok = (r.aksi === 'B');
+			var pola = '';
+			if(r.path){ pola += '<div class="sn-mono" title="' + snEsc(r.path) + '">URI ' + snEsc(r.path) + '</div>'; }
+			if(r.ua){ pola += '<div class="sn-mono" title="' + snEsc(r.ua) + '">UA ' + snEsc(r.ua) + '</div>'; }
+			var src = (r.sources || []);
+			var srcTxt = snEsc(src[0] || '-') + (src.length > 1 ? ' +' + (src.length - 1) : '');
+			var kerja = Number(r.hits) || 0;
+			b += '<tr><td><span class="sn-lv ' + (blok ? 'lv3' : 'lv0') + '">' + (blok ? (isEn ? 'Block' : 'Blokir') : (isEn ? 'Allow' : 'Izinkan')) + '</span></td>'
+				+ '<td class="sn-clip">' + pola + '</td>'
+				+ '<td>' + snEsc(r.kind || '-') + '</td>'
+				+ '<td class="sn-mono" title="' + snEsc(src.join(', ')) + '">' + srcTxt + '</td>'
+				+ '<td class="sn-mono">' + waktu(r.created) + '</td>'
+				+ '<td class="r" title="' + (r.last_hit ? snEsc(waktu(r.last_hit)) : '') + '">' + (blok ? kerja : '-') + '</td>'
+				+ '<td><span class="sn-fl" style="flex-wrap:nowrap">'
+				+ '<span class="sn-btn" onclick="snLearnedModal(\'' + String(r.id).replace(/[^0-9a-f]/g, '') + '\')" title="' + (isEn ? 'Edit this learned rule' : 'Ubah aturan yang dipelajari ini') + '">' + (isEn ? 'Edit' : 'Ubah') + '</span>'
+				+ '<span class="sn-btn dgr" onclick="snLearnedRevoke(\'' + String(r.id).replace(/[^0-9a-f]/g, '') + '\')" title="' + (isEn ? 'Forget this learned rule' : 'Lupakan aturan yang dipelajari ini') + '">' + (isEn ? 'Revoke' : 'Cabut') + '</span>'
+				+ '</span></td></tr>';
+		}
+		if(b){ $('#tbLearned').html(b); } else { kosong('#tbLearned', 7, isEn ? 'Nothing learned yet. Press Block or Allow on a row in Event Feed to teach the plugin.' : 'Belum ada yang dipelajari. Tekan Blokir atau Izinkan pada satu baris di Event Feed untuk mengajari plugin.'); }
+	}, null, btn, isSilent);
+}
+var SN_LRN_DATA = [];
+/* Tambah (tanpa id) atau ubah (dengan id) aturan yang dipelajari. Validasi pengaman ada di backend. */
+function snLearnedModal(id){
+	var isEn = (SN_LANG !== 'id');
+	var r = null;
+	if(id){ for(var i = 0; i < SN_LRN_DATA.length; i++){ if(SN_LRN_DATA[i].id === id) r = SN_LRN_DATA[i]; } if(!r){ layer.msg(isEn ? 'Rule not found, refresh the table' : 'Aturan tidak ditemukan, segarkan tabel', {time: 2500}); return; } }
+	var kat = ['scanner', 'campuran', 'probe-paths', 'bad-ua', 'bruteforce'];
+	var opsiKat = '';
+	for(var k = 0; k < kat.length; k++){ opsiKat += '<option value="' + kat[k] + '">' + kat[k] + '</option>'; }
+	var h = '<div style="padding:18px 22px;font-size:13px">'
+		+ '<div class="sn-grid2" style="gap:12px;margin-bottom:12px">'
+		+ '<div><label style="font-weight:600;display:block;margin-bottom:6px">' + (isEn ? 'Rule:' : 'Aturan:') + '</label><select id="lrnAksi" class="sn-inp" style="width:100%"><option value="B">' + (isEn ? 'Block (ban on match, 4xx only)' : 'Blokir (ban bila cocok, hanya 4xx)') + '</option><option value="A">' + (isEn ? 'Allow (do not flag this client)' : 'Izinkan (klien ini tidak ditandai)') + '</option></select></div>'
+		+ '<div><label style="font-weight:600;display:block;margin-bottom:6px">' + (isEn ? 'Category:' : 'Kategori:') + '</label><select id="lrnKind" class="sn-inp" style="width:100%">' + opsiKat + '</select></div>'
+		+ '</div>'
+		+ '<div style="margin-bottom:12px"><label style="font-weight:600;display:block;margin-bottom:6px">URI path:</label><input id="lrnPath" class="sn-inp" style="width:100%" placeholder="' + (isEn ? 'e.g. /backup-admin.php (optional)' : 'Contoh: /backup-admin.php (opsional)') + '"></div>'
+		+ '<div style="margin-bottom:12px"><label style="font-weight:600;display:block;margin-bottom:6px">User agent:</label><input id="lrnUa" class="sn-inp" style="width:100%" placeholder="' + (isEn ? 'e.g. sqlmap/1.7 or EvilScan (optional)' : 'Contoh: sqlmap/1.7 atau EvilScan (opsional)') + '"></div>'
+		+ '<div class="sn-note">' + (isEn ? 'Fill a path and/or user agent. Paths are normalised (lowercase, no query). Not accepted: "/", static assets, health checks, login paths, browser user agents, and legitimate crawlers for block rules. An allow rule needs a user agent.' : 'Isi path dan/atau user agent. Path dinormalkan (huruf kecil, tanpa query). Tidak diterima: "/", aset statis, health check, jalur login, user agent peramban, dan perayap sah untuk aturan blokir. Aturan izinkan wajib menyebut user agent.') + '</div>'
+		+ '</div>';
+	layer.open({type: 1, title: r ? (isEn ? 'Edit Learned Rule' : 'Ubah Aturan Dipelajari') : (isEn ? 'Add Learned Rule' : 'Tambah Aturan Dipelajari'), area: ['560px', 'auto'], content: h,
+		btn: isEn ? ['Save', 'Cancel'] : ['Simpan', 'Batal'],
+		success: function(){ if(r){ $('#lrnAksi').val(r.aksi); $('#lrnKind').val(kat.indexOf(r.kind) >= 0 ? r.kind : 'campuran'); $('#lrnPath').val(r.path || ''); $('#lrnUa').val(r.ua || ''); } },
+		yes: function(idx){
+			var data = {aksi_l: $('#lrnAksi').val(), kind: $('#lrnKind').val(), path: $.trim($('#lrnPath').val() || ''), ua: $.trim($('#lrnUa').val() || '')};
+			if(!data.path && !data.ua){ layer.msg(isEn ? 'Fill a path and/or user agent' : 'Isi path dan/atau user agent', {time: 2500}); return false; }
+			if(r){ data.id = r.id; }
+			snAjax(r ? 'learned_update' : 'learned_add', data, function(m){ if(m){ layer.close(idx); layer.msg(m, {time: 3000, icon: 1}); snLearned(null, true); } });
+			return false;
+		}});
+}
+function snLearnedRevoke(id){
+	var isEn = (SN_LANG !== 'id');
+	layer.confirm(isEn ? 'Revoke this learned rule? The same behaviour is no longer blocked at once (the normal score thresholds still apply).' : 'Cabut aturan yang dipelajari ini? Perilaku yang sama tidak lagi langsung diblokir (ambang skor normal tetap berlaku).', {
+		title: isEn ? 'Revoke Learned Rule' : 'Cabut Aturan Dipelajari',
+		btn: isEn ? ['Revoke', 'Cancel'] : ['Cabut', 'Batal']
+	}, function(idx){
+		layer.close(idx);
+		snAjax('learned_revoke', {id: id}, function(m){ if(m){ layer.msg(m, {time:3000, icon:1}); snLearned(null, true); } });
+	});
+}
+function snLearnedToggle(){
+	snAjax('learned_toggle', {enabled: SN_LRN_ON ? 0 : 1}, function(m){ if(m){ layer.msg(m, {time:3500}); snLearned(null, true); } });
 }
 
 /* ---------- IP timeline ---------- */
@@ -4996,11 +5231,67 @@ function snConf(){
 	});
 }
 function snSimpan(k){ snSetConf(k, $('#c_' + k).val(), $('#c_' + k)); }
+/* ---------- mode blokir per lapisan ---------- */
+function snModeNama(kode){
+	var isEn = (SN_LANG !== 'id');
+	var n = {guardd: isEn ? 'Log analysis (guardd)' : 'Analisis log (guardd)', firewall: isEn ? 'Kernel firewall' : 'Firewall kernel',
+		waf: 'WAF', proc: 'Process Guard (EDR)', upload: 'Upload Protection'};
+	return n[kode] || kode;
+}
+function snRenderMode(pos){
+	var isEn = (SN_LANG !== 'id');
+	var b = $('#bMode');
+	if(!pos){ b.text('🛡️ Mode: -').attr('class', 'sn-badge sn-off'); return; }
+	var teks, kelas;
+	if(pos.menunggu){ teks = isEn ? 'Applying...' : 'Menerapkan...'; kelas = 'sn-info'; }
+	else if(pos.ringkas === 'blokir'){ teks = isEn ? 'Full Blocking' : 'Blokir Penuh'; kelas = 'sn-ok'; }
+	else if(pos.ringkas === 'parsial'){ teks = isEn ? 'Partial' : 'Parsial'; kelas = 'sn-warn'; }
+	else { teks = isEn ? 'Monitor Only' : 'Monitor Saja'; kelas = 'sn-bad'; }
+	b.text('🛡️ Mode: ' + teks).attr('class', 'sn-badge ' + kelas);
+	var n = 0; for(var i = 0; i < pos.lapisan.length; i++){ if(pos.lapisan[i].blokir) n++; }
+	b.attr('title', (isEn ? 'Blocking layers: ' : 'Lapisan memblokir: ') + n + '/' + pos.lapisan.length + (isEn ? ' (click for details)' : ' (klik untuk rincian)'));
+	var jalanKartu = Number(pos.enforce_jalan) === 1;
+	$('#tileMonitor').toggleClass('on', !jalanKartu);
+	$('#tileBlock').toggleClass('on', jalanKartu);
+	$('#badgeEnforce').text(pos.menunggu ? (isEn ? 'APPLYING' : 'MENERAPKAN') : (jalanKartu ? (isEn ? 'BLOCKING' : 'MEMBLOKIR') : (isEn ? 'MONITOR' : 'MONITOR')))
+		.attr('class', 'sn-badge ' + (pos.menunggu ? 'sn-info' : (jalanKartu ? 'sn-ok' : 'sn-warn')));
+	$('#cardBlockMode').css('border-left-color', jalanKartu ? '#10b981' : '#f59e0b');
+	var now = $('#modeNow');
+	if(now.length){
+		var jalan = Number(pos.enforce_jalan) === 1;
+		now.css({'border-left-color': jalan ? '#10b981' : '#f59e0b'});
+		now.html((isEn ? 'Current guardd mode: ' : 'Mode guardd saat ini: ') + '<b>' + (jalan ? (isEn ? 'BLOCKING (enforce = 1)' : 'MEMBLOKIR (enforce = 1)') : (isEn ? 'MONITOR ONLY (enforce = 0)' : 'MONITOR SAJA (enforce = 0)')) + '</b>'
+			+ (pos.menunggu ? (isEn ? ' &mdash; saved enforce = ' + pos.enforce_setel + ', daemon restarting...' : ' &mdash; tersimpan enforce = ' + pos.enforce_setel + ', daemon sedang restart...') : '')).show();
+	}
+}
+function snModeDetail(){
+	var isEn = (SN_LANG !== 'id');
+	var pos = window.SN_POSTURE;
+	if(!pos){ snStatus(); return; }
+	var b = '<table class="sn-tb"><thead><tr><th>' + (isEn ? 'Layer' : 'Lapisan') + '</th><th>' + (isEn ? 'Service' : 'Layanan') + '</th><th>' + (isEn ? 'Mode' : 'Mode') + '</th><th>' + (isEn ? 'Detail' : 'Rincian') + '</th></tr></thead><tbody>';
+	for(var i = 0; i < pos.lapisan.length; i++){
+		var x = pos.lapisan[i];
+		var mode = !x.aktif ? '<span class="sn-badge sn-bad">' + (isEn ? 'OFF' : 'MATI') + '</span>'
+			: (x.blokir ? '<span class="sn-badge sn-ok">' + (isEn ? 'BLOCKING' : 'MEMBLOKIR') + '</span>' : '<span class="sn-badge sn-warn">' + (isEn ? 'DETECT ONLY' : 'DETEKSI SAJA') + '</span>');
+		b += '<tr><td>' + snEsc(snModeNama(x.kode)) + '</td><td>' + (x.aktif ? (isEn ? 'active' : 'aktif') : (isEn ? 'inactive' : 'tidak aktif')) + '</td><td>' + mode + '</td><td class="sn-mono">' + snEsc(x.ket) + '</td></tr>';
+	}
+	b += '</tbody></table>';
+	if(Number(pos.panic)){ b += '<div class="sn-note" style="margin-top:10px">' + (isEn ? 'PANIC is active: web ports are closed for everyone except allow lists.' : 'PANIC aktif: port web ditutup untuk semua kecuali daftar putih.') + '</div>'; }
+	if(Number(pos.enforce_jalan) !== 1){ b += '<div class="sn-note" style="margin-top:10px">' + (isEn ? 'guardd blocking is switched in <b>Settings &rarr; Blocking Mode</b> (Enable Blocking).' : 'Mode blokir guardd diaktifkan di <b>Settings &rarr; Blocking Mode</b> (Enable Blocking).') + '</div>'; }
+	layer.open({type: 1, title: isEn ? 'Blocking Mode per Layer' : 'Mode Blokir per Lapisan', area: ['680px', 'auto'], shadeClose: true,
+		btn: isEn ? ['Close'] : ['Tutup'], content: '<div style="padding:14px">' + b + '</div>'});
+}
+
 function snSetConf(k, v, el){
 	var isEn = (SN_LANG !== 'id');
 	var pIdx = snProgress(isEn ? ('Saving configuration ' + k + '...') : ('Menyimpan pengaturan ' + k + '...'));
 	snAjax('set_conf', {key: k, value: v}, function(m){
-		if(m){ layer.msg(m, {time:3000}); snConf(); snStatus(); }
+		if(m){
+			layer.msg(m, {time:3000}); snConf(); snStatus();
+			// guardd direstart dan baru menulis status.json beberapa detik kemudian:
+			// baca ulang supaya mode yang tampil adalah mode daemon yang sebenarnya.
+			if(k === 'enforce'){ setTimeout(function(){ snStatus(null, true); }, 2500); setTimeout(function(){ snStatus(null, true); }, 6000); setTimeout(function(){ snStatus(null, true); }, 12000); }
+		}
 	}, pIdx);
 }
 function snSvc(aksi, btn){
@@ -5589,9 +5880,12 @@ function snPortRender(direction){
 			? '<span class="sn-refresh">' + (isEn ? 'Any Address (0.0.0.0/0)' : 'Semua Alamat (0.0.0.0/0)') + '</span>'
 			: '<span class="sn-mono"><code>' + targetNet + '</code></span>';
 		var systemTag = r.system ? '<span class="sn-tag ok" style="font-size:10px;margin-left:6px" title="' + (isEn ? 'Protected baseline rule' : 'Aturan baseline terproteksi') + '">BASELINE</span>' : '';
-		var aksiBtn = r.system
-			? '<span class="sn-refresh" title="' + (isEn ? 'Protected baseline rule' : 'Aturan baseline terproteksi') + '">-</span>'
-			: '<span class="sn-btn dgr" onclick="snPortDelete(\'' + r.id + '\',\'' + r.port + '\')" title="' + (isEn ? 'Delete this port rule' : 'Hapus aturan port ini') + '">' + (isEn ? 'Delete' : 'Hapus') + '</span>';
+		var rid = String(r.id || '').replace(/[^A-Za-z0-9._-]/g, '');
+		var editBtn = '<span class="sn-btn" onclick="snPortRuleModal(\'' + rid + '\')" title="' + (r.system ? (isEn ? 'Edit remark (port, protocol, action and address of baseline rules are locked)' : 'Ubah keterangan (port, protokol, aksi, dan alamat aturan baseline dikunci)') : (isEn ? 'Edit this port rule' : 'Ubah aturan port ini')) + '">' + (isEn ? 'Edit' : 'Ubah') + '</span>';
+		var hapusBtn = r.system
+			? '<span class="sn-btn" style="opacity:.45;cursor:not-allowed" title="' + (isEn ? 'Baseline rule (SSH, panel, web) cannot be deleted: it could cut admin access' : 'Aturan baseline (SSH, panel, web) tidak bisa dihapus: bisa memutus akses admin') + '">' + (isEn ? 'Delete' : 'Hapus') + '</span>'
+			: '<span class="sn-btn dgr" onclick="snPortDelete(\'' + rid + '\',\'' + snEsc(String(r.port || '')).replace(/'/g, '') + '\')" title="' + (isEn ? 'Delete this port rule' : 'Hapus aturan port ini') + '">' + (isEn ? 'Delete' : 'Hapus') + '</span>';
+		var aksiBtn = '<span class="sn-fl" style="flex-wrap:nowrap;justify-content:flex-end">' + editBtn + hapusBtn + '</span>';
 
 		h += '<tr>'
 			+ '<td class="sn-mono" style="color:var(--muted)">' + (i + 1) + '</td>'
@@ -5697,8 +5991,21 @@ function snPortApplyKernel(){
 	});
 }
 
-function snPortRuleModal(){
+function snPortCari(id){
+	var c = (SN_PORT_DATA && SN_PORT_DATA.config) || {};
+	var arah = ['inbound', 'outbound'];
+	for(var a = 0; a < arah.length; a++){
+		var l = c[arah[a]] || [];
+		for(var i = 0; i < l.length; i++){ if(l[i].id === id) return {rule: l[i], dir: arah[a]}; }
+	}
+	return null;
+}
+/* Tanpa argumen: tambah aturan. Dengan id: ubah aturan itu (arah tetap; aturan baseline
+   hanya keterangannya, kolom lain dikunci sesuai larangan di backend). */
+function snPortRuleModal(editId){
 	var isEn = (SN_LANG !== 'id');
+	var ed = editId ? snPortCari(editId) : null;
+	if(editId && !ed){ layer.msg(isEn ? 'Rule not found, refresh the table' : 'Aturan tidak ditemukan, segarkan tabel', {time: 2500}); return; }
 	var sshPort = (SN_PORT_DATA && SN_PORT_DATA.config && SN_PORT_DATA.config.detected_ssh_port) ? SN_PORT_DATA.config.detected_ssh_port : 2244;
 	var pnlPort = (SN_PORT_DATA && SN_PORT_DATA.config && SN_PORT_DATA.config.detected_panel_port) ? SN_PORT_DATA.config.detected_panel_port : 15960;
 
@@ -5759,10 +6066,26 @@ function snPortRuleModal(){
 
 	layer.open({
 		type: 1,
-		title: isEn ? 'Add Port Access Control Rule' : 'Tambah Aturan Port Access Control',
+		title: ed ? (isEn ? 'Edit Port Access Control Rule' : 'Ubah Aturan Port Access Control') : (isEn ? 'Add Port Access Control Rule' : 'Tambah Aturan Port Access Control'),
 		area: ['540px', 'auto'],
 		content: modalHtml,
 		btn: isEn ? ['Save & Apply', 'Cancel'] : ['Simpan & Terapkan', 'Batal'],
+		success: function(){
+			if(!ed) return;
+			var r = ed.rule;
+			$('#modPortDir').val(ed.dir).prop('disabled', true);
+			snPortModalDirChange(ed.dir);
+			$('#modPortNum').val(r.port || '');
+			$('#modPortProto').val(r.protocol || 'tcp');
+			$('#modPortAction').val(r.action || 'ACCEPT');
+			$('#modPortNet').val((ed.dir === 'inbound' ? r.source : r.dest) || '0.0.0.0/0');
+			$('#modPortRemark').val(r.remark || '');
+			if(r.system){
+				$('#modPortNum, #modPortProto, #modPortAction, #modPortNet').prop('disabled', true);
+				$('#modPortNum').closest('div').parent().prev().hide();
+				$('#modPortRemark').closest('div').before('<div class="sn-note" style="margin-bottom:10px">' + (isEn ? 'Baseline rule: only the remark can be changed. Port, protocol, action and address are locked so SSH, panel and websites stay reachable.' : 'Aturan baseline: hanya keterangan yang bisa diubah. Port, protokol, aksi, dan alamat dikunci agar SSH, panel, dan situs tetap terjangkau.') + '</div>');
+			}
+		},
 		yes: function(idx){
 			var dir = $('#modPortDir').val();
 			var port = ($('#modPortNum').val() || '').trim();
@@ -5793,7 +6116,8 @@ function snPortRuleModal(){
 
 			layer.close(idx);
 			var pIdx = snProgress(isEn ? 'Saving port firewall rule...' : 'Menyimpan aturan port firewall...');
-			snAjax('add_port_rule', payload, function(res){
+			if(ed){ payload.id = ed.rule.id; payload.direction = ed.dir; }
+			snAjax(ed ? 'update_port_rule' : 'add_port_rule', payload, function(res){
 				if(res){
 					layer.msg(res, {time: 3000});
 					snPortLoad();
@@ -7184,7 +7508,50 @@ function snRevPut(ip, keputusan){
 }
 
 /* ---------- asal negara penyerang ---------- */
+/* ---------- asal negara penyerang (tab Origin) ----------
+   Fungsi pengisi tabel ini sempat tertimpa oleh fungsi bernama sama yang hanya
+   memuat kartu Country Block, sehingga tabel selalu "loading". Kartu Country Block
+   kini dimuat oleh snGeoBanPanel() sesudah tabel. */
 function snGeoMuat(){
+	var isEn = (SN_LANG !== 'id');
+	var jam = $('#selGeoJam').val() || '168';
+	snAjax('get_geo_stat', {hours: jam}, function(m){
+		if(!m){ kosong('#tbGeo', 7, isEn ? 'Failed to load country statistics.' : 'Gagal memuat statistik negara.'); snGeoBanPanel(); return; }
+		if(!m.geo_tersedia){
+			$('#geoNote').html(isEn
+				? 'The panel GeoIP database (<span class="sn-mono">GeoLite2</span>) was not found on this server, so countries cannot be shown. Other features keep working.'
+				: 'Basis data GeoIP panel (<span class="sn-mono">GeoLite2</span>) tidak ditemukan di server ini, jadi negara tidak bisa ditampilkan. Fungsi lain tetap berjalan normal.').show();
+		} else {
+			$('#geoNote').html(isEn
+				? ('Countries are read from the panel GeoLite2 database and cached locally. ' + m.total_ip + ' attacker IPs' + (m.tak_tahu > 0 ? ', ' + m.tak_tahu + ' not recognised (grouped as "Unknown").' : ', all recognised.'))
+				: ('Negara dibaca dari GeoLite2 milik panel dan disimpan di cache lokal. ' + m.total_ip + ' IP penyerang' + (m.tak_tahu > 0 ? ', ' + m.tak_tahu + ' tidak dikenali (digabung sebagai "Tidak diketahui").' : ', semua dikenali.'))).show();
+		}
+		var neg = m.negara || [];
+		var b = '';
+		var maks = neg.length ? (neg[0].n || 1) : 1;
+		for(var i = 0; i < neg.length; i++){
+			var n = neg[i];
+			var kode = String(n.kode || '');
+			var tombol = (kode === '??' || !/^[A-Z]{2}$/.test(kode))
+				? '<span class="sn-refresh">-</span>'
+				: '<span class="sn-btn dgr" onclick="snGeoBanCepat(\'' + kode + '\')" title="' + (isEn ? 'Add this country to the Country Block list' : 'Tambahkan negara ini ke daftar Country Block') + '">' + (isEn ? 'Block' : 'Blokir') + '</span>';
+			var nama = (kode === '??') ? (isEn ? 'Unknown' : 'Tidak diketahui') : n.nama;
+			b += '<tr><td class="sn-mono">' + snBendera(kode) + ' ' + snEsc(kode) + '</td>'
+				+ '<td>' + snEsc(nama) + '</td>'
+				+ '<td class="r">' + (Number(n.ip) || 0) + '</td>'
+				+ '<td class="r">' + (Number(n.n) || 0) + '</td>'
+				+ '<td class="r sn-sc ' + kelasSkor(n.puncak) + '">' + (Number(n.puncak) || 0) + '</td>'
+				+ '<td><div class="sn-bar" style="width:90px"><i style="width:' + Math.round((Number(n.n) || 0) * 100 / maks) + '%"></i></div></td>'
+				+ '<td>' + tombol + '</td></tr>';
+		}
+		if(b){ $('#tbGeo').html(b); }
+		else { kosong('#tbGeo', 7, isEn ? 'No attackers recorded in this timeframe.' : 'Tidak ada penyerang tercatat pada rentang ini.'); }
+		snGeoBanPanel();
+	});
+}
+
+/* Kartu Country Block: status geo-ban, daftar negara terpilih, dan pilihan negara. */
+function snGeoBanPanel(){
 	snAjax('get_geo_ban', {}, function(m){
 		if(!m) return;
 		var isEn = (SN_LANG !== 'id');
@@ -7372,7 +7739,7 @@ SN_SUB = {
 	bans: snBans, edr: snEdrMuat, situs: snSitus, vhost: snVhostMuat, geo: snGeoMuat,
 	review: snRevMuat, notif: snNotifMuat,
 	aksi: snAksiMuat,
-	feed: snFeed, riwayat: snRiwayat, log: snLog
+	feed: snFeed, learned: snLearned, riwayat: snRiwayat, log: snLog
 };
 SN_SUB2 = {
 	aktif: 'atur',
@@ -7382,7 +7749,6 @@ SN_SUB2 = {
 $(function(){
 	snInitLang();
 	snBuka();
-	SN_SYS_T = 0;
 
 	setTimeout(function(){
 		snAjax('get_lifecycle_status', {}, function(st){
@@ -7429,6 +7795,7 @@ $(function(){
 	window.addEventListener('resize', function(){
 		if(SN_GRAF){ SN_GRAF.resize(); }
 		if(SN_DONUT){ SN_DONUT.resize(); }
+		if(SN_PETA){ SN_PETA.resize(); }
 	});
 	/* Timer TIDAK dibuat di sini. snBuka() yang memakainya, supaya timer
 	   lahir dan mati bersama dialog. Kalau dibuat di sini, timer tetap
@@ -7467,6 +7834,7 @@ function snAvSub(nama, el){
 	if(nama === 'vhost'){ snAvSitesMuat(); }
 	else if(nama === 'integ'){ snAvIntegMuat(); }
 	else if(nama === 'quar'){ snAvQuarMuat(); }
+	else if(nama === 'sweeper'){ snSwMuat(); }
 	else if(nama === 'live'){ snScanStreamRefresh(true); }
 	else if(nama === 'logs'){ snAvLogsMuat(); }
 }
@@ -7523,6 +7891,7 @@ function snAvMuat(btn, isSilent){
 	if(SN_AV_TAB === 'vhost'){ snAvSitesMuat(null, isSilent); }
 	else if(SN_AV_TAB === 'integ'){ snAvIntegMuat(null, isSilent); }
 	else if(SN_AV_TAB === 'quar'){ snAvQuarMuat(null, isSilent); }
+	else if(SN_AV_TAB === 'sweeper'){ snSwMuat(null, false); }
 	else if(SN_AV_TAB === 'live'){ snScanStreamRefresh(true); }
 	else if(SN_AV_TAB === 'logs'){ snAvLogsMuat(null, isSilent); }
 }
@@ -8218,6 +8587,299 @@ function snAvQuarMuat(){
 		}
 	$('#tbAvQuar').html(h);
 	});
+}
+
+/* ---------- Sweeper (pemindai webshell, logika ShellSweep) ---------- */
+var SN_SW_TIMER = null;
+var SN_SW_RULES = {
+	'eval-input': ['eval/assert/create_function runs data taken from the request', 'eval/assert/create_function menjalankan data dari request'],
+	'eval-decode': ['eval/assert runs a decoded payload (base64/gzinflate/rot13...)', 'eval/assert menjalankan muatan hasil dekode (base64/gzinflate/rot13...)'],
+	'eval-dynname': ['eval-like function built from constants', 'fungsi eval disusun dari konstanta'],
+	'eval-dynamic': ['create_function with a dynamic body', 'create_function dengan isi dinamis'],
+	'eval-varvar': ['eval of a variable-variable', 'eval dari variabel dinamis ($$x)'],
+	'eval-var': ['eval of a variable (weak signal)', 'eval dari variabel (sinyal lemah)'],
+	'exec-input': ['shell command executed with request data', 'perintah shell dijalankan dengan data request'],
+	'exec-decode': ['shell command from a decoded payload', 'perintah shell dari muatan hasil dekode'],
+	'exec-var': ['shell command with a variable (weak signal)', 'perintah shell dengan variabel (sinyal lemah)'],
+	'include-input': ['include/require of a path from the request (LFI/backdoor loader)', 'include/require path dari request (LFI/pemuat backdoor)'],
+	'include-decode': ['include of a decoded payload', 'include dari muatan hasil dekode'],
+	'callback-input': ['callback function chosen by the request', 'fungsi callback ditentukan oleh request'],
+	'callback-dangerous-const': ['dangerous function used as callback with request data', 'fungsi berbahaya dipakai sebagai callback dengan data request'],
+	'preg-e-input': ['preg_replace /e executes request data', 'preg_replace /e menjalankan data request'],
+	'preg-e': ['preg_replace with the /e modifier (legacy code execution)', 'preg_replace dengan modifier /e (eksekusi kode lawas)'],
+	'write-input': ['file written with a path and content from the request (dropper)', 'berkas ditulis dengan path dan isi dari request (dropper)'],
+	'upload-input-path': ['uploaded file moved to a path chosen by the request', 'berkas unggahan dipindah ke path pilihan request'],
+	'fs-input': ['file path taken from the request', 'path berkas diambil dari request'],
+	'fs-input-read': ['file read with a path from the request', 'berkas dibaca dengan path dari request'],
+	'fs-input-multi': ['many file operations driven by the request (file-manager shell)', 'banyak operasi berkas dikendalikan request (shell file-manager)'],
+	'backtick-input': ['backtick shell command with request data', 'perintah shell backtick dengan data request'],
+	'backtick-var': ['backtick shell command with a variable (weak signal)', 'perintah shell backtick dengan variabel (sinyal lemah)'],
+	'varcall-input': ['function chosen by the request is called ($_POST[x]())', 'fungsi pilihan request dipanggil ($_POST[x]())'],
+	'varcall-dynname': ['function name rebuilt from fragments then called', 'nama fungsi disusun dari potongan lalu dipanggil'],
+	'varcall-decoded': ['function from a decoded payload is called', 'fungsi dari muatan hasil dekode dipanggil'],
+	'varcall-decoder-name': ['variable holds a decoder name (weak signal)', 'variabel berisi nama dekoder (sinyal lemah)'],
+	'callconst-dynname': ['("sys"."tem")(...) style call', 'pemanggilan gaya ("sys"."tem")(...)'],
+	'extract-input': ['extract() imports request variables', 'extract() memasukkan variabel request'],
+	'varvar-input': ['variable-variables from request data', 'variabel dinamis dari data request'],
+	'input-eval': ['request input plus eval of a variable', 'input request ditambah eval variabel'],
+	'input-eval-decode': ['request input, decoder, and eval of a variable (Godzilla/Behinder style)', 'input request, dekoder, dan eval variabel (gaya Godzilla/Behinder)'],
+	'inc-chain': ['long $x++ chains build strings (non-alphanumeric obfuscation)', 'rantai $x++ panjang membangun string (obfuskasi non-alfanumerik)'],
+	'inc-chain-dynamic': ['increment-built string used to run request code', 'string hasil $x++ dipakai menjalankan kode request'],
+	'xslt-php': ['XSLT registerPHPFunctions', 'XSLT registerPHPFunctions'],
+	'revshell-php': ['PHP reverse shell (socket plus shell)', 'reverse shell PHP (socket plus shell)'],
+	'revshell': ['reverse shell', 'reverse shell'],
+	'obf-globals': ['${"GLOBALS"} built from escapes', '${"GLOBALS"} disusun dari escape'],
+	'hex-escape-heavy': ['file dominated by \\x escapes', 'berkas didominasi escape \\x'],
+	'decode-blob': ['large encoded blob passed to a decoder (weak signal)', 'blob terenkode besar ke dekoder (sinyal lemah)'],
+	'entropy-high': ['entropy far above normal code (ShellSweep indicator)', 'entropi jauh di atas kode normal (indikator ShellSweep)'],
+	'jsp-exec-input': ['Runtime.exec/ProcessBuilder with request data', 'Runtime.exec/ProcessBuilder dengan data request'],
+	'jsp-defineclass': ['defineClass loader (Behinder/Godzilla)', 'pemuat defineClass (Behinder/Godzilla)'],
+	'jsp-script-eval': ['ScriptEngine eval with request data', 'ScriptEngine eval dengan data request'],
+	'jsp-reflect-input': ['reflection invoke with request data and crypto', 'invoke refleksi dengan data request dan kripto'],
+	'jsp-write-input': ['file written with a path from the request', 'berkas ditulis dengan path dari request'],
+	'jsp-exec': ['Runtime.exec (weak signal)', 'Runtime.exec (sinyal lemah)'],
+	'asp-eval-input': ['eval/Execute of request data', 'eval/Execute data request'],
+	'asp-exec-input': ['process started with request data', 'proses dijalankan dengan data request'],
+	'aspx-exec-input': ['process arguments from user input', 'argumen proses dari input pengguna'],
+	'asp-wscript-input': ['WScript.Shell run with request data', 'WScript.Shell menjalankan data request'],
+	'asp-assembly-load': ['Assembly.Load of a request payload', 'Assembly.Load muatan request'],
+	'asp-write-input': ['file written with a path from the request', 'berkas ditulis dengan path dari request'],
+	'asp-filemanager': ['file-manager features driven by the request', 'fitur file-manager dikendalikan request']
+};
+function snSwRuleText(id, isEn){ var r = SN_SW_RULES[id]; return r ? r[isEn ? 0 : 1] : id; }
+function snSwDur(s){ s = Number(s) || 0; return s < 60 ? s + ' s' : Math.floor(s / 60) + ' m ' + (s % 60) + ' s'; }
+function snSwWaktu(ts){ if(!ts) return '-'; var d = new Date(Number(ts) * 1000); return d.toLocaleString(); }
+
+function snSwMuat(btn, manual){
+	var stopSpin = snSpinBtn(btn);
+	snAjax('get_sweeper_status', {}, function(m){
+		stopSpin();
+		if(!m) return;
+		var isEn = (SN_LANG !== 'id');
+		snSwRender(m);
+		snSwFindings();
+		if(m.running) snSwPoll();
+		if(manual && window.layer && layer.msg){ layer.msg(isEn ? 'Status refreshed' : 'Status diperbarui', {time: 1500, icon: 1}); }
+	}, null, btn);
+}
+
+function snSwRender(m){
+	var isEn = (SN_LANG !== 'id');
+	var eng = m.engine || {}, cfg = m.config || {}, last = m.last || {}, sm = last.summary || {}, cnt = m.counts || {};
+	var baris = function(k, v){ return '<div><span>' + k + '</span><span>' + v + '</span></div>'; };
+	var badge = $('#swEngineBadge');
+	if(eng.kind === 'c'){ badge.attr('class', 'sn-badge sn-ok').text(isEn ? 'Engine: C native' : 'Mesin: C native').attr('title', eng.version || ''); }
+	else { badge.attr('class', 'sn-badge sn-warn').text(isEn ? 'Engine: Python (slow)' : 'Mesin: Python (lambat)').attr('title', isEn ? 'C engine missing. Open Settings and build it (needs gcc).' : 'Mesin C belum ada. Buka Pengaturan lalu susun (butuh gcc).'); }
+	$('#avSweepCount').text((Number(cnt.webshell) || 0) + (Number(cnt.suspicious) || 0));
+	var roots = m.roots || [];
+	var info = baris(isEn ? 'Folders scanned' : 'Folder dipindai', roots.length + (isEn ? ' (vhosts + custom)' : ' (vhost + kustom)'))
+		+ baris(isEn ? 'Last scan' : 'Pemindaian terakhir', last.finished ? snEsc(snSwWaktu(last.finished)) + (last.engine ? ' (' + snEsc(last.engine) + ')' : '') : '-')
+		+ baris(isEn ? 'Files scanned / flagged' : 'Berkas dipindai / ditandai', last.finished ? ((sm.scanned || 0) + ' / ' + (sm.flagged || 0)) : '-')
+		+ baris(isEn ? 'Duration / CPU / memory' : 'Durasi / CPU / memori', last.finished ? (snSwDur(sm.seconds) + ' / ' + (Number(sm.cpu_seconds) || 0) + ' s / ' + Math.round((Number(sm.max_rss_kb) || 0) / 1024) + ' MB') : '-')
+		+ baris(isEn ? 'Quarantined (last scan) / total' : 'Dikarantina (scan terakhir) / total', (sm.quarantined || 0) + ' / ' + (Number(cnt.quarantined) || 0))
+		+ baris(isEn ? 'Open: webshell / suspicious' : 'Terbuka: webshell / mencurigakan', (Number(cnt.webshell) || 0) + ' / ' + (Number(cnt.suspicious) || 0))
+		+ baris(isEn ? 'Auto quarantine' : 'Karantina otomatis', cfg.auto_quarantine ? (isEn ? 'on (score ' + (cfg.quarantine_min_score || 90) + '+)' : 'aktif (skor ' + (cfg.quarantine_min_score || 90) + '+)') : (isEn ? 'off (report only)' : 'mati (laporan saja)'))
+		+ baris(isEn ? 'Schedule' : 'Jadwal', m.schedule ? (isEn ? 'daily (incremental)' : 'harian (inkremental)') : (isEn ? 'off' : 'mati'))
+		+ baris(isEn ? 'Trusted hashes' : 'Hash sah', Number(m.allow_count) || 0);
+	$('#swInfo').html(info);
+	var run = !!m.running;
+	$('#btnSwAll, #btnSwReport, #btnSwPath').css({opacity: run ? 0.45 : 1, 'pointer-events': run ? 'none' : 'auto'});
+	$('#swBtnAbort').toggle(run);
+	$('#swProg').toggle(run);
+	if(run){ var pg = (m.job || {}).progress || {}; $('#swProgTxt').text((pg.scanned || 0) + (isEn ? ' files scanned, ' : ' berkas dipindai, ') + (pg.flagged || 0) + (isEn ? ' flagged | ' : ' ditandai | ') + (pg.path || '')); }
+}
+
+function snSwPoll(){
+	if(SN_SW_TIMER) return;
+	SN_SW_TIMER = setInterval(function(){
+		if(!$('#top-antivirus').hasClass('on') || SN_AV_TAB !== 'sweeper'){ clearInterval(SN_SW_TIMER); SN_SW_TIMER = null; return; }
+		snAjax('get_sweeper_job', {}, function(j){
+			if(!j) return;
+			var isEn = (SN_LANG !== 'id');
+			if(j.running){
+				var pg = (j.job || {}).progress || {};
+				$('#swProgTxt').text((pg.scanned || 0) + (isEn ? ' files scanned, ' : ' berkas dipindai, ') + (pg.flagged || 0) + (isEn ? ' flagged | ' : ' ditandai | ') + (pg.path || ''));
+				return;
+			}
+			clearInterval(SN_SW_TIMER); SN_SW_TIMER = null;
+			var sm = (j.job || {}).summary || {};
+			if(window.layer && layer.msg){
+				layer.msg(isEn ? ('Sweeper finished: ' + (sm.scanned || 0) + ' files, ' + (sm.webshell || 0) + ' webshell, ' + (sm.quarantined || 0) + ' quarantined')
+					: ('Sweeper selesai: ' + (sm.scanned || 0) + ' berkas, ' + (sm.webshell || 0) + ' webshell, ' + (sm.quarantined || 0) + ' dikarantina'), {time: 5000, icon: (sm.webshell || 0) > 0 ? 0 : 1});
+			}
+			snSwMuat(null, false);
+			snAvQuarMuat();
+		}, null, null, true);
+	}, 2000);
+}
+
+function snSwStart(scope, mode, path){
+	var isEn = (SN_LANG !== 'id');
+	var go = function(){
+		var pIdx = snProgress(isEn ? 'Starting Sweeper...' : 'Memulai Sweeper...');
+		var d = {scope: scope, mode: mode, full: '1'};
+		if(scope === 'path') d.path = path;
+		snAjax('sweeper_start', d, function(r){
+			if(!r) return;
+			if(r.started === false && r.running){ layer.msg(isEn ? 'A scan is already running' : 'Pemindaian lain sedang berjalan', {time: 2500}); }
+			else { layer.msg(isEn ? 'Sweeper scan started' : 'Pemindaian Sweeper dimulai', {time: 2000, icon: 1}); }
+			SN_SW_TIMER = null;
+			snSwMuat(null, false);
+			snSwPoll();
+		}, pIdx);
+	};
+	if(mode === 'auto'){
+		layer.confirm(isEn ? 'Scan all vhosts and custom folders now? Files rated <b>webshell</b> (score 90+) are moved to quarantine automatically.' : 'Pindai semua vhost dan folder kustom sekarang? Berkas berperingkat <b>webshell</b> (skor 90+) otomatis dipindahkan ke karantina.',
+			{title: 'Sweeper', btn: isEn ? ['Start scan', 'Cancel'] : ['Mulai pindai', 'Batal']}, function(idx){ layer.close(idx); go(); });
+	} else { go(); }
+}
+
+function snSwStartPath(){
+	var isEn = (SN_LANG !== 'id');
+	layer.prompt({title: isEn ? 'Folder to scan (inside a vhost or custom folder)' : 'Folder yang dipindai (di dalam vhost atau folder kustom)', value: '/www/wwwroot/', formType: 0, area: ['520px', '40px'], btn: isEn ? ['Start scan', 'Cancel'] : ['Mulai pindai', 'Batal']}, function(val, idx){
+		layer.close(idx);
+		val = $.trim(val);
+		if(!val || val.charAt(0) !== '/'){ layer.msg(isEn ? 'Enter an absolute path' : 'Isi path absolut', {time: 2000}); return; }
+		snSwStart('path', 'auto', val);
+	});
+}
+
+function snSwAbort(){
+	var isEn = (SN_LANG !== 'id');
+	snAjax('sweeper_abort', {}, function(r){ if(r){ layer.msg(r, {time: 2000, icon: 1}); setTimeout(function(){ snSwMuat(null, false); }, 1200); } });
+}
+
+function snSwFindings(){
+	var isEn = (SN_LANG !== 'id');
+	var f = $('#swFilter').val();
+	if(f === undefined || f === null) f = 'open';
+	snAjax('get_sweeper_findings', {filter: f}, function(rows){
+		if(!rows){ kosong('#tbSweep', 6, isEn ? 'Failed to load findings.' : 'Gagal memuat temuan.'); return; }
+		if(!rows.length){ kosong('#tbSweep', 6, isEn ? 'No findings. Nothing suspicious was detected in the scanned folders.' : 'Tidak ada temuan. Tidak ada yang mencurigakan di folder yang dipindai.'); return; }
+		var h = '';
+		for(var i = 0; i < rows.length; i++){
+			var e = rows[i], st = e.status || 'open';
+			var lv = st === 'quarantined' ? '<span class="sn-badge sn-ok">' + (isEn ? 'QUARANTINED' : 'DIKARANTINA') + '</span>'
+				: st === 'ignored' ? '<span class="sn-badge sn-off">' + (isEn ? 'IGNORED' : 'DIABAIKAN') + '</span>'
+				: st === 'allowed' ? '<span class="sn-badge sn-off">' + (isEn ? 'SAFE' : 'SAH') + '</span>'
+				: (e.verdict === 'webshell' ? '<span class="sn-badge sn-bad">WEBSHELL</span>' : '<span class="sn-badge sn-warn">' + (isEn ? 'SUSPICIOUS' : 'MENCURIGAKAN') + '</span>');
+			var rules = '';
+			var rl = e.rules || [];
+			for(var q = 0; q < rl.length; q++){
+				rules += '<span class="sn-swrule" title="' + snEsc(snSwRuleText(rl[q][0], isEn)) + (rl[q][2] ? ' [' + snEsc(rl[q][2]) + ']' : '') + '">' + snEsc(rl[q][0]) + ' ' + (Number(rl[q][1]) || 0) + '</span>';
+			}
+			var pa = snEsc(e.path || '');
+			var act = '';
+			if(st === 'open'){
+				act = '<span class="sn-btn dgr" data-p="' + pa + '" onclick="snSwAct(\'quarantine\', this)">' + (isEn ? 'Quarantine' : 'Karantina') + '</span> '
+					+ '<span class="sn-btn" data-p="' + pa + '" onclick="snSwAct(\'allow\', this)">' + (isEn ? 'Mark safe' : 'Tandai sah') + '</span> '
+					+ '<span class="sn-btn" data-p="' + pa + '" onclick="snSwAct(\'ignore\', this)">' + (isEn ? 'Ignore' : 'Abaikan') + '</span>';
+			} else if(st === 'ignored'){
+				act = '<span class="sn-btn" data-p="' + pa + '" onclick="snSwAct(\'unignore\', this)">' + (isEn ? 'Reopen' : 'Buka kembali') + '</span>';
+			} else if(st === 'quarantined'){
+				act = '<span class="sn-btn" onclick="snAvSub(\'quar\', $(\'#top-antivirus .sn-tabs > span\').eq(2))">' + (isEn ? 'See Quarantine' : 'Lihat Karantina') + '</span>';
+			}
+			h += '<tr><td>' + lv + '</td>'
+				+ '<td class="sn-mono" style="font-size:12px;word-break:break-all">' + pa + '<div style="color:var(--muted);font-size:11px">' + snEsc(e.vhost || '') + ' | ' + ukuranAngka(e.size || 0) + '</div></td>'
+				+ '<td class="r sn-sc ' + kelasSkor(e.score) + '">' + (Number(e.score) || 0) + '</td>'
+				+ '<td>' + rules + '</td>'
+				+ '<td class="r sn-mono">' + (Number(e.entropy) || 0).toFixed(2) + '</td>'
+				+ '<td class="r" style="white-space:nowrap">' + act + '</td></tr>';
+		}
+		$('#tbSweep').html(h);
+	});
+}
+
+function snSwAct(act, el){
+	var isEn = (SN_LANG !== 'id');
+	var path = $(el).attr('data-p');
+	var jalan = function(){
+		var pIdx = snProgress(isEn ? 'Applying action...' : 'Menjalankan aksi...');
+		snAjax('sweeper_action', {act: act, path: path}, function(r){
+			if(r){ layer.msg(r, {time: 2500, icon: 1}); snSwMuat(null, false); if(act === 'quarantine') snAvQuarMuat(); }
+		}, pIdx);
+	};
+	if(act === 'quarantine' || act === 'allow'){
+		var pesan = act === 'quarantine'
+			? (isEn ? 'Move this file to quarantine?<br><span class="sn-mono">' : 'Pindahkan berkas ini ke karantina?<br><span class="sn-mono">')
+			: (isEn ? 'Mark this exact file content as safe? It will no longer be reported (same hash).<br><span class="sn-mono">' : 'Tandai isi berkas ini sebagai sah? Tidak akan dilaporkan lagi (hash yang sama).<br><span class="sn-mono">');
+		layer.confirm(pesan + snEsc(path) + '</span>', {title: 'Sweeper', btn: isEn ? ['Yes', 'Cancel'] : ['Ya', 'Batal']}, function(idx){ layer.close(idx); jalan(); });
+	} else { jalan(); }
+}
+
+function snSwConfig(){
+	var isEn = (SN_LANG !== 'id');
+	snAjax('get_sweeper_status', {}, function(m){
+		if(!m) return;
+		snAjax('get_sweeper_allow', {}, function(allow){
+			var c = m.config || {}, eng = m.engine || {}, ent = c.entropy || {};
+			var cek = function(id, on, txt){ return '<label style="display:block;margin:4px 0;cursor:pointer"><input type="checkbox" id="' + id + '"' + (on ? ' checked' : '') + '> ' + txt + '</label>'; };
+			var num = function(id, v, lo, hi, txt){ return '<label style="display:inline-block;margin:4px 14px 4px 0">' + txt + ' <input type="number" id="' + id + '" class="sn-inp" value="' + (Number(v) || 0) + '" min="' + lo + '" max="' + hi + '" style="width:80px"></label>'; };
+			var al = '';
+			allow = allow || [];
+			for(var i = 0; i < allow.length; i++){
+				al += '<div style="display:flex;gap:8px;align-items:center;margin:2px 0"><span class="sn-mono" style="font-size:11px;flex:1;word-break:break-all">' + snEsc(allow[i].sha256.slice(0, 16)) + '... ' + snEsc(allow[i].catatan) + '</span>'
+					+ '<span class="sn-btn dgr sn-sm" data-h="' + snEsc(allow[i].sha256) + '" onclick="snSwAllowDel(this)">' + (isEn ? 'Remove' : 'Hapus') + '</span></div>';
+			}
+			if(!al) al = '<span style="color:var(--muted)">' + (isEn ? 'No trusted hashes yet.' : 'Belum ada hash sah.') + '</span>';
+			var html = '<div style="padding:14px 20px;font-size:13px;line-height:1.55;max-height:600px;overflow:auto">'
+				+ '<b>' + (isEn ? 'Folders' : 'Folder') + '</b>'
+				+ '<div style="color:var(--muted);font-size:12px">' + (isEn ? 'All vhosts are scanned automatically. Add extra folders (one per line, absolute path):' : 'Semua vhost dipindai otomatis. Tambahkan folder lain (satu per baris, path absolut):') + '</div>'
+				+ '<textarea id="swCfgPaths" class="sn-inp" style="width:100%;height:60px">' + snEsc((c.custom_paths || []).join('\n')) + '</textarea>'
+				+ '<div style="margin-top:6px">' + (isEn ? 'Exclude paths containing (one per line):' : 'Kecualikan path yang memuat (satu per baris):') + '</div>'
+				+ '<textarea id="swCfgExcl" class="sn-inp" style="width:100%;height:50px">' + snEsc((c.exclude || []).join('\n')) + '</textarea>'
+				+ '<div style="margin-top:6px">' + (isEn ? 'Skip vhosts (names, one per line):' : 'Lewati vhost (nama, satu per baris):') + '</div>'
+				+ '<textarea id="swCfgSkip" class="sn-inp" style="width:100%;height:40px">' + snEsc((c.skip_vhosts || []).join('\n')) + '</textarea>'
+				+ '<hr style="border:0;border-top:1px solid rgba(255,255,255,0.1);margin:10px 0"><b>' + (isEn ? 'Detection' : 'Deteksi') + '</b>'
+				+ cek('swCfgAuto', c.auto_quarantine, isEn ? 'Quarantine webshells automatically (score 90+)' : 'Karantina webshell otomatis (skor 90+)')
+				+ '<div>' + num('swCfgQmin', c.quarantine_min_score, 90, 100, isEn ? 'Quarantine score' : 'Skor karantina') + num('swCfgRmin', c.report_min_score, 50, 100, isEn ? 'Report score' : 'Skor laporan') + '</div>'
+				+ '<div style="color:var(--muted);font-size:12px">' + (isEn ? 'Entropy baseline for PHP (ShellSweep indicator): mean ' + (Number(ent.mean) || 0).toFixed(3) + ', sd ' + (Number(ent.sd) || 0).toFixed(3) + '. Calibrate on a folder you trust:' : 'Basis entropi PHP (indikator ShellSweep): rata-rata ' + (Number(ent.mean) || 0).toFixed(3) + ', sd ' + (Number(ent.sd) || 0).toFixed(3) + '. Kalibrasi pada folder yang Anda percaya:') + '</div>'
+				+ '<div style="display:flex;gap:8px"><input type="text" id="swCfgCal" class="sn-inp" style="flex:1" placeholder="/www/wwwroot/situs-bersih"><span class="sn-btn" onclick="snSwCalibrate()">' + (isEn ? 'Calibrate' : 'Kalibrasi') + '</span></div>'
+				+ '<hr style="border:0;border-top:1px solid rgba(255,255,255,0.1);margin:10px 0"><b>' + (isEn ? 'Resources' : 'Sumber daya') + '</b><div>'
+				+ num('swCfgThr', c.throttle_ms, 0, 1000, isEn ? 'Pause ms per 50 files' : 'Jeda ms per 50 berkas') + num('swCfgNice', c.nice, 0, 19, 'nice') + num('swCfgMax', c.max_size_mb, 1, 8, isEn ? 'Max file MB' : 'Maks berkas MB') + '</div>'
+				+ cek('swCfgInc', c.incremental, isEn ? 'Scheduled scans only read changed files (full scan weekly)' : 'Pemindaian terjadwal hanya membaca berkas yang berubah (penuh tiap minggu)')
+				+ '<div style="margin-top:6px">' + (isEn ? 'Engine:' : 'Mesin:') + ' <select id="swCfgEng" class="sn-inp"><option value="auto"' + (c.engine === 'auto' ? ' selected' : '') + '>auto</option><option value="c"' + (c.engine === 'c' ? ' selected' : '') + '>C</option><option value="python"' + (c.engine === 'python' ? ' selected' : '') + '>Python</option></select> '
+				+ '<span class="sn-btn" onclick="snSwBuild()">' + (isEn ? 'Build C engine' : 'Susun mesin C') + '</span> <span style="color:var(--muted);font-size:12px">' + snEsc(eng.version || (isEn ? 'not built' : 'belum disusun')) + (eng.gcc ? '' : ' (no gcc)') + '</span></div>'
+				+ cek('swCfgSched', m.schedule, isEn ? 'Daily scheduled scan (04:20)' : 'Pemindaian terjadwal harian (04:20)')
+				+ '<hr style="border:0;border-top:1px solid rgba(255,255,255,0.1);margin:10px 0"><b>' + (isEn ? 'Trusted hashes (allowlist)' : 'Hash sah (daftar putih)') + '</b><div id="swAllowBox">' + al + '</div>'
+				+ '</div>';
+			layer.open({type: 1, title: isEn ? 'Sweeper Settings' : 'Pengaturan Sweeper', area: ['640px', 'auto'], maxHeight: 720, content: html,
+				btn: isEn ? ['Save', 'Cancel'] : ['Simpan', 'Batal'],
+				yes: function(idx){
+					var lines = function(id){ var t = $.trim($('#' + id).val()); return t ? $.map(t.split('\n'), function(x){ x = $.trim(x); return x ? x : null; }) : []; };
+					var cfg = {custom_paths: lines('swCfgPaths'), exclude: lines('swCfgExcl'), skip_vhosts: lines('swCfgSkip'), auto_quarantine: $('#swCfgAuto').is(':checked'),
+						quarantine_min_score: parseInt($('#swCfgQmin').val(), 10), report_min_score: parseInt($('#swCfgRmin').val(), 10), throttle_ms: parseInt($('#swCfgThr').val(), 10),
+						nice: parseInt($('#swCfgNice').val(), 10), max_size_mb: parseInt($('#swCfgMax').val(), 10), incremental: $('#swCfgInc').is(':checked'), engine: $('#swCfgEng').val()};
+					var jadwal = $('#swCfgSched').is(':checked');
+					snAjax('set_sweeper_config', {config: JSON.stringify(cfg)}, function(r){
+						if(!r) return;
+						snAjax('sweeper_schedule', {mode: jadwal ? 'on' : 'off'}, function(){
+							layer.close(idx); layer.msg(isEn ? 'Settings saved' : 'Pengaturan disimpan', {time: 2000, icon: 1}); snSwMuat(null, false);
+						});
+					});
+				}});
+		});
+	});
+}
+
+function snSwCalibrate(){
+	var isEn = (SN_LANG !== 'id');
+	var p = $.trim($('#swCfgCal').val());
+	if(!p){ layer.msg(isEn ? 'Enter a trusted folder' : 'Isi folder yang dipercaya', {time: 2000}); return; }
+	var pIdx = snProgress(isEn ? 'Calibrating entropy baseline...' : 'Mengkalibrasi basis entropi...');
+	snAjax('sweeper_calibrate', {path: p}, function(r){
+		if(r){ layer.msg((isEn ? 'Calibrated from ' : 'Dikalibrasi dari ') + r.n + (isEn ? ' PHP files: mean ' : ' berkas PHP: rata-rata ') + r.mean + ', sd ' + r.sd, {time: 4000, icon: 1}); }
+	}, pIdx);
+}
+function snSwBuild(){
+	var isEn = (SN_LANG !== 'id');
+	var pIdx = snProgress(isEn ? 'Building the C engine...' : 'Menyusun mesin C...');
+	snAjax('sweeper_build', {}, function(r){ if(r){ layer.msg(r, {time: 3000, icon: 1}); snSwMuat(null, false); } }, pIdx);
+}
+function snSwAllowDel(el){
+	var isEn = (SN_LANG !== 'id');
+	var h = $(el).attr('data-h');
+	snAjax('sweeper_allow_remove', {sha256: h}, function(r){ if(r){ layer.msg(r, {time: 2000, icon: 1}); $(el).parent().remove(); } });
 }
 
 function snAvRestore(id, path){

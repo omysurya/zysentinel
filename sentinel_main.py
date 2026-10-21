@@ -226,6 +226,9 @@ def rx_uji_subproses(pola_list, timeout=4):
     return ['lambat'] * len(pola_list)
 
 
+RE2_TIDAK_DIDUKUNG = re.compile(r'\(\?<?[=!]|\(\?>|\(\?P=|\\[1-9]|[*+?}]\+')
+
+
 def regex_waras(pola, maks=300):
     """Pola regex untuk daftar URL: harus bisa dikompilasi, tidak mencocokkan SEMUA URL,
     dan tidak boleh lambat (ReDoS).
@@ -237,6 +240,11 @@ def regex_waras(pola, maks=300):
     s, err = teks_aman(pola, maks, 'pola URL')
     if err:
         return None, err
+    # Coraza memakai RE2: lookaround, backreference, atomic group, dan
+    # kuantor posesif diterima re Python tetapi membuat seluruh ruleset
+    # ditolak saat nginx dimuat ulang (dan WAF tercabut dari semua vhost).
+    if RE2_TIDAK_DIDUKUNG.search(s):
+        return None, 'pola memakai sintaks yang tidak didukung WAF (lookahead/lookbehind, backreference, atomic group, atau kuantor posesif)'
     hasil = rx_uji_subproses([s])[0]
     if hasil == 'err':
         return None, 'regex tidak valid'
@@ -257,6 +265,8 @@ def path_aman_shell(p):
 # sebagai cadangan di _localize_msg: kamus exact-match tidak cukup karena
 # pesan ini memuat alasan dan nilai yang berubah-ubah.
 _EN_VALIDASI = [
+    (r'pola memakai sintaks yang tidak didukung WAF \(lookahead/lookbehind, backreference, atomic group, atau kuantor posesif\)',
+     'pattern uses syntax the WAF does not support (lookahead/lookbehind, backreference, atomic group or possessive quantifier)'),
     (r'^alamat IP tidak valid: ', 'Invalid IP address: '),
     (r'^alamat IP/CIDR tidak valid: ', 'Invalid IP/CIDR address: '),
     (r'^nilai tidak valid: ', 'Invalid value: '),
@@ -348,6 +358,7 @@ class sentinel_main(object):
                 'sentinel-ports.py', 'sentinel-waf.sh', 'sentinel-fw.sh',
                 'sentinel-av.sh', 'sentinel-proc.py', 'sentinel-intel.sh',
                 'sentinel-notify.sh', 'sentinel-upload-scan.py', 'sentinel-selfheal.py',
+                'sentinel-sweeper.py', 'sentinel-sweeplib.py',
                 'sentinel-sage.py', 'sentinel-zyrules.py', 'guardctl', 'guardd'
             ]
             for s in core_scripts:
@@ -599,7 +610,7 @@ class sentinel_main(object):
             (r'^Gagal melakukan (start|stop|restart|reload): (.*)$', r'Failed to \1 service: \2'),
             (r'^Aturan whitelist \'(.*)\' berhasil ditambahkan dan langsung aktif$', r"Process whitelist rule '\1' added successfully and active"),
             (r'^Aturan \'(.*)\' berhasil dihapus$', r"Rule '\1' removed successfully"),
-            (r'^Pengaturan telemetri Google Tag Manager berhasil diubah: (.*)$', r'Google Tag Manager telemetry setting updated: \1'),
+            (r'^Pengaturan telemetri berhasil diubah: (.*)$', r'Telemetry setting updated: \1'),
             (r'^Bahasa antarmuka diubah ke (.*)$', r'Interface language changed to \1'),
             (r'^Process Guard berhasil disetel ke mode: (.*)$', r'Process Guard mode set to: \1'),
             (r'^Egress Guard berhasil diatur ke (.*): (.*)$', r'Egress Guard set to \1: \2'),
@@ -650,11 +661,13 @@ class sentinel_main(object):
             return attr
 
         def secure_api_wrapper(get=None, *args, **kwargs):
-            self._ensure_core_files()
             active_lang = self._get_active_lang(get)
             ok, err_msg = self._enforce_security_guard(name, get)
             if not ok:
                 return public.returnMsg(False, self._localize_msg(err_msg, active_lang))
+            # Sesudah pemeriksaan sesi: menyalin berkas inti dan daemon-reload
+            # tidak boleh dipicu oleh permintaan yang belum terotentikasi.
+            self._ensure_core_files()
             res = attr(get, *args, **kwargs)
             if isinstance(res, dict) and 'msg' in res and isinstance(res['msg'], str):
                 res['msg'] = self._localize_msg(res['msg'], active_lang)
@@ -1100,7 +1113,69 @@ class sentinel_main(object):
             'av_status': badges.get('av_status', 'off'),
             'fw_backend': badges.get('fw_backend', 'iptables-nft'),
             'panic_status': badges.get('panic_status', 0),
+            'posture': self._posture(st, guardd, fw, badges),
         })
+
+    def _conf_kv(self, path):
+        isi = {}
+        try:
+            with open(path, 'r') as f:
+                for line in f:
+                    line = line.split('#')[0].strip()
+                    if '=' in line:
+                        k, v = line.split('=', 1)
+                        isi[k.strip()] = v.strip()
+        except Exception:
+            pass
+        return isi
+
+    def _posture(self, st, guardd, fw, badges):
+        """Mode tiap lapisan pertahanan: memblokir, hanya mendeteksi, atau mati.
+
+        Dulu dasbor hanya punya teks "Monitor mode only" untuk guardd dan
+        tidak pernah menampilkan bahwa mode blokir aktif. Setelan di
+        guardd.conf (conf) dibandingkan dengan nilai daemon yang berjalan
+        (status.json): bila berbeda, daemon sedang restart."""
+        conf = self._conf_kv(self._p('etc', 'guardd.conf'))
+        waf = self._conf_kv(self._p('etc', 'waf.conf'))
+        try:
+            up = json.load(open(self._p('etc', 'vhost_upload_scan.json')))
+        except Exception:
+            up = {}
+        rc, o, _ = self._sh('systemctl is-active sentinel-proc.service sentinel-upload-scan.service 2>/dev/null', 5)
+        akt = (o.split() + ['unknown', 'unknown'])[:2]
+        jalan = int(st.get('enforce', 0) or 0)
+        try:
+            setel = int(conf.get('enforce', jalan))
+        except ValueError:
+            setel = jalan
+        pg = conf.get('proc_guard', 'enforce').lower()
+        pg = 'enforce' if pg in ('enforce', 'on', '1', 'true') else ('audit' if pg in ('audit', 'log') else 'off')
+        wmode = waf.get('mode', 'block')
+        weng = badges.get('waf_engine', 'off')
+        n_up = sum(1 for v in (up.get('vhosts') or {}).values() if v)
+
+        def lap(kode, aktif, blokir, ket):
+            return {'kode': kode, 'aktif': bool(aktif), 'blokir': bool(aktif and blokir), 'ket': ket}
+
+        lapisan = [
+            lap('guardd', guardd == 'active', jalan == 1, 'enforce=%d' % jalan),
+            lap('firewall', fw == 'active', True, 'ipset ban/throttle/intel'),
+            lap('waf', weng != 'off', wmode == 'block', '%s, mode=%s' % (weng, wmode)),
+            lap('proc', akt[0] == 'active', pg == 'enforce', 'mode=%s' % pg),
+            lap('upload', akt[1] == 'active' and up.get('enabled') and n_up > 0,
+                up.get('action', 'quarantine') == 'quarantine', '%d vhost, aksi=%s' % (n_up, up.get('action', '-'))),
+        ]
+        n_blok = sum(1 for x in lapisan if x['blokir'])
+        if n_blok == len(lapisan):
+            ringkas = 'blokir'
+        elif n_blok == 0:
+            ringkas = 'monitor'
+        else:
+            ringkas = 'parsial'
+        return {'ringkas': ringkas, 'lapisan': lapisan, 'enforce_jalan': jalan,
+                'enforce_setel': setel, 'menunggu': setel != jalan and guardd == 'active',
+                'panic': badges.get('panic_status', 0)}
 
     # cache CPU. Persentase CPU butuh dua pembacaan /proc/stat dengan
     # jeda di antaranya. Dasbor sendiri menyegarkan tiap 10 detik, jadi
@@ -1311,9 +1386,11 @@ class sentinel_main(object):
                           'bruteforce': 'bruteforce', 'campuran': 'campuran'}
     _ATTACK_CACHE = {}
 
-    def _attack_waf_jenis(self, sejak):
+    def _attack_waf_jenis(self, sejak, per_ip=None):
         """Hitung transaksi log audit WAF sejak `sejak` per jenis serangan.
-        Loopback tidak dihitung (itu uji lokal, bukan penyerang)."""
+        Loopback tidak dihitung (itu uji lokal, bukan penyerang).
+        Bila `per_ip` berupa dict, jumlah per client_ip ikut dihitung di sana
+        (dipakai peta asal serangan; satu kali baca log untuk keduanya)."""
         hitung = {}
         berkas = [self.WAF_AUDIT_LOG, self.WAF_AUDIT_LOG + '.1']
         sisa = 16 * 1024 * 1024
@@ -1363,6 +1440,10 @@ class sentinel_main(object):
                     if any(i.startswith('920') or i.startswith('921') for i in ids):
                         jenis = 'protocol'
                 hitung[jenis] = hitung.get(jenis, 0) + 1
+                if per_ip is not None:
+                    cip = str(tx.get('client_ip') or '')
+                    if cip:
+                        per_ip[cip] = per_ip.get(cip, 0) + 1
         return hitung
 
     def get_attack_types(self, get):
@@ -1407,6 +1488,58 @@ class sentinel_main(object):
         self._ATTACK_CACHE[kunci] = (ukuran, time.time(), hasil)
         return public.returnMsg(True, hasil)
 
+    _ATTACK_MAP_CACHE = {}
+    ATTACK_MAP_IP_MAKS = 3000
+
+    def get_attack_map(self, get):
+        """Asal serangan per negara untuk peta dasbor.
+
+        Sumbernya SAMA dengan diagram donat (get_attack_types): kejadian guardd
+        per IP ditambah transaksi log audit WAF per client_ip, pada rentang jam
+        yang sama, sehingga total peta = total donat. Negara dari cache GeoIP
+        (tabel geo); hanya IP baru yang dicari di berkas MMDB."""
+        jam = int(get.get('hours', 24) or 24)
+        jam = max(1, min(168, jam))
+        sejak = int(time.time()) - jam * 3600
+        try:
+            ukuran = os.path.getsize(self.WAF_AUDIT_LOG)
+        except OSError:
+            ukuran = -1
+        c = self._ATTACK_MAP_CACHE.get(jam)
+        if c and c[0] == ukuran and time.time() - c[1] < 20:
+            return public.returnMsg(True, c[2])
+
+        per_ip = {}
+        rows = self._sql("SELECT ip, COUNT(*) n FROM events WHERE ts >= ? GROUP BY ip", (sejak,))
+        for r in rows if isinstance(rows, list) else []:
+            ipt = self._numip(r['ip']) if isinstance(r['ip'], int) else str(r['ip'])
+            per_ip[ipt] = per_ip.get(ipt, 0) + (r['n'] or 0)
+        self._attack_waf_jenis(sejak, per_ip)
+
+        geo_ada = self._geo_buka() is not None
+        negara = {}
+        tak_tahu = 0
+        urut = sorted(per_ip.items(), key=lambda x: -x[1])
+        for i, (ipt, n) in enumerate(urut):
+            kode, nama = ('', '')
+            if i < self.ATTACK_MAP_IP_MAKS and self._ipnum(ipt):
+                kode, nama = self._geo_satu(ipt)
+            if not kode:
+                tak_tahu += n
+                continue
+            g = negara.setdefault(kode, {'kode': kode, 'nama': nama, 'n': 0, 'ip': 0})
+            g['n'] += n
+            g['ip'] += 1
+        hasil = {
+            'jam': jam,
+            'total': sum(per_ip.values()),
+            'tak_tahu': tak_tahu,
+            'geo_tersedia': geo_ada,
+            'negara': sorted(negara.values(), key=lambda x: -x['n']),
+        }
+        self._ATTACK_MAP_CACHE[jam] = (ukuran, time.time(), hasil)
+        return public.returnMsg(True, hasil)
+
     # ------------------------------------------------------------------ #
     # daftar ban dan throttle                                            #
     # ------------------------------------------------------------------ #
@@ -1448,6 +1581,20 @@ class sentinel_main(object):
         })
 
     def ban_ip(self, get):
+        """Blokir satu IP. Dari Event Feed (ev_ts diisi) pola kejadiannya
+        juga dipelajari supaya kejadian serupa langsung diblokir."""
+        res = self._ban_ip_exec(get)
+        if isinstance(res, dict) and res.get('status') and isinstance(res.get('msg'), str):
+            net, err = parse_v4(get.get('ip'), cidr=False, tujuan='blokir')
+            if not err:
+                ip = str(net.network_address)
+                self._learn_revoke_ip(ip, 'A')
+                if self._learn_ts(get):
+                    res['msg'] += self._learn_decision(
+                        'B', ip, self._learn_ts(get), self._get_active_lang(get))
+        return res
+
+    def _ban_ip_exec(self, get):
         """Blokir satu IP sekarang juga lewat soket daemon."""
         net, err = parse_v4(get.get('ip'), cidr=False, tujuan='blokir')
         if err:
@@ -1534,6 +1681,8 @@ class sentinel_main(object):
             return public.returnMsg(False, 'gagal melepas blokir: %s'
                                     % (o.strip() or e.strip()))
         self._sh("'%s/bin/guardctl' flush" % self.__PATH, 10)
+        # keputusan blokir dicabut: pelajaran yang bersumber dari IP ini ikut dicabut
+        self._learn_revoke_ip(ip, 'B')
         return public.returnMsg(True, '%s dilepas dari daftar blokir' % ip)
 
     # ------------------------------------------------------------------ #
@@ -1591,6 +1740,20 @@ class sentinel_main(object):
         return hasil
 
     def allow_ip(self, get):
+        """Tambahkan IP ke daftar putih. Dari Event Feed (ev_ts diisi) klien
+        itu juga dipelajari sebagai sah supaya tidak ditandai lagi."""
+        res = self._allow_ip_exec(get)
+        if isinstance(res, dict) and res.get('status') and isinstance(res.get('msg'), str):
+            net, err = parse_v4(get.get('ip'), cidr=True, min_prefix=8, tujuan='putih')
+            if not err and net.prefixlen == 32:
+                ip = str(net.network_address)
+                self._learn_revoke_ip(ip, 'B')
+                if self._learn_ts(get):
+                    res['msg'] += self._learn_decision(
+                        'A', ip, self._learn_ts(get), self._get_active_lang(get))
+        return res
+
+    def _allow_ip_exec(self, get):
         """Tambahkan IP tunggal atau CIDR ke daftar putih permanen."""
         net, err = parse_v4(get.get('ip'), cidr=True, min_prefix=8,
                             tujuan='putih')
@@ -1655,6 +1818,10 @@ class sentinel_main(object):
                 continue
             sisa.append(b)
         if len(sisa) == len(baris):
+            # Tidak ada di berkas, tetapi pelajaran izinkan yang bersumber
+            # dari IP ini harus tetap ikut dicabut (mis. berkas diedit manual).
+            if net.prefixlen == 32:
+                self._learn_revoke_ip(ip, 'A')
             return public.returnMsg(False, '%s tidak ada di daftar putih' % ip)
         with open(path, 'w') as f:
             fcntl.flock(f, fcntl.LOCK_EX)
@@ -1666,11 +1833,425 @@ class sentinel_main(object):
         if net.prefixlen == 32:
             self._aksi(ip, 'del-allow', 'panel',
                        'dikeluarkan dari daftar putih, blokir lama berlaku lagi')
+            self._learn_revoke_ip(ip, 'A')
         return public.returnMsg(True, '%s dikeluarkan dari daftar putih' % ip)
 
     def del_allow_ip(self, get):
         """Keluarkan IP dari daftar putih (alias untuk del_allow)."""
         return self.del_allow(get)
+
+    # ------------------------------------------------------------------ #
+    # pembelajaran dari keputusan operator                               #
+    # ------------------------------------------------------------------ #
+    # Saat operator menekan Blokir/Izinkan pada Event Feed, pola kejadian
+    # itu (path dan/atau user-agent) disimpan sebagai "pelajaran" di
+    # etc/learned.json lalu diterbitkan ke etc/learned.tsv untuk guardd.
+    # Pelajaran hidup selama keputusan sumbernya belum dicabut: unban atau
+    # keluarnya IP dari daftar putih menghapus pelajaran yang bersumber
+    # dari IP itu. Panel yang mengelola siklus hidupnya; daemon hanya
+    # membaca berkas TSV (lihat bagian PELAJARAN di guardd.c).
+    LEARN_MAX = 500
+    LEARN_PATH_MAX = 149          # sama dengan batas penyimpanan path di tabel events
+    # path yang tidak pernah dijadikan pelajaran BLOKIR: aset dan health
+    # check (pengunjung sah sering mendapat 404 di sini) dan jalur login
+    # (sudah dinilai sebagai brute force oleh daemon).
+    _LEARN_PATH_AMAN = (
+        '/favicon.ico', '/robots.txt', '/sitemap', '/app-ads.txt', '/ads.txt',
+        '/apple-touch-icon', '/manifest.json', '/service-worker', '/sw.js',
+        '/health', '/ping', '/pong', '/up', '/readyz', '/livez', '/uploads',
+        '/assets', '/storage', '/images', '/img', '/css', '/js', '/fonts',
+        '/media', '/static', '/login', '/signin', '/log-in', '/sign-in',
+        '/auth', '/authenticate', '/wp-login', '/password', '/passwd',
+        '/user/login', '/api/login', '/api/auth', '/api/v1/login',
+        '/api/v1/auth', '/oauth', '/session', '/member/login',
+        '/account/login', '/users/sign_in', '/do/login')
+    _LEARN_EKSTENSI_AMAN = frozenset((
+        'css', 'js', 'mjs', 'map', 'png', 'jpg', 'jpeg', 'gif', 'svg', 'ico',
+        'webp', 'avif', 'bmp', 'woff', 'woff2', 'ttf', 'eot', 'otf', 'mp4',
+        'webm', 'mp3', 'ogg', 'pdf', 'txt', 'xml', 'json', 'rss', 'atom'))
+    # perayap sah yang tidak boleh diblokir lewat pelajaran UA
+    _LEARN_UA_BAIK = (
+        'googlebot', 'bingbot', 'adsbot', 'mediapartners', 'duckduckbot',
+        'slurp', 'yandex', 'baiduspider', 'facebookexternalhit', 'twitterbot',
+        'linkedinbot', 'whatsapp', 'telegrambot', 'uptimerobot', 'pingdom',
+        'statuscake', 'applebot', 'ia_archiver')
+    _LEARN_KIND_PATH = ('scanner', 'campuran', 'probe-paths')
+    _LEARN_KIND_UA = ('scanner', 'campuran', 'probe-paths', 'bad-ua',
+                      'bruteforce')
+
+    def _learn_files(self):
+        return self._p('etc', 'learned.json'), self._p('etc', 'learned.tsv')
+
+    @staticmethod
+    def _learn_id(aksi, path, ua):
+        return hashlib.sha1(('%s|%s|%s' % (aksi, path, ua)).encode(
+            'utf-8', 'replace')).hexdigest()[:8]
+
+    def _learn_sig_path(self, path, aksi):
+        """Path yang dinormalkan seperti guardd (tanpa query, huruf kecil,
+        tanpa garis miring penutup), atau '' bila tidak aman dipelajari."""
+        if not isinstance(path, str):
+            return ''
+        p = re.split(r'[?#]', path, 1)[0].strip().lower()
+        p = re.sub(r'/+$', '', p) if len(p) > 1 else p
+        if len(p) < 2 or len(p) > self.LEARN_PATH_MAX or p[0] != '/':
+            return ''
+        if re.search(r'[\x00-\x20\x7f]', p):
+            return ''
+        if aksi == 'B':
+            for a in self._LEARN_PATH_AMAN:
+                if p == a or p.startswith(a + '/') or p.startswith(a + '.') \
+                        or p.startswith(a + '-'):
+                    return ''
+            ekst = p.rsplit('.', 1)[1] if '.' in p.rsplit('/', 1)[1] else ''
+            if ekst in self._LEARN_EKSTENSI_AMAN:
+                return ''
+        return p
+
+    def _learn_sig_ua(self, ua, aksi):
+        """Satu token produk user-agent, atau '' untuk UA peramban biasa.
+        Peramban (Mozilla/Opera tanpa nama bot) tidak pernah dipelajari:
+        satu token itu akan mencakup hampir semua pengunjung."""
+        if not isinstance(ua, str):
+            return ''
+        low = ua.strip().lower()
+        if not low or low == '-':
+            return ''
+        m = re.search(r'([a-z0-9._+-]*(?:bot|crawler|spider|scraper)[a-z0-9._+-]*)', low)
+        if m:
+            tok = m.group(1)
+        elif 'mozilla' in low or 'opera' in low or 'applewebkit' in low:
+            return ''
+        else:
+            m = re.match(r'([a-z0-9][a-z0-9._+-]*)', low)
+            tok = m.group(1) if m else ''
+        tok = tok.strip('.-+_')
+        if not re.fullmatch(r'[a-z0-9][a-z0-9._+-]{3,39}', tok or ''):
+            return ''
+        if aksi == 'B' and any(b in low for b in self._LEARN_UA_BAIK):
+            return ''
+        return tok
+
+    def _learn_sig(self, aksi, ev):
+        """Turunkan pelajaran dari satu kejadian. (pelajaran, None) atau
+        (None, kode_alasan) bila tidak ada pola yang aman dipelajari."""
+        kind = str(ev.get('kind') or '')
+        if kind == 'flood':
+            return None, 'flood'
+        path = ua = ''
+        if kind in self._LEARN_KIND_PATH:
+            path = self._learn_sig_path(ev.get('path'), aksi)
+        if kind in self._LEARN_KIND_UA:
+            ua = self._learn_sig_ua(ev.get('ua'), aksi)
+        # Pelajaran izinkan harus menyebut klien (UA): izin berbasis path
+        # saja akan membutakan deteksi untuk siapa pun yang meraba path itu.
+        if aksi == 'A' and not ua:
+            return None, 'tanpa-ua'
+        if not path and not ua:
+            return None, 'tanpa-pola'
+        return {'id': self._learn_id(aksi, path, ua), 'aksi': aksi,
+                'kind': kind if kind in self._LEARN_KIND_UA else 'campuran',
+                'path': path, 'ua': ua}, None
+
+    def _learn_load(self):
+        jf, _ = self._learn_files()
+        try:
+            with open(jf, 'r', encoding='utf-8') as f:
+                d = json.load(f)
+            if isinstance(d, dict) and isinstance(d.get('lessons'), list):
+                d.setdefault('enabled', True)
+                return d
+        except Exception:
+            pass
+        return {'v': 1, 'enabled': True, 'lessons': []}
+
+    def _learn_publish(self, st):
+        """Tulis JSON (sumber kebenaran) dan TSV (untuk daemon) secara atomik,
+        lalu minta daemon memuat ulang. Mengembalikan balasan daemon atau None."""
+        jf, tf = self._learn_files()
+        baris = ['# dibuat panel ZySentinel dari etc/learned.json; jangan diubah manual']
+        if st.get('enabled', True):
+            for L in st['lessons']:
+                baris.append('\t'.join([
+                    L['id'], L['aksi'], L.get('kind') or 'campuran',
+                    L.get('path') or '-', L.get('ua') or '-']))
+        for nama, isi in ((jf, json.dumps(st, ensure_ascii=False, indent=1)),
+                          (tf, '\n'.join(baris) + '\n')):
+            tmp = '%s.tmp.%d' % (nama, os.getpid())
+            with open(tmp, 'w', encoding='utf-8') as f:
+                f.write(isi)
+            os.chmod(tmp, 0o640)
+            os.replace(tmp, nama)
+        rc, o, e = self._sh("'%s/bin/guardctl' learnload" % self.__PATH, 10)
+        try:
+            return json.loads(o) if rc == 0 else None
+        except Exception:
+            return None
+
+    def _learn_edit(self, fn):
+        """Baca-ubah-tulis di bawah kunci berkas. fn(store) mengembalikan
+        hasil; store diterbitkan hanya bila fn menandai st['_ubah']."""
+        kunci = self._p('etc', 'learned.lock')
+        with open(kunci, 'a+') as lk:
+            fcntl.flock(lk, fcntl.LOCK_EX)
+            try:
+                st = self._learn_load()
+                hasil = fn(st)
+                if st.pop('_ubah', False):
+                    self._learn_publish(st)
+                return hasil
+            finally:
+                fcntl.flock(lk, fcntl.LOCK_UN)
+
+    def _learn_event(self, ip, ts):
+        n = self._ipnum(ip)
+        if not n:
+            return None
+        baris = []
+        if ts:
+            baris = self._sql(
+                "SELECT ts, ip, kind, score, level, host, path, ua FROM events "
+                "WHERE ip=? AND ts=? ORDER BY id DESC LIMIT 1", (n, ts))
+        if not baris:
+            baris = self._sql(
+                "SELECT ts, ip, kind, score, level, host, path, ua FROM events "
+                "WHERE ip=? ORDER BY ts DESC, id DESC LIMIT 1", (n,))
+        return baris[0] if baris else None
+
+    def _learn_revoke_ip(self, ip, aksi):
+        """Keputusan operator atas IP ini dicabut: hapus IP dari sumber
+        pelajaran dan hapus pelajaran yang tidak punya sumber lagi."""
+        def kerja(st):
+            sisa, dicabut = [], 0
+            for L in st['lessons']:
+                if L.get('aksi') == aksi and ip in L.get('sources', []):
+                    L['sources'] = [s for s in L['sources'] if s != ip]
+                    st['_ubah'] = True
+                    if not L['sources']:
+                        dicabut += 1
+                        continue
+                sisa.append(L)
+            st['lessons'] = sisa
+            return dicabut
+        try:
+            return self._learn_edit(kerja)
+        except Exception:
+            return 0
+
+    def _learn_decision(self, aksi, ip, ts, lang):
+        """Pelajari satu keputusan. Mengembalikan kalimat ringkas untuk
+        operator, atau '' bila tidak ada yang perlu disampaikan."""
+        isEn = (lang == 'en')
+        # Keputusan berlawanan atas IP yang sama membatalkan pelajaran lama
+        # dari IP itu (operator berubah pikiran).
+        lawan = 'A' if aksi == 'B' else 'B'
+        self._learn_revoke_ip(ip, lawan)
+        st0 = self._learn_load()
+        if not st0.get('enabled', True):
+            return ''
+        ev = self._learn_event(ip, ts)
+        if not ev:
+            return (' | Learning skipped: no event found for this IP' if isEn
+                    else ' | Belajar dilewati: kejadian IP ini tidak ditemukan')
+        L, alasan = self._learn_sig(aksi, ev)
+        if not L:
+            pesan = {
+                'flood': ('flood events have no safe pattern to learn',
+                          'kejadian flood tidak punya pola yang aman dipelajari'),
+                'tanpa-ua': ('an allow lesson needs an identifiable client (user-agent)',
+                             'pelajaran izinkan butuh klien yang dapat dikenali (user-agent)'),
+                'tanpa-pola': ('only generic/safe paths and browser user-agents were seen',
+                               'hanya path umum/aman dan user-agent peramban yang terlihat'),
+            }[alasan]
+            return (' | Not learned: ' + pesan[0]) if isEn \
+                else (' | Tidak dipelajari: ' + pesan[1])
+
+        def kerja(st):
+            # keputusan terbaru untuk pola yang sama menggantikan yang lama
+            for x in list(st['lessons']):
+                if x['aksi'] != aksi and x.get('path', '') == L['path'] \
+                        and x.get('ua', '') == L['ua']:
+                    st['lessons'].remove(x)
+            ada = [x for x in st['lessons'] if x['id'] == L['id']]
+            now = int(time.time())
+            if ada:
+                if ip not in ada[0]['sources']:
+                    ada[0]['sources'].append(ip)
+                ada[0]['updated'] = now
+                baru = False
+            else:
+                if len(st['lessons']) >= self.LEARN_MAX:
+                    return 'penuh'
+                L2 = dict(L)
+                L2.update({'sources': [ip], 'created': now, 'updated': now,
+                           'host': str(ev.get('host') or '-')[:64]})
+                st['lessons'].append(L2)
+                baru = True
+            st['_ubah'] = True
+            return 'baru' if baru else 'ada'
+
+        try:
+            hasil = self._learn_edit(kerja)
+        except Exception as ex:
+            return ' | Learning failed: %s' % ex if isEn \
+                else ' | Belajar gagal: %s' % ex
+        if hasil == 'penuh':
+            return (' | Not learned: lesson limit reached' if isEn
+                    else ' | Tidak dipelajari: batas jumlah pelajaran tercapai')
+        self._aksi(ip, 'belajar', 'panel',
+                   'pelajaran %s (%s) path=%s ua=%s' % (
+                       L['id'], 'blokir' if aksi == 'B' else 'izinkan',
+                       L['path'] or '-', L['ua'] or '-'))
+        pola = ' + '.join(x for x in (
+            ('path ' + L['path']) if L['path'] else '',
+            ('UA ' + L['ua']) if L['ua'] else '') if x)
+        if isEn:
+            return ' | Learned %s [%s]: %s' % (
+                'block rule' if aksi == 'B' else 'allow rule', L['id'], pola)
+        return ' | Dipelajari: aturan %s [%s]: %s' % (
+            'blokir' if aksi == 'B' else 'izinkan', L['id'], pola)
+
+    @staticmethod
+    def _learn_ts(get):
+        t = str(get.get('ev_ts') or '').strip()
+        return int(t) if t.isdigit() and len(t) <= 11 else 0
+
+    def get_learned(self, get):
+        """Pelajaran aktif beserta jumlah kali masing-masing bekerja."""
+        st = self._learn_load()
+        kerja = {}
+        for r in self._sql(
+                "SELECT substr(alasan,12,8) id, COUNT(*) n, MAX(ts) t FROM aksi "
+                "WHERE alasan LIKE 'dipelajari:%' GROUP BY substr(alasan,12,8)"):
+            kerja[r['id']] = (r['n'], r['t'])
+        daftar = []
+        for L in st['lessons']:
+            n, t = kerja.get(L['id'], (0, 0))
+            daftar.append({
+                'id': L['id'], 'aksi': L['aksi'], 'kind': L.get('kind', ''),
+                'path': L.get('path', ''), 'ua': L.get('ua', ''),
+                'host': L.get('host', '-'), 'sources': L.get('sources', []),
+                'created': L.get('created', 0), 'hits': n, 'last_hit': t,
+                'manual': bool(L.get('manual'))})
+        daftar.sort(key=lambda x: -x['created'])
+        stt = self._status() or {}
+        return public.returnMsg(True, {
+            'enabled': bool(st.get('enabled', True)), 'lessons': daftar,
+            'max': self.LEARN_MAX, 'enforce': stt.get('enforce', 0)})
+
+    def _learn_masukan(self, get):
+        """Validasi pelajaran manual: aksi B/A, kategori, path dan/atau UA.
+        Aturan pengaman sama dengan pembelajaran otomatis (path aman, UA peramban,
+        perayap sah, izin wajib menyebut klien)."""
+        aksi = str(get.get('aksi_l') or '').strip().upper()
+        if aksi not in ('B', 'A'):
+            return None, 'aturan harus B (blokir) atau A (izinkan)'
+        kind = str(get.get('kind') or 'campuran').strip()
+        if kind not in self._LEARN_KIND_UA:
+            return None, 'kategori tidak dikenal'
+        path_raw = str(get.get('path') or '').strip()
+        ua_raw = str(get.get('ua') or '').strip()
+        path = self._learn_sig_path(path_raw, aksi) if path_raw else ''
+        ua = self._learn_sig_ua(ua_raw, aksi) if ua_raw else ''
+        if path_raw and not path:
+            return None, 'path tidak aman dipelajari (/, aset statis, health check, login, atau format tidak valid)'
+        if ua_raw and not ua:
+            return None, 'user-agent tidak bisa dipakai (peramban biasa, perayap sah, atau terlalu pendek)'
+        if not path and not ua:
+            return None, 'isi path dan/atau user-agent'
+        if aksi == 'A' and not ua:
+            return None, 'aturan izinkan wajib menyebut klien (user-agent)'
+        return {'id': self._learn_id(aksi, path, ua), 'aksi': aksi, 'kind': kind,
+                'path': path, 'ua': ua}, None
+
+    def learned_add(self, get):
+        """Tambah pelajaran secara manual (tanpa IP sumber; hanya dicabut manual)."""
+        isEn = (self._get_active_lang(get) == 'en')
+        L, err = self._learn_masukan(get)
+        if err:
+            return public.returnMsg(False, err)
+
+        def kerja(st):
+            if any(x['id'] == L['id'] for x in st['lessons']):
+                return 'ada'
+            if len(st['lessons']) >= self.LEARN_MAX:
+                return 'penuh'
+            now = int(time.time())
+            st['lessons'] = [x for x in st['lessons'] if not (x['aksi'] != L['aksi'] and x.get('path', '') == L['path'] and x.get('ua', '') == L['ua'])]
+            L2 = dict(L); L2.update({'sources': [], 'manual': True, 'created': now, 'updated': now, 'host': '-'})
+            st['lessons'].append(L2)
+            st['_ubah'] = True
+            return 'ok'
+        hasil = self._learn_edit(kerja)
+        if hasil == 'ada':
+            return public.returnMsg(False, 'Lesson already exists' if isEn else 'pelajaran yang sama sudah ada')
+        if hasil == 'penuh':
+            return public.returnMsg(False, 'Lesson limit reached' if isEn else 'batas jumlah pelajaran tercapai')
+        return public.returnMsg(True, ('Lesson %s added' if isEn else 'Pelajaran %s ditambahkan') % L['id'])
+
+    def learned_update(self, get):
+        """Ubah pola/kategori/aturan satu pelajaran. Sumber IP dipertahankan."""
+        isEn = (self._get_active_lang(get) == 'en')
+        lid = str(get.get('id') or '').strip().lower()
+        if not re.fullmatch(r'[0-9a-f]{4,11}', lid):
+            return public.returnMsg(False, 'Invalid lesson id' if isEn else 'id pelajaran tidak valid')
+        L, err = self._learn_masukan(get)
+        if err:
+            return public.returnMsg(False, err)
+
+        def kerja(st):
+            lama = [x for x in st['lessons'] if x['id'] == lid]
+            if not lama:
+                return 'tidak'
+            if L['id'] != lid and any(x['id'] == L['id'] for x in st['lessons']):
+                return 'ada'
+            x = lama[0]
+            x.update({'id': L['id'], 'aksi': L['aksi'], 'kind': L['kind'], 'path': L['path'],
+                      'ua': L['ua'], 'updated': int(time.time())})
+            st['_ubah'] = True
+            return 'ok'
+        hasil = self._learn_edit(kerja)
+        if hasil == 'tidak':
+            return public.returnMsg(False, 'Lesson not found' if isEn else 'pelajaran tidak ditemukan')
+        if hasil == 'ada':
+            return public.returnMsg(False, 'Another lesson already has this pattern' if isEn else 'pelajaran lain sudah memakai pola ini')
+        return public.returnMsg(True, ('Lesson updated (%s)' if isEn else 'Pelajaran diperbarui (%s)') % L['id'])
+
+    def learned_revoke(self, get):
+        lid = str(get.get('id') or '').strip().lower()
+        isEn = (self._get_active_lang(get) == 'en')
+        if not re.fullmatch(r'[0-9a-f]{4,11}', lid):
+            return public.returnMsg(False, 'Invalid lesson id' if isEn else 'id pelajaran tidak valid')
+
+        def kerja(st):
+            n0 = len(st['lessons'])
+            st['lessons'] = [x for x in st['lessons'] if x['id'] != lid]
+            if len(st['lessons']) != n0:
+                st['_ubah'] = True
+                return True
+            return False
+        try:
+            ada = self._learn_edit(kerja)
+        except Exception as ex:
+            return public.returnMsg(False, 'Failed: %s' % ex if isEn else 'gagal: %s' % ex)
+        if not ada:
+            return public.returnMsg(False, 'Lesson not found' if isEn else 'pelajaran tidak ditemukan')
+        return public.returnMsg(True, 'Lesson %s revoked' % lid if isEn else 'Pelajaran %s dicabut' % lid)
+
+    def learned_toggle(self, get):
+        on = str(get.get('enabled', '1')).strip() in ('1', 'true', 'on')
+        isEn = (self._get_active_lang(get) == 'en')
+
+        def kerja(st):
+            st['enabled'] = on
+            st['_ubah'] = True
+        try:
+            self._learn_edit(kerja)
+        except Exception as ex:
+            return public.returnMsg(False, 'Failed: %s' % ex if isEn else 'gagal: %s' % ex)
+        if isEn:
+            return public.returnMsg(True, 'Learning %s' % ('enabled' if on else 'paused: lessons are kept but not applied'))
+        return public.returnMsg(True, 'Pembelajaran %s' % ('dinyalakan' if on else 'dijeda: pelajaran disimpan tetapi tidak diterapkan'))
 
     # ------------------------------------------------------------------ #
     # pengaturan                                                         #
@@ -2116,6 +2697,100 @@ class sentinel_main(object):
             except Exception:
                 return public.returnMsg(False, 'Gagal memuat status port firewall: %s' % (e or str(ex)))
 
+    def _port_rule_masukan(self, get, direction):
+        """Validasi masukan aturan port (dipakai add_port_rule dan update_port_rule).
+        Mengembalikan (field_dict, None) atau (None, pesan)."""
+        protocol = str(get.get('protocol') or 'tcp').strip().lower()
+        if protocol not in ['tcp', 'udp', 'tcp/udp', 'all']:
+            return None, 'Protokol harus tcp, udp, tcp/udp, atau all'
+        port = str(get.get('port') or '').strip()
+        if not port:
+            return None, 'Nomor port atau rentang port wajib diisi'
+        clean_port = port.replace(':', '-')
+        if clean_port.lower() == 'all':
+            clean_port = 'all'
+        elif not re.fullmatch(r'[1-9][0-9]{0,4}(-[1-9][0-9]{0,4})?', clean_port):
+            return None, 'Format port tidak valid (contoh: 80 atau 8000-8080)'
+        else:
+            parts = clean_port.split('-')
+            for p_str in parts:
+                if int(p_str) < 1 or int(p_str) > 65535:
+                    return None, 'Nomor port harus berada di antara 1 dan 65535'
+            if len(parts) == 2 and int(parts[0]) >= int(parts[1]):
+                return None, 'Rentang port tidak valid (port awal harus lebih kecil)'
+        action = str(get.get('rule_action') or get.get('act') or get.get('aksi') or get.get('sub_action') or (get.get('action') if get.get('action') != 'a' else None) or 'ACCEPT').strip().upper()
+        action = {'ALLOW': 'ACCEPT', 'PERMIT': 'ACCEPT', 'DENY': 'DROP', 'BLOCK': 'DROP'}.get(action, action)
+        if action not in ['ACCEPT', 'DROP']:
+            return None, 'Aksi harus ACCEPT atau DROP'
+        kolom = 'source' if direction == 'inbound' else 'dest'
+        mentah = str(get.get(kolom) or '0.0.0.0/0').strip() or '0.0.0.0/0'
+        alamat, err = parse_v4_daftar(mentah, cidr=True, min_prefix=0,
+                                      tujuan='netral', semua=True)
+        if err:
+            return None, 'Format alamat IP/CIDR %s tidak valid: %s' % (kolom, err)
+        remark, err = teks_aman(str(get.get('remark') or ''), 120, 'Catatan', boleh_kosong=True)
+        if err:
+            return None, err
+        if not remark:
+            remark = '%s Port %s' % (protocol.upper(), clean_port)
+        return {'port': clean_port, 'protocol': protocol, 'action': action,
+                'remark': remark, kolom: ','.join(alamat)}, None
+
+    def update_port_rule(self, get):
+        """Mengubah aturan port yang sudah ada (arah tetap).
+
+        Aturan baseline (SSH, panel, web) hanya boleh diubah keterangannya:
+        port, protokol, aksi, dan alamatnya dikunci, sama seperti larangan
+        menghapus/mematikannya, supaya akses admin dan situs tidak terputus.
+        Bila kernel menolak, aturan lama dipulihkan."""
+        rule_id = str(get.get('id') or '').strip()
+        if not rule_id or not id_valid(rule_id):
+            return public.returnMsg(False, 'Format ID aturan tidak valid')
+        try:
+            with open(self.PORTS_CONF, 'r') as fp:
+                cfg = json.load(fp)
+        except Exception as ex:
+            return public.returnMsg(False, 'Gagal membaca konfigurasi: %s' % str(ex))
+        arah, idx = None, -1
+        for d in ['inbound', 'outbound']:
+            for i, r in enumerate(cfg.get(d, [])):
+                if r.get('id') == rule_id:
+                    arah, idx = d, i
+        if arah is None:
+            return public.returnMsg(False, 'Aturan dengan ID tersebut tidak ditemukan')
+        lama = dict(cfg[arah][idx])
+        if lama.get('system'):
+            remark, err = teks_aman(str(get.get('remark') or ''), 120, 'Catatan', boleh_kosong=True)
+            if err:
+                return public.returnMsg(False, err)
+            cfg[arah][idx]['remark'] = remark or lama.get('remark', '')
+            with open(self.PORTS_CONF, 'w') as fp:
+                json.dump(cfg, fp, indent=2)
+            return public.returnMsg(True, 'Keterangan aturan baseline %s diperbarui (port, protokol, aksi, dan alamat baseline dikunci)' % rule_id)
+        baru, err = self._port_rule_masukan(get, arah)
+        if err:
+            return public.returnMsg(False, err)
+        kolom = 'source' if arah == 'inbound' else 'dest'
+        for r in cfg.get(arah, []):
+            if (r.get('id') != rule_id and r.get('port') == baru['port']
+                    and r.get('protocol') == baru['protocol'] and r.get('action') == baru['action']
+                    and r.get(kolom) == baru[kolom]):
+                return public.returnMsg(False, 'Aturan yang sama sudah ada (%s)' % r.get('id'))
+        cfg[arah][idx].update(baru)
+        with open(self.PORTS_CONF, 'w') as fp:
+            json.dump(cfg, fp, indent=2)
+        if cfg.get('active', True):
+            rc, o, e = self._ports_script('apply')
+            if rc != 0:
+                cfg[arah][idx] = lama
+                with open(self.PORTS_CONF, 'w') as fp:
+                    json.dump(cfg, fp, indent=2)
+                self._ports_script('apply')
+                return public.returnMsg(
+                    False, 'Perubahan ditolak saat diterapkan ke kernel dan dibatalkan: %s'
+                           % ((o or e).strip()[:300]))
+        return public.returnMsg(True, 'Aturan port %s diperbarui' % baru['port'])
+
     def add_port_rule(self, get):
         """Menambahkan aturan port baru (Inbound atau Outbound).
 
@@ -2127,47 +2802,12 @@ class sentinel_main(object):
         direction = str(get.get('direction') or 'inbound').strip().lower()
         if direction not in ['inbound', 'outbound']:
             return public.returnMsg(False, 'Arah aturan harus inbound atau outbound')
-
-        protocol = str(get.get('protocol') or 'tcp').strip().lower()
-        if protocol not in ['tcp', 'udp', 'tcp/udp', 'all']:
-            return public.returnMsg(False, 'Protokol harus tcp, udp, tcp/udp, atau all')
-
-        port = str(get.get('port') or '').strip()
-        if not port:
-            return public.returnMsg(False, 'Nomor port atau rentang port wajib diisi')
-        clean_port = port.replace(':', '-')
-        if clean_port.lower() == 'all':
-            clean_port = 'all'
-        elif not re.fullmatch(r'[1-9][0-9]{0,4}(-[1-9][0-9]{0,4})?', clean_port):
-            return public.returnMsg(False, 'Format port tidak valid (contoh: 80 atau 8000-8080)')
-        else:
-            parts = clean_port.split('-')
-            for p_str in parts:
-                if int(p_str) < 1 or int(p_str) > 65535:
-                    return public.returnMsg(False, 'Nomor port harus berada di antara 1 dan 65535')
-            if len(parts) == 2 and int(parts[0]) >= int(parts[1]):
-                return public.returnMsg(False, 'Rentang port tidak valid (port awal harus lebih kecil)')
-
-        action = str(get.get('rule_action') or get.get('act') or get.get('aksi') or get.get('sub_action') or (get.get('action') if get.get('action') != 'a' else None) or 'ACCEPT').strip().upper()
-        # Alias lama dipetakan secara eksplisit. Nilai lain ditolak, bukan
-        # diubah diam-diam menjadi ACCEPT.
-        action = {'ALLOW': 'ACCEPT', 'PERMIT': 'ACCEPT', 'DENY': 'DROP', 'BLOCK': 'DROP'}.get(action, action)
-        if action not in ['ACCEPT', 'DROP']:
-            return public.returnMsg(False, 'Aksi harus ACCEPT atau DROP')
-
-        kolom = 'source' if direction == 'inbound' else 'dest'
-        mentah = str(get.get(kolom) or '0.0.0.0/0').strip() or '0.0.0.0/0'
-        alamat, err = parse_v4_daftar(mentah, cidr=True, min_prefix=0,
-                                      tujuan='netral', semua=True)
-        if err:
-            return public.returnMsg(False, 'Format alamat IP/CIDR %s tidak valid: %s' % (kolom, err))
-        alamat_str = ','.join(alamat)
-
-        remark, err = teks_aman(str(get.get('remark') or ''), 120, 'Catatan', boleh_kosong=True)
+        baru, err = self._port_rule_masukan(get, direction)
         if err:
             return public.returnMsg(False, err)
-        if not remark:
-            remark = '%s Port %s' % (protocol.upper(), clean_port)
+        kolom = 'source' if direction == 'inbound' else 'dest'
+        clean_port, protocol, action = baru['port'], baru['protocol'], baru['action']
+        alamat_str, remark = baru[kolom], baru['remark']
 
         try:
             if not os.path.isfile(self.PORTS_CONF):
@@ -4521,6 +5161,170 @@ class sentinel_main(object):
             return public.returnMsg(True, 'Database signature Rkhunter berhasil diperbarui: ' + o.strip())
         return public.returnMsg(False, 'Pembaruan signature Rkhunter gagal: ' + (e.strip() or o.strip()))
 
+    # ------------------------------------------------------------------ #
+    # Sweeper: pemindai webshell (logika ShellSweep) selain ClamAV         #
+    # ------------------------------------------------------------------ #
+    def _sweeper(self, *args, timeout=60):
+        """Jalankan sentinel-sweeper.py dan baca baris JSON terakhirnya. Return dict {status, msg}."""
+        self._ensure_core_files()
+        skrip = self._p('bin', 'sentinel-sweeper.py')
+        if not os.path.isfile(skrip):
+            skrip = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'payload', 'sentinel-sweeper.py')
+        if not os.path.isfile(skrip):
+            return {'status': False, 'msg': 'sentinel-sweeper.py tidak ditemukan'}
+        py = '/www/server/panel/pyenv/bin/python3'
+        if not os.path.exists(py):
+            py = 'python3'
+        cmd = ' '.join([shlex.quote(py), shlex.quote(skrip)] + [shlex.quote(str(a)) for a in args])
+        rc, o, e = self._sh(cmd, timeout)
+        baris = [l for l in o.strip().splitlines() if l.strip()]
+        if not baris:
+            return {'status': False, 'msg': (e.strip() or 'tidak ada keluaran')[:300]}
+        try:
+            j = json.loads(baris[-1])
+            return j if isinstance(j, dict) and 'status' in j else {'status': False, 'msg': 'keluaran tidak dikenal'}
+        except Exception:
+            return {'status': False, 'msg': (o.strip() or e.strip())[-300:]}
+
+    @staticmethod
+    def _sweeper_path(raw):
+        if not isinstance(raw, str) or not raw.strip():
+            return None, 'path wajib diisi'
+        raw = raw.strip()
+        if len(raw) > 1024 or re.search(r'[\x00-\x1f\x7f]', raw) or '..' in raw.split('/') or not raw.startswith('/'):
+            return None, 'path harus absolut, tanpa karakter kontrol dan tanpa ".."'
+        return raw, None
+
+    def get_sweeper_status(self, get):
+        """Status mesin, konfigurasi, pemindaian terakhir, cacah temuan, dan folder yang dipindai."""
+        r = self._sweeper('status')
+        return public.returnMsg(bool(r.get('status')), r.get('msg'))
+
+    def sweeper_start(self, get):
+        """Mulai pemindaian Sweeper di latar: scope=vhosts (semua vhost + folder kustom) atau scope=path&path=..."""
+        scope = str(get.get('scope', 'vhosts')).strip().lower()
+        mode = str(get.get('mode', 'auto')).strip().lower()
+        if scope not in ('vhosts', 'path') or mode not in ('auto', 'report'):
+            return public.returnMsg(False, 'parameter tidak valid')
+        args = ['scan']
+        if scope == 'path':
+            p, err = self._sweeper_path(get.get('path', ''))
+            if err:
+                return public.returnMsg(False, err)
+            v = self._sweeper('validate-path', p)
+            if not v.get('status'):
+                return public.returnMsg(False, 'path ditolak: %s' % str(v.get('msg'))[:200])
+            args += ['--path', p]
+        else:
+            args.append('--all-vhosts')
+        if mode == 'report':
+            args.append('--report-only')
+        if str(get.get('full', '1')) != '0':
+            args.append('--full')
+        st = self._sweeper('status')
+        if st.get('status') and st['msg'].get('running'):
+            return public.returnMsg(True, {'started': False, 'running': True})
+        skrip = self._p('bin', 'sentinel-sweeper.py')
+        if not os.path.isfile(skrip):
+            return public.returnMsg(False, 'sentinel-sweeper.py tidak ditemukan')
+        py = '/www/server/panel/pyenv/bin/python3'
+        if not os.path.exists(py):
+            py = 'python3'
+        os.makedirs(self._p('log'), exist_ok=True)
+        log_f = self._p('log', 'sweeper.out')
+        cmd = ' '.join([shlex.quote(py), shlex.quote(skrip)] + [shlex.quote(a) for a in args]) + ' > %s 2>&1' % shlex.quote(log_f)
+        subprocess.Popen(['setsid', '-f', 'bash', '-c', cmd], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, close_fds=True).wait()
+        for _ in range(30):
+            time.sleep(0.2)
+            s2 = self._sweeper('status')
+            if s2.get('status') and s2['msg'].get('running'):
+                return public.returnMsg(True, {'started': True, 'running': True})
+            if os.path.isfile(log_f):
+                try:
+                    with open(log_f) as fp:
+                        t = fp.read().strip()
+                    if t.startswith('{') and '"status": false' in t:
+                        return public.returnMsg(False, json.loads(t.splitlines()[-1]).get('msg', 'gagal'))
+                except Exception:
+                    pass
+        return public.returnMsg(True, {'started': True, 'running': False})
+
+    def get_sweeper_job(self, get):
+        """Kemajuan pemindaian: running, progress (berkas/dipindai/ditandai), ringkasan akhir."""
+        r = self._sweeper('status')
+        if not r.get('status'):
+            return public.returnMsg(False, r.get('msg'))
+        m = r['msg']
+        return public.returnMsg(True, {'running': m.get('running'), 'job': m.get('job'), 'last': m.get('last'), 'counts': m.get('counts')})
+
+    def sweeper_abort(self, get):
+        r = self._sweeper('abort')
+        return public.returnMsg(bool(r.get('status')), r.get('msg'))
+
+    def get_sweeper_findings(self, get):
+        flt = str(get.get('filter', '')).strip().lower()
+        if flt not in ('', 'webshell', 'suspicious', 'open', 'quarantined', 'ignored', 'allowed'):
+            return public.returnMsg(False, 'filter tidak valid')
+        r = self._sweeper('findings', *([flt] if flt else []))
+        return public.returnMsg(bool(r.get('status')), r.get('msg'))
+
+    def sweeper_action(self, get):
+        act = str(get.get('act', '')).strip().lower()
+        if act not in ('quarantine', 'allow', 'ignore', 'unignore'):
+            return public.returnMsg(False, 'aksi tidak valid')
+        p, err = self._sweeper_path(get.get('path', ''))
+        if err:
+            return public.returnMsg(False, err)
+        r = self._sweeper('action', act, p)
+        return public.returnMsg(bool(r.get('status')), r.get('msg'))
+
+    def get_sweeper_config(self, get):
+        r = self._sweeper('config')
+        return public.returnMsg(bool(r.get('status')), r.get('msg'))
+
+    def set_sweeper_config(self, get):
+        """Simpan konfigurasi (JSON di parameter 'config'); validasi ketat dilakukan skrip."""
+        raw = get.get('config')
+        if not isinstance(raw, str) or len(raw) > 20000:
+            return public.returnMsg(False, 'parameter config wajib berupa JSON (maks 20 KB)')
+        try:
+            json.loads(raw)
+        except Exception:
+            return public.returnMsg(False, 'config bukan JSON yang valid')
+        r = self._sweeper('config-set', raw)
+        return public.returnMsg(bool(r.get('status')), r.get('msg'))
+
+    def sweeper_calibrate(self, get):
+        p, err = self._sweeper_path(get.get('path', ''))
+        if err:
+            return public.returnMsg(False, err)
+        r = self._sweeper('calibrate', p, timeout=110)
+        return public.returnMsg(bool(r.get('status')), r.get('msg'))
+
+    def get_sweeper_allow(self, get):
+        r = self._sweeper('allow-list')
+        return public.returnMsg(bool(r.get('status')), r.get('msg'))
+
+    def sweeper_allow_remove(self, get):
+        h = str(get.get('sha256', '')).strip().lower()
+        if not re.fullmatch(r'[0-9a-f]{64}', h):
+            return public.returnMsg(False, 'sha256 tidak valid')
+        r = self._sweeper('allow-remove', h)
+        return public.returnMsg(bool(r.get('status')), r.get('msg'))
+
+    def sweeper_schedule(self, get):
+        mode = str(get.get('mode', 'status')).strip().lower()
+        if mode not in ('on', 'off', 'status'):
+            return public.returnMsg(False, 'mode harus on, off, atau status')
+        r = self._sweeper('schedule', mode, timeout=40)
+        return public.returnMsg(bool(r.get('status')), r.get('msg'))
+
+    def sweeper_build(self, get):
+        """Susun biner C dari sumber (butuh gcc); aman dijalankan berulang."""
+        r = self._sweeper('build', timeout=120)
+        return public.returnMsg(bool(r.get('status')), r.get('msg'))
+
     def av_scan_all(self, get):
         """Jalankan pemindaian seluruh vhost di latar belakang."""
         skrip = self._p('bin', 'sentinel-av.sh')
@@ -4778,12 +5582,14 @@ class sentinel_main(object):
         defcon_title = "DEFCON 3 -- PERTAHANAN PENUH AKTIF"
         defcon_desc = "Seluruh layer pertahanan (Firewall kernel, WAF, Egress Guard, Process Guard, Threat Intel) berjalan optimal tanpa insiden."
         
-        recent_kills = int(proc_info.get('kills', 0) or 0)
         now_ts = int(time.time())
-        recent_alert = False
-        if proc_alerts and (now_ts - int(proc_alerts[0].get('ts', 0) or 0) < 900):
-            recent_alert = True
-            
+        # Dihitung dari proc_alerts 15 menit terakhir. Dulu dipakai penghitung kumulatif
+        # "kills" sejak Process Guard terakhir start, sehingga satu kejadian menahan
+        # DEFCON 2 berjam-jam padahal deskripsinya "dalam 15 menit terakhir".
+        baru = [a for a in (proc_alerts or []) if now_ts - int(a.get('ts', 0) or 0) < 900]
+        recent_kills = sum(1 for a in baru if str(a.get('action', '')).startswith('KILLED'))
+        recent_alert = any(not str(a.get('action', '')).startswith('WHITELISTED') for a in baru)
+
         if panic_on:
             defcon = 1
             defcon_title = "DEFCON 1 -- DARURAT (PANIC MODE)"
@@ -4830,6 +5636,17 @@ class sentinel_main(object):
             },
             'waf_engine': waf_engine,
             'bans_active': ban_count,
+            # Indikator yang diukur, urut sesuai prioritas penentuan level (dipakai dialog DEFCON).
+            'indikator': [
+                {'kode': 'panic', 'nilai': 1 if panic_on else 0, 'baik': not panic_on, 'level': 1},
+                {'kode': 'kill_15m', 'nilai': recent_kills, 'baik': recent_kills == 0, 'level': 2},
+                {'kode': 'alert_15m', 'nilai': len([a for a in baru if not str(a.get('action', '')).startswith('WHITELISTED')]), 'baik': not recent_alert, 'level': 2},
+                {'kode': 'persistensi', 'nilai': sys_changes, 'baik': sys_changes == 0, 'level': 2},
+                {'kode': 'egress', 'nilai': 1 if egress_on else 0, 'baik': egress_on, 'level': 4},
+                {'kode': 'proc_guard', 'nilai': 1 if proc_pid_active else 0, 'baik': proc_pid_active, 'level': 4},
+                {'kode': 'intel', 'nilai': intel_count, 'baik': intel_count > 0, 'level': 4},
+            ],
+            'diukur': now_ts,
             'recent_alerts': proc_alerts,
             'proc_whitelist_count': proc_wl_count
         })
@@ -5199,7 +6016,7 @@ class sentinel_main(object):
     # DUKUNGAN TELEMETRI GOOGLE ANALYTICS & TERMS POLICY
     # -------------------------------------------------------------------------
     def _is_telemetry_enabled(self):
-        """Periksa apakah pengiriman statistik telemetri GTM / GA4 diizinkan. Default adalah On (True)."""
+        """Periksa apakah pengiriman statistik telemetri diizinkan. Default adalah On (True)."""
         conf_p = self._p('etc', 'telemetry.json')
         if not os.path.isfile(conf_p):
             conf_p = os.path.join(os.path.dirname(__file__), 'telemetry.json')
@@ -5212,14 +6029,46 @@ class sentinel_main(object):
                 return True
         return True
 
+    def _public_ip(self):
+        """Alamat IPv4 publik server, dipakai sebagai nama halaman telemetri.
+
+        Urutan: alamat antarmuka yang routable secara global (bukan 10.x,
+        172.16-31.x, 192.168.x, loopback, atau antarmuka docker), lalu
+        daftar alamat yang dideteksi aaPanel (data/iplist.txt, berguna di
+        belakang NAT), lalu _self_ip() sebagai pilihan terakhir.
+        """
+        kandidat = []
+        try:
+            with open('/proc/net/fib_trie') as f:
+                for baris in f.read().splitlines():
+                    b = baris.strip()
+                    if '/32 host' in b and not b.startswith('32 host LOCAL'):
+                        kandidat.append(b.split('/32 host')[0].strip().lstrip('|-+ '))
+        except Exception:
+            pass
+        try:
+            with open('/www/server/panel/data/iplist.txt') as f:
+                kandidat += re.findall(r'\d{1,3}(?:\.\d{1,3}){3}', f.read())
+        except Exception:
+            pass
+        for k in kandidat:
+            try:
+                if ipaddress.IPv4Address(k).is_global:
+                    return k
+            except Exception:
+                continue
+        return self._self_ip()
+
     def get_telemetry_setting(self, get):
-        """Ambil konfigurasi telemetri statistik Google Tag Manager."""
+        """Ambil konfigurasi telemetri statistik beserta IP publik server
+        (nama halaman yang dilaporkan telemetri)."""
         return public.returnMsg(True, {
-            'enabled': self._is_telemetry_enabled()
+            'enabled': self._is_telemetry_enabled(),
+            'server_ip': self._public_ip()
         })
 
     def set_telemetry_setting(self, get):
-        """Ubah konfigurasi On/Off telemetri statistik Google Tag Manager."""
+        """Ubah konfigurasi On/Off telemetri statistik."""
         val = str(get.get('enabled', '1')).strip().lower()
         enabled = val in ('1', 'true', 'on', 'yes')
         payload = {
@@ -5242,7 +6091,7 @@ class sentinel_main(object):
             pass
 
         status_text = 'Aktif (ON)' if enabled else 'Nonaktif (OFF)'
-        return public.returnMsg(True, 'Pengaturan telemetri Google Tag Manager berhasil diubah: %s' % status_text)
+        return public.returnMsg(True, 'Pengaturan telemetri berhasil diubah: %s' % status_text)
 
     def get_telemetry(self, get):
         """Alias untuk get_telemetry_setting."""

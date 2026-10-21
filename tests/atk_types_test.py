@@ -39,6 +39,23 @@ m = r.get('msg')
 T('respons sukses dengan total = jumlah jenis', r.get('status') is True and m['total'] == sum(x['n'] for x in m['jenis']), r)
 T('jenis terurut menurun', [x['n'] for x in m['jenis']] == sorted([x['n'] for x in m['jenis']], reverse=True))
 T('jam di luar batas dijepit 1..168', sm.get_attack_types(G(hours=99999))['msg']['jam'] == 168 and sm.get_attack_types(G(hours=-5))['msg']['jam'] == 1)
+# ---- peta asal serangan (get_attack_map): sumber sama dengan donat, totalnya harus sama
+sm.WAF_AUDIT_LOG = p
+NEG = {'1.1.1.1': ('AU', 'Australia'), '1.1.1.2': ('AU', 'Australia'), '1.1.1.3': ('US', 'United States'),
+       '9.9.9.9': ('US', 'United States'), '8.8.8.8': ('SG', 'Singapore')}
+sm._geo_satu = lambda ip: NEG.get(ip, ('', ''))        # tanpa MMDB/DB produksi
+sm._geo_buka = lambda: object()
+asli_sql = sm._sql
+EV = [{'kind': 'flood', 'n': 40}, {'kind': 'scanner', 'n': 10}]
+sm._sql = lambda q, a=(): ([{'ip': 151587081, 'n': 40}, {'ip': 134744072, 'n': 10}] if 'GROUP BY ip' in q else EV)   # 9.9.9.9, 8.8.8.8
+sm._ATTACK_CACHE.clear(); sm._ATTACK_MAP_CACHE.clear()
+mp = sm.get_attack_map(G(hours=24))['msg']; dn = sm.get_attack_types(G(hours=24))['msg']
+T('peta: total = total donat (kejadian guardd + transaksi WAF)', mp['total'] == dn['total'] == 58, (mp['total'], dn['total']))
+T('peta: per negara dijumlah dari kedua sumber dan terurut', [(x['kode'], x['n'], x['ip']) for x in mp['negara']] == [('US', 41, 2), ('SG', 10, 1), ('AU', 2, 2)], mp['negara'])
+T('peta: IP tanpa negara dihitung sebagai tak diketahui (1.1.1.4-1.1.1.8 = 5)', mp['tak_tahu'] == 5, mp['tak_tahu'])
+T('peta: loopback 127.0.0.1 tidak dihitung', all(x['kode'] != '??' for x in mp['negara']) and mp['total'] == 58)
+T('peta: jam dijepit 1..168', sm.get_attack_map(G(hours=99999))['msg']['jam'] == 168)
+sm._sql = asli_sql
 sm.WAF_AUDIT_LOG = os.path.join(d, 'tidak-ada.jsonl')
 T('log audit tidak ada: tetap sukses', sm.get_attack_types(G(hours=24)).get('status') is True)
 print('\nRINGKAS: %d gagal' % gagal); sys.exit(1 if gagal else 0)

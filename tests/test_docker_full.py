@@ -497,9 +497,9 @@ def run_tests():
             "invalid" in combined_ban.lower() or "error" in combined_ban.lower(), combined_ban)
 
     # =========================================================================
-    # BAGIAN 7: SAKELAR TELEMETRI GTM
+    # BAGIAN 7: SAKELAR TELEMETRI
     # =========================================================================
-    print("\n--- 7. Telemetry (GTM Toggle) ---")
+    print("\n--- 7. Telemetry (Toggle) ---")
 
     if sm:
         # Set Off
