@@ -14,7 +14,11 @@ VERSION="${1:-$INFO_VERSION}"
 [ "$VERSION" = "$INFO_VERSION" ] || { echo "[GAGAL] versi $VERSION tidak sama dengan info.json ($INFO_VERSION): python3 versi.py terapkan" >&2; exit 1; }
 python3 "$SCRIPT_DIR/versi.py" periksa || { echo "[GAGAL] string versi tidak konsisten: python3 versi.py terapkan" >&2; exit 1; }
 OUT_DIR="${2:-/www/backup}"
-STAGE_DIR="/tmp/sentinel_build_staging"
+# Staging di direktori acak milik root (mktemp, 0700). Dulu jalur tetap /tmp/sentinel_build_staging: user lokal
+# (mis. www dari situs yang dibobol) dapat membuat direktori itu lebih dulu di sela rm dan mkdir, lalu menukar isi
+# sebelum zip, sehingga rilis bertanda tangan membawa kodenya (audit 23 Okt 2026).
+STAGE_DIR="$(mktemp -d /tmp/sentinel_build.XXXXXXXX)"
+trap 'rm -rf "$STAGE_DIR"' EXIT
 
 echo "===================================================================="
 echo " [ZySentinel] Membangun Paket Distribusi Bersih (Versi: v${VERSION})"
@@ -50,7 +54,6 @@ fi
 
 # 2. Siapkan direktori staging
 echo "[*] Menyiapkan struktur direktori staging..."
-rm -rf "$STAGE_DIR"
 mkdir -p "$STAGE_DIR/sentinel"
 
 # 3. Salin berkas bersih tanpa sampah (*.bak, *.pyc, __pycache__)
@@ -92,10 +95,9 @@ VERSIONED_ZIP="$OUT_DIR/zysentinel-v${VERSION}.zip"
 # Rilis ENFORCE (Pro) memakai nama BERBEDA supaya tidak pernah tertukar dengan aset garis publik: zysentinel-pro-vX.Y.Z.zip
 
 echo "[*] Mengompresi paket ke $TARGET_ZIP..."
-rm -f "$TARGET_ZIP" "$VERSIONED_ZIP" "/tmp/sentinel.zip"
+rm -f "$TARGET_ZIP" "$VERSIONED_ZIP"
 (cd "$STAGE_DIR" && zip -r -9 "$TARGET_ZIP" sentinel/ >/dev/null)
 cp -f "$TARGET_ZIP" "$VERSIONED_ZIP"
-cp -f "$TARGET_ZIP" "/tmp/sentinel.zip"
 
 # 6. Hitung Checksum (SHA256SUMS.txt memuat berkas bernama versi; pembaruan klien membacanya dari aset rilis)
 SHA256="$(sha256sum "$TARGET_ZIP" | cut -d' ' -f1)"

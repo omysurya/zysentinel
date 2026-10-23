@@ -6561,6 +6561,18 @@ class sentinel_main(object):
         chk = self.check_github_update(get)
         data = chk.get('msg', {})
         download_url = data.get('download_url') or ''
+        # Anti-downgrade (audit 23 Okt 2026): akun/rilis GitHub yang diambil alih dapat menyembunyikan rilis baru sehingga
+        # rilis LAMA (bertanda tangan sah, mungkin rentan) terpilih. Versi lebih lama selalu ditolak; versi sama hanya
+        # dengan konfirmasi eksplisit "pasang ulang" dari UI (reinstall=1).
+        v_kini = self._parse_version(data.get('current_version') or self._versi_plugin())
+        v_rilis = self._parse_version(data.get('latest_version') or '')
+        if v_rilis == (0, 0, 0):
+            return public.returnMsg(False, 'Pembaruan dibatalkan: versi rilis di GitHub tidak dapat dibaca.')
+        if v_rilis < v_kini:
+            return public.returnMsg(False, 'Pembaruan dibatalkan: rilis di GitHub (%s) lebih lama dari versi terpasang (%s); downgrade ditolak.' % (
+                self._normalize_version(data.get('latest_version') or '-'), self._normalize_version(self._versi_plugin())))
+        if v_rilis == v_kini and _g(get, 'reinstall') != '1':
+            return public.returnMsg(False, 'Versi terpasang sudah yang terbaru; pasang ulang versi yang sama harus dikonfirmasi.')
         work = None
         try:
             work = tempfile.mkdtemp(prefix='sentinel_update.')   # milik root, 0700

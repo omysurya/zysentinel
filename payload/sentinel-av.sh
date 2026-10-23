@@ -131,37 +131,88 @@ q_meta() {
   fi
 }
 
+# Pindahkan berkas ke karantina TANPA mengikuti symlink (audit 23 Okt 2026, TOCTOU): pemindaian bisa berjalan lama,
+# dan user web dapat menukar folder induk dengan symlink ke /etc sebelum mv. Setiap komponen path dibuka O_NOFOLLOW,
+# SHA-256 dihitung dari fd yang sama, lalu rename relatif terhadap fd folder induk (atau salin dari fd bila beda filesystem).
+# Keluaran: "<sha256>\t<path_karantina>"; kode 1 bila ditolak (symlink, bukan berkas biasa, atau gagal).
+pindah_karantina_aman() {
+  local py="/www/server/panel/pyenv/bin/python3"
+  [ -x "$py" ] || py="python3"
+  "$py" -I - "$1" "$2" <<'PYQ'
+import hashlib, os, stat, sys, time
+src, qdir = sys.argv[1], sys.argv[2]
+if not src.startswith("/") or "\x00" in src:
+    sys.exit(1)
+bagian = [x for x in src.split("/") if x]
+if not bagian or ".." in bagian:
+    sys.exit(1)
+fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
+try:
+    for k in bagian[:-1]:
+        nfd = os.open(k, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+        os.close(fd); fd = nfd
+    nama = bagian[-1]
+    ffd = os.open(nama, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+    try:
+        st = os.fstat(ffd)
+        if not stat.S_ISREG(st.st_mode):
+            sys.exit(1)
+        h = hashlib.sha256()
+        while True:
+            b = os.read(ffd, 1 << 20)
+            if not b:
+                break
+            h.update(b)
+        sha = h.hexdigest()
+        aman = "".join(c if (c.isprintable() and c not in "/\\") else "_" for c in nama)[:180] or "berkas"
+        tujuan = os.path.join(qdir, "%d_%s_%s" % (int(time.time()), sha[:12], aman))
+        if os.path.lexists(tujuan):
+            tujuan = os.path.join(qdir, "%d_%s_%s" % (int(time.time()), os.urandom(4).hex(), aman))
+        try:
+            os.rename(nama, tujuan, src_dir_fd=fd)
+            # pastikan yang dipindah adalah inode yang dibaca (bukan entri yang ditukar di antara open dan rename)
+            if os.lstat(tujuan).st_ino != st.st_ino:
+                sys.exit(1)
+        except OSError:
+            os.lseek(ffd, 0, 0)
+            ofd = os.open(tujuan, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(ofd, "wb") as o:
+                while True:
+                    b = os.read(ffd, 1 << 20)
+                    if not b:
+                        break
+                    o.write(b)
+            os.unlink(nama, dir_fd=fd)
+        os.chmod(tujuan, 0o600)
+        print("%s\t%s" % (sha, tujuan))
+    finally:
+        os.close(ffd)
+except OSError:
+    sys.exit(1)
+finally:
+    os.close(fd)
+PYQ
+}
+
 cv_quarantine_fallback() {
   local f="$1" sig="$2"
-  local ts sha base qdir mdir qpath meta
-  ts=$(date +%s)
-  sha=$(sha256sum "$f" 2>/dev/null | cut -d' ' -f1)
-  [ -z "$sha" ] && sha="unknown"
-  base=$(basename "$f")
+  local base qdir mdir qpath meta res sha f_aman
   qdir="$(q_files)"
   mdir="$(q_meta)"
   mkdir -p "$qdir" "$mdir" 2>/dev/null
-  qpath="$qdir/${ts}_${sha:0:12}_${base}"
-  meta="$mdir/${ts}_${sha:0:12}_${base}.meta"
-
-  if [ -e "$qpath" ]; then
-    qpath="$qdir/${ts}_${RANDOM}_${base}"
-    meta="$mdir/${ts}_${RANDOM}_${base}.meta"
-  fi
-
-  if ! mv -f "$f" "$qpath" 2>/dev/null; then
-    if ! cp -p "$f" "$qpath" 2>/dev/null; then
-      return 1
-    fi
-    rm -f "$f" 2>/dev/null
-  fi
-  chmod 600 "$qpath" 2>/dev/null
+  res="$(pindah_karantina_aman "$f" "$qdir")" || return 1
+  sha="${res%%$'\t'*}"; qpath="${res#*$'\t'}"
+  [ -n "$sha" ] && [ -f "$qpath" ] || return 1
+  base="$(basename "$qpath")"
+  meta="$mdir/${base}.meta"
+  # newline di nama berkas penyerang tidak boleh menyuntik kunci palsu ke metadata (quarantine_path=..., dibaca do_q_delete)
+  f_aman="${f//$'\n'/\\n}"; f_aman="${f_aman//$'\r'/\\r}"
 
   {
     printf 'quarantined_at=%s\n' "$(date -Is)"
-    printf 'original_path=%s\n' "$f"
+    printf 'original_path=%s\n' "$f_aman"
     printf 'quarantine_path=%s\n' "$qpath"
-    printf 'signature=%s\n' "$sig"
+    printf 'signature=%s\n' "${sig//$'\n'/ }"
     printf 'sha256=%s\n' "$sha"
     printf 'size=%s\n' "$(stat -c %s "$qpath" 2>/dev/null || echo 0)"
     printf 'uid=%s\n' "$(stat -c %u "$qpath" 2>/dev/null || echo 0)"
@@ -222,8 +273,25 @@ do_q_list() {
   done
 }
 
+# id karantina dari panel: nama berkas meta saja (tanpa / atau ..), supaya tidak bisa menunjuk berkas di luar folder metadata
+q_id_sah() { case "$1" in ""|*/*|.|..|*$'\n'*) err "id karantina tidak valid"; return 1;; esac; }
+
+# rm hanya untuk berkas biasa (bukan symlink) yang benar-benar berada di folder karantina; metadata lama bisa memuat
+# quarantine_path palsu (nama berkas penyerang bernewline sebelum perbaikan 23 Okt 2026)
+q_hapus_berkas() {
+  local q="$1" d
+  case "$q" in /*) ;; *) return 0;; esac
+  for d in "$(q_files)" "$Q_FALLBACK_FILES"; do
+    [ -n "$d" ] || continue
+    case "$q" in "$d"/*) case "${q#"$d"/}" in */*|..) continue;; esac
+      [ -L "$q" ] || rm -f -- "$q" 2>/dev/null; return 0;; esac
+  done
+  return 0
+}
+
 do_q_restore() {
   [ $# -ge 1 ] || { err "pakai: quarantine-restore <id>"; return 1; }
+  q_id_sah "$1" || return 1
   local meta; meta="$(q_meta)/$1.meta"
   [ -f "$meta" ] || { err "metadata tidak ditemukan: $1"; return 1; }
   local asal; asal="$(sed -n 's/^original_path=//p' "$meta" | head -1)"
@@ -238,10 +306,11 @@ do_q_restore() {
 
 do_q_delete() {
   [ $# -ge 1 ] || { err "pakai: quarantine-delete <id>"; return 1; }
+  q_id_sah "$1" || return 1
   local meta; meta="$(q_meta)/$1.meta"
   [ -f "$meta" ] || { err "metadata tidak ditemukan: $1"; return 1; }
-  local qpath; qpath="$(sed -n 's/^quarantine_path=//p' "$meta" | head -1)"
-  rm -f "$qpath" 2>/dev/null
+  local qpath; qpath="$(sed -n 's/^quarantine_path=//p' "$meta" | tail -1)"
+  q_hapus_berkas "$qpath"
   rm -f "$meta" 2>/dev/null
   say "dihapus permanen: $1"
 }
@@ -252,8 +321,8 @@ do_q_purge() {
   local f qpath n=0
   for f in "$dir"/*.meta; do
     [ -f "$f" ] || continue
-    qpath="$(sed -n 's/^quarantine_path=//p' "$f" | head -1)"
-    rm -f "$qpath" 2>/dev/null
+    qpath="$(sed -n 's/^quarantine_path=//p' "$f" | tail -1)"
+    q_hapus_berkas "$qpath"
     rm -f "$f" 2>/dev/null
     n=$((n+1))
   done
@@ -317,11 +386,8 @@ scan_satu() {
           [ -f "$f" ] || continue
           found=$((found+1))
           if [ "${ACTION_ON_DETECT:-quarantine}" = "quarantine" ]; then
-            if [ "$CV_OK" = 1 ] && type cv_quarantine >/dev/null 2>&1; then
-              cv_quarantine "$f" "$sig" >/dev/null 2>&1 || true
-            else
-              cv_quarantine_fallback "$f" "$sig" >/dev/null 2>&1 || true
-            fi
+            # selalu pemindah aman milik sendiri (O_NOFOLLOW); cv_quarantine pustaka host memakai mv berbasis path (TOCTOU symlink)
+            cv_quarantine_fallback "$f" "$sig" >/dev/null 2>&1 || true
             printf '%s\tSCAN_DETECTED\t%s\t%s\n' \
               "$(date -Is)" "$f" "$sig" >> "${EVENT_LOG:-/var/log/clamav/realtime.log}" 2>/dev/null || true
           fi
@@ -681,11 +747,8 @@ EOF
                 echo "[!] ANCAMAN TERDETEKSI: $f [Signature: $sig]"
                 if [ "${ACTION_ON_DETECT:-quarantine}" = "quarantine" ]; then
                   local qres=""
-                  if [ "$CV_OK" = 1 ] && type cv_quarantine >/dev/null 2>&1; then
-                    qres="$(cv_quarantine "$f" "$sig" 2>/dev/null || true)"
-                  else
-                    qres="$(cv_quarantine_fallback "$f" "$sig" 2>/dev/null || true)"
-                  fi
+                  # selalu pemindah aman milik sendiri (O_NOFOLLOW); cv_quarantine pustaka host memakai mv berbasis path (TOCTOU symlink)
+                  qres="$(cv_quarantine_fallback "$f" "$sig" 2>/dev/null || true)"
                   echo "    -> Berkas telah diisolasi ke karantina ($qres)"
                   printf '%s\tSCAN_DETECTED\t%s\t%s\n' \
                     "$(date -Is)" "$f" "$sig" >> "${EVENT_LOG:-/var/log/clamav/realtime.log}" 2>/dev/null || true

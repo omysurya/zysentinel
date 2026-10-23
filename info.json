@@ -4,7 +4,7 @@
 	"name": "sentinel",
 	"type": "Security",
 	"ps": "Monitoring, port access control, kernel firewall, WAF, EDR process guard & whitelist, threat intel & antivirus",
-	"versions": "1.6.3",
+	"versions": "1.6.4",
 	"shell": "install.sh",
 	"checks": "/www/server/sentinel/bin/guardd",
 	"author": "ZySens.com",
