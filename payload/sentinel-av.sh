@@ -58,6 +58,10 @@ fi
 
 clam_ada()     { command -v clamscan >/dev/null 2>&1; }
 clamd_ada()    { [ -S "${CLAMD_SOCKET:-/var/run/clamav/clamd.ctl}" ]; }
+# ---- gerbang lisensi: mesin premium (ransomware, judol, mining, SAGE AI) adalah fitur Max (av_engines). Gagal tertutup:
+# biner pemverifikasi hilang/rusak = hanya ClamAV dan Rkhunter. Mesin 'both' (bawaan) TIDAK lagi membuka mesin premium tanpa lisensi.
+av_premium_ok() { return 1; }      # edisi Free: mesin premium adalah fitur Max
+
 rkhunter_ada() { [ -x "$RKHUNTER_BIN" ] || command -v rkhunter >/dev/null 2>&1; }
 
 # ==================================================================
@@ -127,37 +131,88 @@ q_meta() {
   fi
 }
 
+# Pindahkan berkas ke karantina TANPA mengikuti symlink (audit 23 Okt 2026, TOCTOU): pemindaian bisa berjalan lama,
+# dan user web dapat menukar folder induk dengan symlink ke /etc sebelum mv. Setiap komponen path dibuka O_NOFOLLOW,
+# SHA-256 dihitung dari fd yang sama, lalu rename relatif terhadap fd folder induk (atau salin dari fd bila beda filesystem).
+# Keluaran: "<sha256>\t<path_karantina>"; kode 1 bila ditolak (symlink, bukan berkas biasa, atau gagal).
+pindah_karantina_aman() {
+  local py="/www/server/panel/pyenv/bin/python3"
+  [ -x "$py" ] || py="python3"
+  "$py" -I - "$1" "$2" <<'PYQ'
+import hashlib, os, stat, sys, time
+src, qdir = sys.argv[1], sys.argv[2]
+if not src.startswith("/") or "\x00" in src:
+    sys.exit(1)
+bagian = [x for x in src.split("/") if x]
+if not bagian or ".." in bagian:
+    sys.exit(1)
+fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
+try:
+    for k in bagian[:-1]:
+        nfd = os.open(k, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+        os.close(fd); fd = nfd
+    nama = bagian[-1]
+    ffd = os.open(nama, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+    try:
+        st = os.fstat(ffd)
+        if not stat.S_ISREG(st.st_mode):
+            sys.exit(1)
+        h = hashlib.sha256()
+        while True:
+            b = os.read(ffd, 1 << 20)
+            if not b:
+                break
+            h.update(b)
+        sha = h.hexdigest()
+        aman = "".join(c if (c.isprintable() and c not in "/\\") else "_" for c in nama)[:180] or "berkas"
+        tujuan = os.path.join(qdir, "%d_%s_%s" % (int(time.time()), sha[:12], aman))
+        if os.path.lexists(tujuan):
+            tujuan = os.path.join(qdir, "%d_%s_%s" % (int(time.time()), os.urandom(4).hex(), aman))
+        try:
+            os.rename(nama, tujuan, src_dir_fd=fd)
+            # pastikan yang dipindah adalah inode yang dibaca (bukan entri yang ditukar di antara open dan rename)
+            if os.lstat(tujuan).st_ino != st.st_ino:
+                sys.exit(1)
+        except OSError:
+            os.lseek(ffd, 0, 0)
+            ofd = os.open(tujuan, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+            with os.fdopen(ofd, "wb") as o:
+                while True:
+                    b = os.read(ffd, 1 << 20)
+                    if not b:
+                        break
+                    o.write(b)
+            os.unlink(nama, dir_fd=fd)
+        os.chmod(tujuan, 0o600)
+        print("%s\t%s" % (sha, tujuan))
+    finally:
+        os.close(ffd)
+except OSError:
+    sys.exit(1)
+finally:
+    os.close(fd)
+PYQ
+}
+
 cv_quarantine_fallback() {
   local f="$1" sig="$2"
-  local ts sha base qdir mdir qpath meta
-  ts=$(date +%s)
-  sha=$(sha256sum "$f" 2>/dev/null | cut -d' ' -f1)
-  [ -z "$sha" ] && sha="unknown"
-  base=$(basename "$f")
+  local base qdir mdir qpath meta res sha f_aman
   qdir="$(q_files)"
   mdir="$(q_meta)"
   mkdir -p "$qdir" "$mdir" 2>/dev/null
-  qpath="$qdir/${ts}_${sha:0:12}_${base}"
-  meta="$mdir/${ts}_${sha:0:12}_${base}.meta"
-
-  if [ -e "$qpath" ]; then
-    qpath="$qdir/${ts}_${RANDOM}_${base}"
-    meta="$mdir/${ts}_${RANDOM}_${base}.meta"
-  fi
-
-  if ! mv -f "$f" "$qpath" 2>/dev/null; then
-    if ! cp -p "$f" "$qpath" 2>/dev/null; then
-      return 1
-    fi
-    rm -f "$f" 2>/dev/null
-  fi
-  chmod 600 "$qpath" 2>/dev/null
+  res="$(pindah_karantina_aman "$f" "$qdir")" || return 1
+  sha="${res%%$'\t'*}"; qpath="${res#*$'\t'}"
+  [ -n "$sha" ] && [ -f "$qpath" ] || return 1
+  base="$(basename "$qpath")"
+  meta="$mdir/${base}.meta"
+  # newline di nama berkas penyerang tidak boleh menyuntik kunci palsu ke metadata (quarantine_path=..., dibaca do_q_delete)
+  f_aman="${f//$'\n'/\\n}"; f_aman="${f_aman//$'\r'/\\r}"
 
   {
     printf 'quarantined_at=%s\n' "$(date -Is)"
-    printf 'original_path=%s\n' "$f"
+    printf 'original_path=%s\n' "$f_aman"
     printf 'quarantine_path=%s\n' "$qpath"
-    printf 'signature=%s\n' "$sig"
+    printf 'signature=%s\n' "${sig//$'\n'/ }"
     printf 'sha256=%s\n' "$sha"
     printf 'size=%s\n' "$(stat -c %s "$qpath" 2>/dev/null || echo 0)"
     printf 'uid=%s\n' "$(stat -c %u "$qpath" 2>/dev/null || echo 0)"
@@ -179,10 +234,23 @@ cv_restore_fallback() {
   gid=$(grep '^gid=' "$meta" | cut -d= -f2-)
   mode=$(grep '^mode=' "$meta" | cut -d= -f2-)
 
-  [ -f "$qpath" ] || { err "berkas karantina hilang: $qpath"; return 1; }
-  mkdir -p "$(dirname "$orig")" 2>/dev/null
-  mv -f "$qpath" "$orig" || return 1
-  chown "${uid:-0}:${gid:-0}" "$orig" 2>/dev/null
+  [ -f "$qpath" ] && [ ! -L "$qpath" ] || { err "berkas karantina hilang atau symlink: $qpath"; return 1; }
+  # Pemulihan berjalan sebagai root: tujuan harus absolut, tanpa '..' dan tanpa
+  # symlink, berada di area situs, dan tidak boleh menimpa berkas yang ada.
+  case "$orig" in /*) ;; *) err "path asal tidak valid"; return 1 ;; esac
+  case "/$orig/" in */../*) err "path asal memuat .."; return 1 ;; esac
+  local odir; odir="$(dirname "$orig")"
+  if [ "$(realpath -m "$odir")" != "$(realpath -sm "$odir")" ]; then
+    err "path asal memuat symlink: $odir"; return 1
+  fi
+  case "$(realpath -m "$odir")/" in
+    /www/wwwroot/*|/home/*|/var/www/*|/srv/*|/opt/*|/tmp/*) ;;
+    *) err "tujuan di luar area situs: $odir"; return 1 ;;
+  esac
+  [ -e "$orig" ] || [ -L "$orig" ] && { err "berkas tujuan sudah ada, tidak ditimpa: $orig"; return 1; }
+  mkdir -p "$odir" 2>/dev/null
+  mv -n "$qpath" "$orig" || return 1
+  chown -h "${uid:-0}:${gid:-0}" "$orig" 2>/dev/null
   chmod "${mode:-644}" "$orig" 2>/dev/null
   rm -f "$meta"
   echo "RESTORED: $orig"
@@ -205,25 +273,44 @@ do_q_list() {
   done
 }
 
+# id karantina dari panel: nama berkas meta saja (tanpa / atau ..), supaya tidak bisa menunjuk berkas di luar folder metadata
+q_id_sah() { case "$1" in ""|*/*|.|..|*$'\n'*) err "id karantina tidak valid"; return 1;; esac; }
+
+# rm hanya untuk berkas biasa (bukan symlink) yang benar-benar berada di folder karantina; metadata lama bisa memuat
+# quarantine_path palsu (nama berkas penyerang bernewline sebelum perbaikan 23 Okt 2026)
+q_hapus_berkas() {
+  local q="$1" d
+  case "$q" in /*) ;; *) return 0;; esac
+  for d in "$(q_files)" "$Q_FALLBACK_FILES"; do
+    [ -n "$d" ] || continue
+    case "$q" in "$d"/*) case "${q#"$d"/}" in */*|..) continue;; esac
+      [ -L "$q" ] || rm -f -- "$q" 2>/dev/null; return 0;; esac
+  done
+  return 0
+}
+
 do_q_restore() {
   [ $# -ge 1 ] || { err "pakai: quarantine-restore <id>"; return 1; }
+  q_id_sah "$1" || return 1
   local meta; meta="$(q_meta)/$1.meta"
   [ -f "$meta" ] || { err "metadata tidak ditemukan: $1"; return 1; }
   local asal; asal="$(sed -n 's/^original_path=//p' "$meta" | head -1)"
-  if [ "$CV_OK" = 1 ] && type cv_restore >/dev/null 2>&1; then
-    cv_restore "$meta" || { err "restore gagal"; return 1; }
-  else
-    cv_restore_fallback "$meta" || { err "restore gagal"; return 1; }
-  fi
+  # SELALU jalur yang diperkeras, juga saat clamav-common.sh tersedia: cv_restore
+  # milik operator memakai "mkdir -p; mv -f" sebagai root tanpa memeriksa
+  # symlink, area situs, atau berkas yang sudah ada. Penyerang yang masih punya
+  # akses www cukup mengganti folder asal dengan symlink (mis. ke /etc/profile.d)
+  # lalu menunggu admin memulihkan berkas.
+  cv_restore_fallback "$meta" || { err "restore gagal"; return 1; }
   say "dikembalikan: $asal"
 }
 
 do_q_delete() {
   [ $# -ge 1 ] || { err "pakai: quarantine-delete <id>"; return 1; }
+  q_id_sah "$1" || return 1
   local meta; meta="$(q_meta)/$1.meta"
   [ -f "$meta" ] || { err "metadata tidak ditemukan: $1"; return 1; }
-  local qpath; qpath="$(sed -n 's/^quarantine_path=//p' "$meta" | head -1)"
-  rm -f "$qpath" 2>/dev/null
+  local qpath; qpath="$(sed -n 's/^quarantine_path=//p' "$meta" | tail -1)"
+  q_hapus_berkas "$qpath"
   rm -f "$meta" 2>/dev/null
   say "dihapus permanen: $1"
 }
@@ -234,8 +321,8 @@ do_q_purge() {
   local f qpath n=0
   for f in "$dir"/*.meta; do
     [ -f "$f" ] || continue
-    qpath="$(sed -n 's/^quarantine_path=//p' "$f" | head -1)"
-    rm -f "$qpath" 2>/dev/null
+    qpath="$(sed -n 's/^quarantine_path=//p' "$f" | tail -1)"
+    q_hapus_berkas "$qpath"
     rm -f "$f" 2>/dev/null
     n=$((n+1))
   done
@@ -287,20 +374,20 @@ scan_satu() {
       > "$tmp" 2>/dev/null || rc=$?
   fi
 
-  # pindahkan temuan ke karantina bila ada
-  if [ "$rc" -eq 1 ]; then
+  # pindahkan temuan ke karantina bila ada. Kode 2 (ada galat, mis. berkas cache
+  # hilang di antara find dan pemindaian) TIDAK berarti tidak ada temuan: dulu
+  # satu galat saja membuang semua baris FOUND. Yang diproses hanya baris FOUND.
+  if [ "$rc" -ne 0 ]; then
     while IFS= read -r line; do
       [ -z "$line" ] && continue
       case "$line" in
         *": "*" FOUND")
-          local f="${line%%: *}" sig="${line#*: }"; sig="${sig% FOUND}"
+          local lx="${line% FOUND}"; local f="${lx%: *}" sig="${lx##*: }"
+          [ -f "$f" ] || continue
           found=$((found+1))
           if [ "${ACTION_ON_DETECT:-quarantine}" = "quarantine" ]; then
-            if [ "$CV_OK" = 1 ] && type cv_quarantine >/dev/null 2>&1; then
-              cv_quarantine "$f" "$sig" >/dev/null 2>&1 || true
-            else
-              cv_quarantine_fallback "$f" "$sig" >/dev/null 2>&1 || true
-            fi
+            # selalu pemindah aman milik sendiri (O_NOFOLLOW); cv_quarantine pustaka host memakai mv berbasis path (TOCTOU symlink)
+            cv_quarantine_fallback "$f" "$sig" >/dev/null 2>&1 || true
             printf '%s\tSCAN_DETECTED\t%s\t%s\n' \
               "$(date -Is)" "$f" "$sig" >> "${EVENT_LOG:-/var/log/clamav/realtime.log}" 2>/dev/null || true
           fi
@@ -352,63 +439,63 @@ do_scan_all() {
 # ==================================================================
 # INTEGRITAS (anti-tamper) -- manifest hash per vhost
 # ==================================================================
-EXT_POLA='\.(php|phtml|php[0-9]|js|html|htm|sh|py|pl|cgi|asp|aspx|jsp)$'
+# Pola berkas yang dijaga. Dulu .phar, .inc, .pht, .htaccess, dan .user.ini terlewat,
+# padahal .user.ini (auto_prepend_file) dan .htaccess (AddHandler) adalah cara persistensi
+# webshell yang paling umum.
+EXT_POLA='(\.(php|phtml|pht|phps|phar|inc|php[0-9]|js|html|htm|shtml|sh|py|pl|cgi|asp|aspx|jsp)|/\.htaccess|/\.user\.ini|/php\.ini)$'
+# Folder yang berubah sendiri saat aplikasi berjalan (cache, log, git, dependensi build).
+INTEG_KECUALI='/(storage/framework|storage/logs|bootstrap/cache|node_modules|\.git|wp-content/cache)/'
+INTEG_DB=/www/server/sentinel/data/guardd.db
 
 baseline_path() { printf '%s' "$BASE_DIR/$1.txt"; }
 
+# "hash  path" untuk semua berkas terjaga di bawah $1, terurut. Satu proses sha256sum per
+# ribuan berkas (xargs), bukan satu per berkas. Path berspasi aman.
+integ_hitung() {
+  find "$1" -type f -regextype posix-extended -regex ".*$EXT_POLA" ! -regex ".*$INTEG_KECUALI.*" -print0 2>/dev/null \
+    | nice -n 10 ionice -c3 xargs -0 -r sha256sum 2>/dev/null | LC_ALL=C sort -k2
+}
+
+# Bandingkan baseline ($1) dengan keadaan sekarang ($2) dalam SATU lintasan awk.
+# Dulu setiap berkas memanggil awk atas seluruh baseline (20 ribu berkas = 400 juta baris
+# dibaca) dan path berspasi selalu dianggap "added" karena hanya kolom ke-2 yang dibaca.
+integ_banding() {
+  awk '
+    { i = index($0, "  "); h = substr($0, 1, i - 1); p = substr($0, i + 2) }
+    NR == FNR { b[p] = h; next }
+    { n[p] = h
+      if (!(p in b)) print "added|" p "|-|" h
+      else if (b[p] != h) print "changed|" p "|" b[p] "|" h }
+    END { for (p in b) if (!(p in n)) print "deleted|" p "|" b[p] "|-" }
+  ' "$1" "$2"
+}
+
+# Antrekan notifikasi (dikirim sentinel-notify.sh) untuk perubahan BARU saja.
+integ_notif() {
+  local label="$1" berkas="$2" n contoh
+  n="$(grep -c . "$berkas" 2>/dev/null)"
+  [ "${n:-0}" -gt 0 ] || return 0
+  command -v sqlite3 >/dev/null 2>&1 && [ -f "$INTEG_DB" ] || return 0
+  label="$(printf '%s' "$label" | tr -dc 'A-Za-z0-9._-')"
+  contoh="$(head -5 "$berkas" | cut -d'|' -f1,2 | tr '\n' ';' | tr -d "'\"\\\\\`" | tr -d '\000-\037' | cut -c1-600)"
+  sqlite3 "$INTEG_DB" "INSERT INTO notif (ts, ip, jenis, isi, terkirim, coba, galat) VALUES ($(date +%s), 0, 'integritas', 'Integritas berkas $label: $n perubahan baru. $contoh', 0, 0, '');" 2>/dev/null || true
+}
+
 do_baseline() {
-  [ $# -ge 1 ] || { err "pakai: baseline <path> [label]"; return 1; }
-  local path="$1" label="${2:-$(basename "$path")}"
-  [ -d "$path" ] || { err "path bukan direktori: $path"; return 1; }
-  local out; out="$(baseline_path "$label")"
-  local dir; dir="$(dirname "$out")"; mkdir -p "$dir"
-  : > "$out.tmp"
-  local n=0
-  while IFS= read -r f; do
-    local h; h="$(sha256sum "$f" 2>/dev/null | cut -d' ' -f1)"
-    [ -z "$h" ] && continue
-    printf '%s  %s\n' "$h" "$f" >> "$out.tmp"
-    n=$((n+1))
-  done < <(find "$path" -type f -regextype posix-extended -regex ".*$EXT_POLA" 2>/dev/null || true)
-  mv "$out.tmp" "$out"
-  say "baseline $label: $n berkas direkam"
+  err "integritas berkas web per vhost adalah fitur Pro (integ_web)"
+  return 1
 }
 
 do_check() {
-  [ $# -ge 1 ] || { err "pakai: check <path> [label]"; return 1; }
-  local path="$1" label="${2:-$(basename "$path")}"
-  local base; base="$(baseline_path "$label")"
-  [ -f "$base" ] || { err "belum ada baseline untuk $label; jalankan baseline dulu"; return 1; }
-  local now; now="$(mktemp /tmp/zysentinel-id.XXXXXX)"
-  while IFS= read -r f; do
-    local h; h="$(sha256sum "$f" 2>/dev/null | cut -d' ' -f1)"
-    [ -z "$h" ] && continue
-    printf '%s  %s\n' "$h" "$f" >> "$now"
-  done < <(find "$path" -type f -regextype posix-extended -regex ".*$EXT_POLA" 2>/dev/null || true)
+  err "integritas berkas web per vhost adalah fitur Pro (integ_web)"
+  return 1
+}
 
-  local out="$LAST_DIR/integ-$label.txt"
-  : > "$out"
-  # tambah / berubah
-  while IFS= read -r linha; do
-    [ -z "$linha" ] && continue
-    local h f lama
-    h="${linha%%  *}"; f="${linha#*  }"
-    lama="$(awk -v path="$f" '$2 == path { print $1; exit }' "$base" 2>/dev/null || true)"
-    if [ -z "$lama" ]; then
-      printf 'added|%s|-|%s\n' "$f" "$h" >> "$out"
-    elif [ "$lama" != "$h" ]; then
-      printf 'changed|%s|%s|%s\n' "$f" "$lama" "$h" >> "$out"
-    fi
-  done < "$now"
-  # hapus
-  while IFS= read -r linha; do
-    [ -z "$linha" ] && continue
-    local f; f="${linha#*  }"
-    [ -e "$f" ] || printf 'deleted|%s|%s|-\n' "$f" "${linha%%  *}" >> "$out"
-  done < "$base"
-  rm -f "$now"
-  local n; n="$(wc -l < "$out" | tr -d ' ')"
-  say "integritas $label: $n perubahan"
+# Semua vhost di /www/wwwroot: vhost tanpa baseline dibuatkan baseline (tanpa laporan),
+# sisanya diperiksa dan perubahan BARU dikirim sebagai notifikasi. Dipanggil timer per jam.
+do_check_all() {
+  err "integritas berkas web per vhost adalah fitur Pro (integ_web)"
+  return 1
 }
 
 do_integ_list() {
@@ -488,28 +575,19 @@ do_check_sys() {
     fi
   done
 
-  local out="$LAST_DIR/integ-sys-persistence.txt"
-  : > "$out"
-  # tambah / berubah
-  while IFS= read -r linha; do
-    [ -z "$linha" ] && continue
-    local h f lama
-    h="${linha%%  *}"; f="${linha#*  }"
-    lama="$(awk -v path="$f" '$2 == path { print $1; exit }' "$base" 2>/dev/null || true)"
-    if [ -z "$lama" ]; then
-      printf 'added|%s|-|%s\n' "$f" "$h" >> "$out"
-    elif [ "$lama" != "$h" ]; then
-      printf 'changed|%s|%s|%s\n' "$f" "$lama" "$h" >> "$out"
-    fi
-  done < "$now"
-  # hapus
-  while IFS= read -r linha; do
-    [ -z "$linha" ] && continue
-    local f; f="${linha#*  }"
-    [ -e "$f" ] || printf 'deleted|%s|%s|-\n' "$f" "${linha%%  *}" >> "$out"
-  done < "$base"
-  rm -f "$now"
-  local n; n="$(wc -l < "$out" | tr -d ' ')"
+  local out="$LAST_DIR/integ-sys-persistence.txt" lama
+  lama="$(mktemp /tmp/zysentinel-sl.XXXXXX)"
+  [ -f "$out" ] && cp "$out" "$lama"
+  LC_ALL=C sort -k2 "$now" -o "$now"
+  integ_banding "$base" "$now" | LC_ALL=C sort > "$out.tmp" && mv -f "$out.tmp" "$out"
+  if [ -n "${1:-}" ]; then
+    LC_ALL=C sort "$lama" -o "$lama"
+    LC_ALL=C comm -13 "$lama" "$out" > "$lama.baru"
+    integ_notif "sys-persistence" "$lama.baru"
+    rm -f "$lama.baru"
+  fi
+  rm -f "$now" "$lama"
+  local n; n="$(grep -c . "$out")"
   say "integritas sys-persistence: $n perubahan terdeteksi"
 }
 
@@ -518,7 +596,11 @@ do_check_sys() {
 # ==================================================================
 do_db_update() {
   command -v freshclam >/dev/null 2>&1 || { err "freshclam tidak ada"; return 1; }
-  nice -n 10 freshclam 2>&1 | tail -5
+  # Kode keluar freshclam dipertahankan (dulu '| tail' menelan kegagalan).
+  local out rc
+  out="$(nice -n 10 freshclam 2>&1)"; rc=$?
+  printf '%s\n' "$out" | tail -5
+  return $rc
 }
 
 # ==================================================================
@@ -536,6 +618,33 @@ do_rkhunter_update() {
   "$RKHUNTER_BIN" --update --dbdir "$RKHUNTER_DB" --tmpdir "$RKHUNTER_TMP" --logfile "$RKHUNTER_LOG"
 }
 
+# Beberapa tugas pembaruan berurutan dengan penanda [n/m] per tugas, supaya panel bisa
+# menampilkan kemajuan dan hasil tiap tugas. rkhunter --update mengembalikan 2 bila
+# "tidak ada pembaruan": itu bukan kegagalan.
+do_update_batch() {
+  local total=$# n=0 gagal=0 t rc t0 judul
+  [ "$total" -gt 0 ] || { err "tidak ada tugas"; return 2; }
+  for t in "$@"; do
+    n=$((n + 1))
+    case "$t" in
+      db-update)        judul="Memperbarui basis data virus ClamAV (freshclam)" ;;
+      rkhunter-propupd) judul="Merekam hash biner sistem (rkhunter --propupd)" ;;
+      rkhunter-update)  judul="Memperbarui signature rkhunter (--update)" ;;
+      *) say "[$n/$total] tugas tidak dikenal: $t"; say "[$n/$total] selesai rc=64 (0 dtk)"; gagal=$((gagal + 1)); continue ;;
+    esac
+    say "[$n/$total] $judul"
+    t0=$(date +%s)
+    case "$t" in
+      db-update)        do_db_update; rc=$? ;;
+      rkhunter-propupd) do_rkhunter_propupd; rc=$? ;;
+      rkhunter-update)  do_rkhunter_update; rc=$?; [ "$rc" = "2" ] && { say "rkhunter: tidak ada pembaruan tersedia"; rc=0; } ;;
+    esac
+    say "[$n/$total] selesai rc=$rc ($(( $(date +%s) - t0 )) dtk)"
+    [ "$rc" = "0" ] || gagal=$((gagal + 1))
+  done
+  [ "$gagal" -eq 0 ]
+}
+
 # ==================================================================
 # SCAN-STREAM (REALTIME LOG PEMINDAIAN CLAMAV & RKHUNTER)
 # ==================================================================
@@ -551,7 +660,7 @@ do_scan_stream() {
   local t0; t0=$(date +%s)
   local found_malware=0 warnings_count=0 total_files=0
 
-  cat <<EOF > "$ACTIVE_SCAN_JSON"
+  cat <<EOF > "$ACTIVE_SCAN_JSON.tmp"
 {
   "status": "running",
   "pid": $$,
@@ -565,6 +674,8 @@ do_scan_stream() {
   "warnings": 0
 }
 EOF
+  # 644 dan ganti atomik: dulu berkas bisa 666 sehingga user www memalsukan status pindai di panel
+  chmod 644 "$ACTIVE_SCAN_JSON.tmp" 2>/dev/null; mv -f "$ACTIVE_SCAN_JSON.tmp" "$ACTIVE_SCAN_JSON"
 
   echo "======================================================================"
   echo " [ZySentinel] Realtime Security & Threat Scanner"
@@ -625,21 +736,19 @@ EOF
           nice -n 10 ionice -c2 -n7 clamscan --no-summary --infected -f "$flist" > "$tmp" 2>/dev/null || rc=$?
         fi
 
-        if [ "$rc" -eq 1 ]; then
+        if [ "$rc" -ne 0 ]; then
           while IFS= read -r line; do
             [ -z "$line" ] && continue
             case "$line" in
               *": "*" FOUND")
-                local f="${line%%: *}" sig="${line#*: }"; sig="${sig% FOUND}"
+                local lx="${line% FOUND}"; local f="${lx%: *}" sig="${lx##*: }"
+                [ -f "$f" ] || continue
                 found_malware=$((found_malware + 1))
                 echo "[!] ANCAMAN TERDETEKSI: $f [Signature: $sig]"
                 if [ "${ACTION_ON_DETECT:-quarantine}" = "quarantine" ]; then
                   local qres=""
-                  if [ "$CV_OK" = 1 ] && type cv_quarantine >/dev/null 2>&1; then
-                    qres="$(cv_quarantine "$f" "$sig" 2>/dev/null || true)"
-                  else
-                    qres="$(cv_quarantine_fallback "$f" "$sig" 2>/dev/null || true)"
-                  fi
+                  # selalu pemindah aman milik sendiri (O_NOFOLLOW); cv_quarantine pustaka host memakai mv berbasis path (TOCTOU symlink)
+                  qres="$(cv_quarantine_fallback "$f" "$sig" 2>/dev/null || true)"
                   echo "    -> Berkas telah diisolasi ke karantina ($qres)"
                   printf '%s\tSCAN_DETECTED\t%s\t%s\n' \
                     "$(date -Is)" "$f" "$sig" >> "${EVENT_LOG:-/var/log/clamav/realtime.log}" 2>/dev/null || true
@@ -780,170 +889,12 @@ EOF
     fi
   fi
 
-  # ------------------------------------------------------------------
-  # TAHAP 3: DETEKSI ARTEFAK RANSOMWARE & RANSOM NOTES
-  # ------------------------------------------------------------------
-  if [ "$engine" = "ransomware" ] || [ "$engine" = "all" ] || [ "$engine" = "both" ]; then
-    echo ""
-    echo "----------------------------------------------------------------------"
-    echo "[*] [TAHAP 3] Deteksi Artefak Ransomware & Berkas Terenkripsi"
-    echo "----------------------------------------------------------------------"
-    if [ ! -d "$path" ] && [ ! -f "$path" ]; then
-      echo "[-] Path target tidak ditemukan untuk analisis ransomware."
-    else
-      echo "[*] Memindai ekstensi terenkripsi ransomware pada $path..."
-      local r_ext_pattern='.*\.(locked|crypto|locky|enc|wnry|wannacry|cerber|ryuk|phobos|dharma|blackcat|lockbit|mallox|makop|hive|alfa)$'
-      local r_files
-      r_files="$(find "$path" -maxdepth 6 -type f 2>/dev/null | grep -E -i "$r_ext_pattern" | head -n 50 || true)"
-      if [ -n "$r_files" ]; then
-        local r_count=0
-        while IFS= read -r rf; do
-          [ -z "$rf" ] && continue
-          echo "[!] BERKAS TERENKRIPSI RANSOMWARE: $rf"
-          r_count=$((r_count + 1))
-          found_malware=$((found_malware + 1))
-        done <<< "$r_files"
-        echo "[!] Ditemukan $r_count berkas mencurigakan ber-ekstensi ransomware!"
-      else
-        echo "[OK] Ekstensi Berkas: Tidak ditemukan berkas terkunci/terenkripsi ransomware."
-      fi
-
-      echo "[*] Memindai berkas pesan tebusan (ransom notes)..."
-      local r_notes
-      r_notes="$(find "$path" -maxdepth 6 -type f \( \
-        -iname "*README*RESTORE*" -o -iname "*HOW*TO*DECRYPT*" -o \
-        -iname "*DECRYPT*INSTRUCTIONS*" -o -iname "*RESTORE*FILES*" -o \
-        -iname "*RECOVERY*KEY*" -o -iname "*LOCKBIT*README*" -o \
-        -iname "*HELP_DECRYPT*" \) 2>/dev/null | head -n 30 || true)"
-      if [ -n "$r_notes" ]; then
-        local rn_count=0
-        while IFS= read -r rnf; do
-          [ -z "$rnf" ] && continue
-          echo "[!] RANSOM NOTE DITEMUKAN: $rnf"
-          rn_count=$((rn_count + 1))
-          warnings_count=$((warnings_count + 1))
-        done <<< "$r_notes"
-        echo "[!] Ditemukan $rn_count berkas catatan pemerasan/tebusan ransomware!"
-      else
-        echo "[OK] Ransom Notes: Tidak ditemukan berkas catatan tebusan ransomware."
-      fi
-    fi
-  fi
-
-  # ------------------------------------------------------------------
-  # TAHAP 4: DETEKSI DEFACEMENT & INJEKSI JUDOL (JUDI ONLINE / SLOT GACOR)
-  # ------------------------------------------------------------------
-  if [ "$engine" = "judol" ] || [ "$engine" = "all" ] || [ "$engine" = "both" ]; then
-    echo ""
-    echo "----------------------------------------------------------------------"
-    echo "[*] [TAHAP 4] Deteksi Injeksi Defacement Judol (Judi Online & Slot Gacor)"
-    echo "----------------------------------------------------------------------"
-    if [ ! -d "$path" ] && [ ! -f "$path" ]; then
-      echo "[-] Path target tidak ditemukan untuk analisis judol."
-    else
-      echo "[*] Memindai berkas web (.php, .html, .js, .txt) terhadap injeksi judol..."
-      local judol_kw='slot88|slot[ _-]*gacor|maxwin|zeus[ _-]*slot|pragmatic[ _-]*play|situs[ _-]*judi|judi[ _-]*online|daftar[ _-]*slot|bocoran[ _-]*rtp|link[ _-]*gacor|toto[ _-]*macau|agen[ _-]*togel|sbobet88'
-      local judol_files
-      judol_files="$(grep -r -E -i -l "$judol_kw" "$path" \
-        --exclude-dir=vendor --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=cache \
-        --include="*.php" --include="*.html" --include="*.htm" --include="*.js" --include="*.txt" --include=".htaccess" 2>/dev/null | head -n 50 || true)"
-      if [ -n "$judol_files" ]; then
-        local j_count=0
-        while IFS= read -r jf; do
-          [ -z "$jf" ] && continue
-          local cuplikan; cuplikan="$(grep -E -i -m 1 "$judol_kw" "$jf" 2>/dev/null | tr -s ' ' | cut -c 1-80 || true)"
-          echo "[!] INJEKSI JUDOL TERDETEKSI: $jf"
-          echo "    Cuplikan Konten: $cuplikan"
-          j_count=$((j_count + 1))
-          warnings_count=$((warnings_count + 1))
-        done <<< "$judol_files"
-        echo "[!] Peringatan: Ditemukan $j_count berkas yang terindikasi injeksi/spam judi online!"
-      else
-        echo "[OK] Analisis Judol: Bersih. Tidak ditemukan injeksi kata kunci slot gacor / judi online."
-      fi
-    fi
-  fi
-
-  # ------------------------------------------------------------------
-  # TAHAP 5: DETEKSI IN-BROWSER WEB MINER (CRYPTOJACKING)
-  # ------------------------------------------------------------------
-  if [ "$engine" = "mining" ] || [ "$engine" = "all" ] || [ "$engine" = "both" ]; then
-    echo ""
-    echo "----------------------------------------------------------------------"
-    echo "[*] [TAHAP 5] Deteksi Skrip Web Miner (In-Browser Cryptojacking)"
-    echo "----------------------------------------------------------------------"
-    if [ ! -d "$path" ] && [ ! -f "$path" ]; then
-      echo "[-] Path target tidak ditemukan untuk analisis webminer."
-    else
-      echo "[*] Memindai pustaka & skrip penambang kripto browser..."
-      local miner_kw='coinhive|coin-hive|webminepool|crypto-loot|cryptonight\.wasm|minr\.pw|stratum\+tcp'
-      local miner_files
-      miner_files="$(grep -r -E -i -l "$miner_kw" "$path" \
-        --exclude-dir=vendor --exclude-dir=node_modules --exclude-dir=.git \
-        --include="*.php" --include="*.html" --include="*.htm" --include="*.js" 2>/dev/null | head -n 30 || true)"
-      if [ -n "$miner_files" ]; then
-        local m_count=0
-        while IFS= read -r mf; do
-          [ -z "$mf" ] && continue
-          echo "[!] WEBMINER TERDETEKSI: $mf"
-          m_count=$((m_count + 1))
-          warnings_count=$((warnings_count + 1))
-        done <<< "$miner_files"
-        echo "[!] Peringatan: Ditemukan $m_count skrip webminer tertanam pada berkas situs!"
-      else
-        echo "[OK] Web Miner: Bersih. Tidak ditemukan pustaka cryptojacking browser."
-      fi
-    fi
-  fi
-
-  # ------------------------------------------------------------------
-  # TAHAP 6: DETEKSI AI SAFETY, PROMPT INJECTION & TOXIC SKILLS (SAGE)
-  # ------------------------------------------------------------------
-  if [ "$engine" = "sage" ] || [ "$engine" = "all" ] || [ "$engine" = "both" ] || [ "$engine" = "ai" ] || [ "$engine" = "scan-ai" ]; then
-    echo ""
-    echo "----------------------------------------------------------------------"
-    echo "[*] [TAHAP 6] Deteksi AI Safety, Prompt Injection & Toxic Skills (SAGE)"
-    echo "----------------------------------------------------------------------"
-    local sage_bin="/www/server/sentinel/bin/sentinel-sage.py"
-    [ ! -f "$sage_bin" ] && sage_bin="/www/server/panel/plugin/sentinel/payload/sentinel-sage.py"
-    if [ ! -f "$sage_bin" ]; then
-      echo "[-] Mesin SAGE AI Safety (sentinel-sage.py) tidak ditemukan."
-    elif [ ! -d "$path" ] && [ ! -f "$path" ]; then
-      echo "[-] Path target tidak ditemukan untuk analisis AI Safety."
-    else
-      echo "[*] Menjalankan pemindaian SAGE AI Safety pada $path..."
-      local py_bin="/www/server/panel/pyenv/bin/python3"
-      [ ! -x "$py_bin" ] && py_bin="python3"
-
-      local q_arg=""
-      if [ "${ACTION_ON_DETECT:-quarantine}" = "quarantine" ]; then
-        q_arg="--quarantine $(q_files)"
-      fi
-
-      local sage_tmp; sage_tmp="$(mktemp /tmp/zysentinel-sage.XXXXXX)"
-      $py_bin "$sage_bin" scan "$path" $q_arg > "$sage_tmp" 2>&1 || true
-
-      local sage_infected=0
-      while IFS= read -r s_line; do
-        [ -z "$s_line" ] && continue
-        echo "$s_line"
-        case "$s_line" in
-          *"[!] ANCAMAN AI TERDETEKSI:"*)
-            sage_infected=$((sage_infected + 1))
-            found_malware=$((found_malware + 1))
-            ;;
-        esac
-      done < "$sage_tmp"
-      rm -f "$sage_tmp"
-
-      if [ "$sage_infected" -eq 0 ]; then
-        echo "[OK] SAGE AI Safety: Bersih. Tidak ditemukan prompt injection, toxic skills, atau aturan berbahaya."
-      else
-        echo "[!] SAGE AI Safety: Terdeteksi $sage_infected ancaman instruksi berbahaya / toxic skills!"
-      fi
-    fi
-  fi
-
+  local premium=0
+  av_premium_ok && premium=1
+  case "$engine" in
+    ransomware|judol|mining|sage|ai|scan-ai)
+      [ "$premium" = 1 ] || echo "[-] Mesin $engine membutuhkan paket Max (av_engines); hanya ClamAV dan Rkhunter yang tersedia." ;;
+  esac
   # ------------------------------------------------------------------
   # RINGKASAN AKHIR
   # ------------------------------------------------------------------
@@ -986,7 +937,7 @@ EOF
 }
 EOF
 
-  cat <<EOF > "$ACTIVE_SCAN_JSON"
+  cat <<EOF > "$ACTIVE_SCAN_JSON.tmp"
 {
   "status": "done",
   "pid": $$,
@@ -1002,6 +953,8 @@ EOF
   "summary": "$status_str"
 }
 EOF
+  # 644 dan ganti atomik: dulu berkas bisa 666 sehingga user www memalsukan status pindai di panel
+  chmod 644 "$ACTIVE_SCAN_JSON.tmp" 2>/dev/null; mv -f "$ACTIVE_SCAN_JSON.tmp" "$ACTIVE_SCAN_JSON"
 
   rm -f "$ACTIVE_SCAN_PID" 2>/dev/null
   say "scan-stream $label selesai dalam $durasi dtk (malware: $found_malware, warn: $warnings_count)"
@@ -1024,10 +977,12 @@ case "${1:-status}" in
   baseline)           do_baseline "${2:-}" "${3:-}" ;;
   baseline-sys)       do_baseline_sys ;;
   check)              do_check "${2:-}" "${3:-}" ;;
-  check-sys)          do_check_sys ;;
+  check-sys)          do_check_sys "${2:-}" ;;
+  check-all)          do_check_all ;;
   integ-list)         do_integ_list "${2:-}" ;;
   db-update)          do_db_update ;;
   rkhunter-propupd)   do_rkhunter_propupd ;;
   rkhunter-update)    do_rkhunter_update ;;
+  update-batch)       shift; do_update_batch "$@" ;;
   *) echo "Usage: $0 {status|scan <path> [label]|scan-stream <engine> <path> [label]|scan-ai <path> [label]|scan-all|quarantine-list|quarantine-restore <id>|quarantine-delete <id>|quarantine-purge|baseline <path> [label]|baseline-sys|check <path> [label]|check-sys|integ-list [label]|db-update|rkhunter-propupd|rkhunter-update}"; exit 1 ;;
 esac

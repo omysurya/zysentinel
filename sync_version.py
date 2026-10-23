@@ -12,15 +12,29 @@ TARGET_FILE = "/www/wwwroot/sec.zysens.com/version.json"
 REPO = "omysurya/zysentinel"
 URL = f"https://api.github.com/repos/{REPO}/releases/latest"
 
+def versi_lokal():
+    """Versi plugin dari info.json (sumber tunggal, ditanam versi.py); tanpa literal versi di skrip ini."""
+    for p in (os.path.join(os.path.dirname(os.path.abspath(__file__)), "info.json"),
+              "/www/server/panel/plugin/sentinel/info.json"):
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                v = str(json.load(f).get("versions", "")).strip().lstrip("v")
+            if v:
+                return v
+        except Exception:
+            pass
+    return "0.0.0"
+
+
 def sync_version():
-    tag = "v1.6.1"
-    ver = "1.6.1"
-    name = "ZySentinel v1.6.1"
+    ver = versi_lokal()
+    tag = f"v{ver}"
+    name = f"ZySentinel {tag}"
     published_at = ""
     html_url = f"https://github.com/{REPO}/releases/latest"
-    zip_name = "zysentinel-v1.6.1.zip"
-    zip_url = f"https://github.com/{REPO}/releases/download/v1.6.1/{zip_name}"
-    tarball_url = f"https://api.github.com/repos/{REPO}/tarball/v1.6.1"
+    zip_name = f"zysentinel-{tag}.zip"
+    zip_url = f"https://github.com/{REPO}/releases/download/{tag}/{zip_name}"
+    tarball_url = f"https://api.github.com/repos/{REPO}/tarball/{tag}"
 
     headers = {
         "User-Agent": "ZySentinel-Web-Sync/1.0",
@@ -58,7 +72,7 @@ def sync_version():
             try:
                 with open(info_path, "r", encoding="utf-8") as f:
                     local_info = json.load(f)
-                    ver = local_info.get("versions", "1.6.1")
+                    ver = local_info.get("versions", ver)
                     tag = f"v{ver}" if not ver.startswith("v") else ver
                     name = f"ZySentinel {tag}"
                     zip_name = f"zysentinel-{tag}.zip"

@@ -3,7 +3,7 @@
 [![Release](https://img.shields.io/github/v/release/omysurya/zysentinel?color=blue&logo=github)](https://github.com/omysurya/zysentinel/releases)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-aaPanel%208.x-orange.svg)](https://www.aapanel.com)
-[![Engine](https://img.shields.io/badge/waf-Lua%20%7C%20Coraza%20CRS-blueviolet.svg)](#)
+[![Engine](https://img.shields.io/badge/waf-Coraza%20%2B%20OWASP%20CRS-blueviolet.svg)](#)
 
 ---
 
@@ -28,7 +28,7 @@
 | Feature / Fitur | English Description | Deskripsi Bahasa Indonesia |
 | :--- | :--- | :--- |
 | **Intrusion Detection & Traffic Analysis** | High-performance C daemon (`guardd`) tails web server logs, calculating dynamic threat scores (scanners, brute-force, distinct 4xx enumeration, floods). | Daemon C berkecepatan tinggi (`guardd`) memantau access log dan menghitung skor ancaman secara real-time (pemindai celah, brute force, lonjakan trafik). |
-| **Dual-Engine WAF** | Flexible web application firewall supporting **Free Nginx (Lua)** for lightweight native filtering and **Coraza + OWASP CRS** for enterprise compliance. | Mendukung dua engine WAF: **Free Nginx (Lua)** untuk efisiensi tinggi serta **Coraza + OWASP CRS** untuk perlindungan standar industri per vhost. |
+| **Coraza WAF + OWASP CRS** | One SecLang ruleset for nginx (Coraza, Go), Apache and OpenLiteSpeed (ModSecurity): OWASP CRS plus ZySentinel rules for sensitive files (`.env`, `.git/`, `.htpasswd`, keys, API keys, backups), scanners, bots, webshells, SQLi/XSS/traversal, with your IP/URL lists and the ZySentinel block page. No Lua. | Satu ruleset SecLang untuk nginx (Coraza, Go), Apache dan OpenLiteSpeed (ModSecurity): OWASP CRS ditambah aturan ZySentinel untuk berkas sensitif (`.env`, `.git/`, `.htpasswd`, kunci, API key, cadangan), pemindai, bot, webshell, SQLi/XSS/traversal, lengkap dengan daftar IP/URL dan halaman blocker ZySentinel. Tanpa Lua. |
 | **Kernel Firewall & Port Control** | Direct integration with `iptables` and `ipset` with zero lock-out risk. Provides Inbound and Outbound port access control (CRUD) with pre-configured secure baselines. | Integrasi langsung dengan `iptables` dan `ipset`. Kontrol akses port Inbound & Outbound dengan aturan fail-safe agar admin tidak terkunci. |
 | **EDR Process Guard** | Real-time process supervisor (`sentinel-proc.py`) terminating webshells, illegal reverse shells, and malicious tools (`SIGKILL` < 1s) with process whitelist management. | Pengawasan proses runtime real-time. Mematikan webshell dan reverse shell seketika (< 1 detik) dengan dukungan daftar putih (whitelist) perintah sah. |
 | **Antivirus & Upload Protection** | ClamAV integration with realtime per-vhost upload quarantine, safe restore/delete actions, and SHA-256 file integrity baseline monitoring. | Integrasi ClamAV dengan karantina otomatis upload berbahaya per vhost, pemulihan aman, dan pemantauan integritas berkas (anti-tamper). |
@@ -50,7 +50,8 @@ sentinel_main.py  ── Controller: reads state, validates inputs, lifecycle ma
          ├── guardctl (bash/python)       Daemon CLI control over Unix socket
          ├── sentinel-fw.sh (bash)        Kernel firewall: ipset rules, ports, geo, egress
          ├── sentinel-ports.py (python)   Inbound/Outbound port rule management
-         ├── sentinel-waf.sh (bash)       Lua WAF & Coraza OWASP CRS management
+         ├── sentinel-waf.sh (bash)       Coraza/ModSecurity + OWASP CRS + ZySentinel ruleset management
+         ├── sentinel-zyrules.py (python) Builds the shared SecLang config (lists, modules, block pages)
          ├── sentinel-av.sh (bash)        ClamAV antivirus & SHA-256 integrity checker
          ├── sentinel-upload-scan.py (py) Realtime per-vhost upload scanner & quarantine
          ├── sentinel-proc.py (python)    Runtime EDR Process Guard (SIGKILL unauthorized shells)
@@ -65,7 +66,7 @@ sentinel_main.py  ── Controller: reads state, validates inputs, lifecycle ma
 ### Method 1: aaPanel App Store (Recommended GUI) / Metode App Store
 
 #### English:
-1. **Download Release:** Download `zysentinel-v1.6.1.zip` (or `sentinel.zip`) from [GitHub Releases](https://github.com/omysurya/zysentinel/releases/latest).
+1. **Download Release:** Download `zysentinel-v1.6.4.zip` (or `sentinel.zip`) from [GitHub Releases](https://github.com/omysurya/zysentinel/releases/latest).
 2. **Access aaPanel:** Log in to your aaPanel dashboard (`https://<YOUR-SERVER-IP>:<PANEL-PORT>/`).
 3. **Open App Store:** Navigate to **App Store** on the left menu.
 4. **Import Plugin:** Click **Import third-party plugin** (or **Import plugin**) located at the top-right corner.
@@ -74,7 +75,7 @@ sentinel_main.py  ── Controller: reads state, validates inputs, lifecycle ma
 7. **Launch Dashboard:** Click on **ZySentinel** in the App Store to open the centralized security monitoring dashboard.
 
 #### Bahasa Indonesia:
-1. **Unduh Paket Rilis:** Unduh berkas `zysentinel-v1.6.1.zip` (atau `sentinel.zip`) dari [GitHub Releases](https://github.com/omysurya/zysentinel/releases/latest).
+1. **Unduh Paket Rilis:** Unduh berkas `zysentinel-v1.6.4.zip` (atau `sentinel.zip`) dari [GitHub Releases](https://github.com/omysurya/zysentinel/releases/latest).
 2. **Buka aaPanel:** Masuk ke dasbor web aaPanel Anda (`https://<IP-SERVER>:<PORT-PANEL>/`).
 3. **Buka App Store:** Klik menu **App Store** pada bilah navigasi sebelah kiri.
 4. **Impor Plugin:** Klik tombol **Import third-party plugin** (atau **Import plugin**) di kanan atas.
@@ -91,8 +92,8 @@ sentinel_main.py  ── Controller: reads state, validates inputs, lifecycle ma
 # 1. Pastikan direktori plugin panel tersedia / Ensure plugin directory exists
 mkdir -p /www/server/panel/plugin
 
-# 2. Clone repositori resmi / Clone official repository (branch v1.6.1)
-git clone -b v1.6.1 https://github.com/omysurya/zysentinel.git /www/server/panel/plugin/sentinel
+# 2. Clone repositori resmi / Clone official repository (branch v1.6.4)
+git clone -b v1.6.4 https://github.com/omysurya/zysentinel.git /www/server/panel/plugin/sentinel
 
 # 3. Jalankan skrip instalasi / Execute installation script
 cd /www/server/panel/plugin/sentinel
@@ -106,7 +107,7 @@ bash /www/server/sentinel/bin/sentinel-fw.sh status
 #### B. Install via GitHub Release Archive (ZIP):
 ```bash
 # 1. Unduh rilis zip resmi dari GitHub / Download official release zip from GitHub
-curl -fsSL -o /tmp/sentinel.zip https://github.com/omysurya/zysentinel/releases/download/v1.6.1/zysentinel-v1.6.1.zip
+curl -fsSL -o /tmp/sentinel.zip https://github.com/omysurya/zysentinel/releases/download/v1.6.4/zysentinel-v1.6.4.zip
 
 # 2. Ekstrak ke folder plugin / Extract to plugin directory
 mkdir -p /www/server/panel/plugin
@@ -122,11 +123,11 @@ bash install.sh install
 ## Lifecycle Management & Updates / Pemeliharaan & Pembaruan
 
 ### 1. Automatic Updates from GitHub / Pembaruan Otomatis dari GitHub
-- **Via Web UI:** In the ZySentinel header, click the version badge `v1.6.1` or go to **Settings ➔ Maintenance**, click **Check GitHub Update**, and apply the update directly with one click.
+- **Via Web UI:** In the ZySentinel header, click the version badge `v1.6.4` or go to **Settings ➔ Maintenance**, click **Check GitHub Update**, and apply the update directly with one click.
 - **Via Terminal (CLI):**
   ```bash
   cd /www/server/panel/plugin/sentinel
-  git pull origin v1.6.1
+  git pull origin v1.6.4
   bash install.sh update
   ```
   *Idempotent Update: Updates binaries and scripts without overwriting custom operator configs (`guardd.conf`, `ports.json`, `proc_whitelist.json`, notification tokens, or audit logs).*
@@ -202,7 +203,9 @@ Standard options: `install` | `remove` | `flush` | `status` | `backend` | `panic
 ```bash
 bash /www/server/sentinel/bin/sentinel-waf.sh <command>
 ```
-Standard options: `engine` | `engine-set <name>` | `mode-get` | `mode-set <mode>` | `rules` | `rule-on <rule>` | `rule-off <rule>` | `vhosts` | `vhost-on <ws> <site>` | `vhost-off <ws> <site>` | `coraza-status` | `coraza-download` | `freewaf-status` | `freewaf-install` | `freewaf-remove`
+Standard options: `engine` | `mode-get` | `mode-set <mode>` | `zyrules-install` | `zyrules-build` | `zyrules-status` | `modul-set <name> <on|off>` | `setting-set <key> <value>` | `rules` | `rule-on <rule>` | `rule-off <rule>` | `vhosts` | `vhost-on <ws> <site>` | `vhost-off <ws> <site>` | `apply` | `reload [ws]` | `coraza-status` | `coraza-download` | `coraza-build [--force|--refresh]` | `coraza-cache` | `coraza-selftest` | `coraza-install` | `coraza-uninstall` | `legacy-status` | `legacy-remove`
+
+The WAF is Coraza (nginx) / ModSecurity (Apache, OpenLiteSpeed) reading one SecLang ruleset. The nginx module is compiled as a dynamic module for the active nginx version using Go from the aaPanel Go SDK Manager, and cached in `coraza-cache/` (no recompilation while the nginx version and configure arguments stay the same). Upgrading from an older version that used the Lua WAF: run `legacy-remove` (or use the banner in the WAF tab) once the Coraza module is loaded.
 
 ### 5. Antivirus & File Integrity CLI (`sentinel-av.sh`)
 ```bash

@@ -32,7 +32,19 @@
 # ============================================================
 set -u
 
-IPT="$(command -v iptables || echo /usr/sbin/iptables)"
+IPT_BIN="$(command -v iptables || echo /usr/sbin/iptables)"
+# Semua pemanggilan iptables menunggu kunci xtables (docker, aaPanel, fail2ban memegangnya
+# sebentar-sebentar); tanpa -w sebuah aturan bisa gagal dipasang diam-diam.
+ipt_w() {
+  # Mode rencana (lihat fw_plan_line): "-A SENTINEL ..." ditulis ke berkas
+  # rencana, bukan dijalankan, supaya bisa diterapkan atomik.
+  if [ -n "${FW_PLAN:-}" ] && [ "${1:-}" = "-A" ] && [ "${2:-}" = "$CHAIN" ]; then
+    fw_plan_line "$@"
+    return 0
+  fi
+  "$IPT_BIN" -w 10 "$@"
+}
+IPT=ipt_w
 IPSET="$(command -v ipset || echo /usr/sbin/ipset)"
 CHAIN="SENTINEL"
 
@@ -148,9 +160,16 @@ ALLOW_FILE=/www/server/sentinel/etc/allowlist.txt
 
 # ---- parameter yang bisa diubah lewat environment ----
 # Batas koneksi bersamaan per IP (anti slowloris dan connection drain).
-CONN_MAX="${SENTINEL_CONN_MAX:-80}"
+CONN_MAX="${SENTINEL_CONN_MAX:-150}"
 # Batas koneksi SYN baru bersamaan per IP (anti SYN flood).
-SYN_MAX="${SENTINEL_SYN_MAX:-40}"
+# Dulu 40: satu IP CGNAT seluler / kantor (puluhan pengguna) cepat mentok.
+SYN_MAX="${SENTINEL_SYN_MAX:-100}"
+# Koneksi bersamaan maksimum untuk IP yang sedang di-throttle.
+THROTTLE_CONN="${SENTINEL_THROTTLE_CONN:-8}"
+# Batas paket UDP 443 (QUIC) per IP per detik.
+QUIC_PPS="${SENTINEL_QUIC_PPS:-3000}"
+case "$QUIC_PPS" in ''|*[!0-9]*|0) QUIC_PPS=3000 ;; esac
+case "$THROTTLE_CONN" in ''|*[!0-9]*|0) THROTTLE_CONN=8 ;; esac
 # Batas laju untuk IP yang masuk daftar throttle.
 # Urutan pembacaan: environment, lalu guardd.conf, baru bawaan.
 # Environment dipakai systemd unit dan tes manual; guardd.conf adalah
@@ -166,12 +185,19 @@ conf_get() {
   fi
   [ -n "$v" ] && printf '%s' "$v" || printf '%s' "$2"
 }
+# ---- gerbang lisensi (paket berlangganan). Gagal tertutup: biner pemverifikasi hilang/rusak = fitur berbayar mati.
+# ZYS_LICENSE_BIN hanya untuk uji. Yang dikunci hanya otomatisasi dan kedalaman; firewall dasar, ban manual, panic tetap Free.
+FW_ADV=0      # edisi Free: anti-DDoS lanjutan (fw_advanced) adalah fitur Pro
 EGRESS_MODE="${SENTINEL_EGRESS_MODE:-$(conf_get egress_guard off)}"
 THROTTLE_RPS="${SENTINEL_THROTTLE_RPS:-$(conf_get throttle_rps 5)}"
 THROTTLE_BURST="${SENTINEL_THROTTLE_BURST:-$(conf_get throttle_burst 15)}"
 # rpm = permintaan per menit. Kosongkan untuk mematikan aturan per menit.
 THROTTLE_RPM="${SENTINEL_THROTTLE_RPM:-$(conf_get throttle_rpm 0)}"
 case "$THROTTLE_RPM" in ''|*[!0-9]*) THROTTLE_RPM=0 ;; esac
+# Nilai tak sah dari guardd.conf tidak boleh membuat aturan RETURN gagal sementara
+# aturan throttle-drop tetap terpasang (semua IP throttle akan terblokir total).
+case "$THROTTLE_RPS" in ''|*[!0-9]*|0) THROTTLE_RPS=5 ;; esac
+case "$THROTTLE_BURST" in ''|*[!0-9]*|0) THROTTLE_BURST=15 ;; esac
 
 # ---- geo-ban (blokir per negara) ----
 # geo_mode: off | block | allow. Bawaan off: tidak ada negara yang
@@ -180,6 +206,8 @@ case "$THROTTLE_RPM" in ''|*[!0-9]*) THROTTLE_RPM=0 ;; esac
 GEO_MODE="${SENTINEL_GEO_MODE:-$(conf_get geo_mode off)}"
 GEO_NEGARA="${SENTINEL_GEO_NEGARA:-$(conf_get geo_negara '')}"
 case "$GEO_MODE" in off|block|allow) ;; *) GEO_MODE="off" ;; esac
+# Geo-ban adalah fitur Pro. Tanpa lisensi mode dianggap off (set geo dikosongkan di bawah); pengaturan operator tidak dihapus.
+if [ "$GEO_MODE" != "off" ]; then GEO_MODE="off"; GEO_DIKUNCI=1; fi
 # Normalisasi daftar negara: huruf besar, tanpa spasi, tanpa kode ganda.
 GEO_NEGARA="$(printf '%s' "$GEO_NEGARA" | tr 'a-z' 'A-Z' | tr -d ' \t')"
 # Cadera global anti keledai-server. KOSONGKAN variabel ini untuk
@@ -260,9 +288,30 @@ install_allow_rules() {
 }
 
 # --- 2b. deteksi otomatis antarmuka & koneksi VPN (WireGuard, OpenVPN, Tailscale, ZeroTier) ---
+# Hanya CIDR yang sempit yang boleh masuk daftar putih: "wg show allowed-ips" pada
+# klien WireGuard sering berisi 0.0.0.0/0, dan satu entri itu memutihkan SELURUH internet
+# (tidak ada IP yang pernah diblokir lagi). Awalan di bawah /16 ditolak.
+vpn_cidr_ok() {
+  local c="$1" o p
+  [[ "$c" =~ ^([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})\.([0-9]{1,3})(/([0-9]{1,2}))?$ ]] || return 1
+  for o in 1 2 3 4; do [ "${BASH_REMATCH[$o]}" -le 255 ] || return 1; done
+  p="${BASH_REMATCH[6]:-32}"
+  [ "$p" -ge 16 ] && [ "$p" -le 32 ] || return 1
+  case "$c" in 0.*|127.*|224.*|225.*|23[0-9].*|24[0-9].*|25[0-5].*) return 1 ;; esac
+  return 0
+}
+
+# Tambah satu entri ke allowlist.txt (milik plugin) bila belum ada sebagai BARIS PENUH.
+vpn_allow_add() {
+  local e="$1" note="$2"
+  [ -f "$ALLOW_FILE" ] || return 0
+  grep -qxF -- "$e" "$ALLOW_FILE" 2>/dev/null && return 0
+  printf '\n# %s\n%s\n' "$note" "$e" >> "$ALLOW_FILE"
+}
+
 auto_detect_vpn_whitelist() {
   local vpn_devs dev ip_cidr r_net ep aip
-  vpn_devs="$(ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | grep -E '^(wg|tun|tap|tailscale|zt|ppp)' | cut -d'@' -f1 | sort -u)"
+  vpn_devs="$(ip -o link show 2>/dev/null | awk -F': ' '{print $2}' | grep -E '^(wg|tun|tailscale|zt|ppp)' | cut -d'@' -f1 | sort -u)"
   [ -z "$vpn_devs" ] && return 0
 
   for dev in $vpn_devs; do
@@ -271,62 +320,248 @@ auto_detect_vpn_whitelist() {
     # 1. Bypass inspeksi INPUT pada antarmuka VPN
     "$IPT" -A "$CHAIN" -i "$dev" -j RETURN 2>/dev/null || true
 
-    # 2. Whitelist seluruh IP/CIDR lokal antarmuka VPN
+    # 2. Whitelist IP/CIDR lokal antarmuka VPN
     for ip_cidr in $(ip -o -4 addr show dev "$dev" 2>/dev/null | awk '{print $4}'); do
-      [ -n "$ip_cidr" ] || continue
+      vpn_cidr_ok "$ip_cidr" || { say "vpn-guard: $ip_cidr dilewati (tidak sempit)"; continue; }
       "$IPT" -A "$CHAIN" -s "$ip_cidr" -j RETURN 2>/dev/null || true
-      "$IPSET" add aapanel.ipv4.whitelist "$ip_cidr" -exist 2>/dev/null || true
-      if [ -f "$ALLOW_FILE" ] && ! grep -qF "$ip_cidr" "$ALLOW_FILE" 2>/dev/null; then
-        printf '\n# Auto-whitelist antarmuka VPN %s\n%s\n' "$dev" "$ip_cidr" >> "$ALLOW_FILE"
-      fi
+      vpn_allow_add "$ip_cidr" "Auto-whitelist antarmuka VPN $dev"
     done
 
     # 3. Whitelist rute terkait antarmuka VPN
     for r_net in $(ip -o route show dev "$dev" 2>/dev/null | awk '{print $1}' | grep -v default); do
-      [ -n "$r_net" ] || continue
+      vpn_cidr_ok "$r_net" || { say "vpn-guard: rute $r_net dilewati (tidak sempit)"; continue; }
       "$IPT" -A "$CHAIN" -s "$r_net" -j RETURN 2>/dev/null || true
-      "$IPSET" add aapanel.ipv4.whitelist "$r_net" -exist 2>/dev/null || true
-      if [ -f "$ALLOW_FILE" ] && ! grep -qF "$r_net" "$ALLOW_FILE" 2>/dev/null; then
-        printf '%s\n' "$r_net" >> "$ALLOW_FILE"
-      fi
+      vpn_allow_add "$r_net" "Auto-whitelist rute VPN $dev"
     done
 
-    # 4. Ambil endpoints dan allowed-ips WireGuard bila tersedia
+    # 4. Endpoint dan allowed-ips WireGuard bila tersedia
     if command -v wg >/dev/null 2>&1 && [[ "$dev" =~ ^wg ]]; then
       for ep in $(wg show "$dev" endpoints 2>/dev/null | awk '{print $2}' | cut -d: -f1); do
-        if [[ "$ep" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-          "$IPT" -A "$CHAIN" -s "$ep/32" -j RETURN 2>/dev/null || true
-          "$IPSET" add aapanel.ipv4.whitelist "$ep/32" -exist 2>/dev/null || true
-          if [ -f "$ALLOW_FILE" ] && ! grep -qF "$ep" "$ALLOW_FILE" 2>/dev/null; then
-            printf '# WireGuard peer endpoint\n%s/32\n' "$ep" >> "$ALLOW_FILE"
-          fi
-        fi
+        vpn_cidr_ok "$ep" || continue
+        "$IPT" -A "$CHAIN" -s "$ep/32" -j RETURN 2>/dev/null || true
+        vpn_allow_add "$ep/32" "WireGuard peer endpoint"
       done
       for aip in $(wg show "$dev" allowed-ips 2>/dev/null | awk '{$1=""; print $0}' | tr ',' ' '); do
-        if [[ "$aip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?$ ]]; then
-          "$IPT" -A "$CHAIN" -s "$aip" -j RETURN 2>/dev/null || true
-          "$IPSET" add aapanel.ipv4.whitelist "$aip" -exist 2>/dev/null || true
-          if [ -f "$ALLOW_FILE" ] && ! grep -qF "$aip" "$ALLOW_FILE" 2>/dev/null; then
-            printf '%s\n' "$aip" >> "$ALLOW_FILE"
-          fi
-        fi
+        vpn_cidr_ok "$aip" || { say "vpn-guard: allowed-ips $aip dilewati (tidak sempit)"; continue; }
+        "$IPT" -A "$CHAIN" -s "$aip" -j RETURN 2>/dev/null || true
+        vpn_allow_add "$aip" "WireGuard allowed-ips"
       done
     fi
 
-    # 5. Routing & Penerusan FORWARD (menjamin Docker container seperti payroll-api bebas akses ke VPN)
-    "$IPT" -C FORWARD -i "$dev" -j ACCEPT 2>/dev/null || "$IPT" -I FORWARD 1 -i "$dev" -j ACCEPT 2>/dev/null || true
-    "$IPT" -C FORWARD -o "$dev" -j ACCEPT 2>/dev/null || "$IPT" -I FORWARD 1 -o "$dev" -j ACCEPT 2>/dev/null || true
-
-    # 6. Pastikan NAT MASQUERADE untuk trafik keluar lewat VPN
-    "$IPT" -t nat -C POSTROUTING -o "$dev" -j MASQUERADE 2>/dev/null || "$IPT" -t nat -I POSTROUTING 1 -o "$dev" -j MASQUERADE 2>/dev/null || true
+    # 5-6. FORWARD dan NAT milik pihak lain: HANYA bila operator memintanya
+    # (touch $BASE/etc/vpn_forward.enabled). Dulu selalu menyisipkan aturan global
+    # yang tidak ikut dicabut saat uninstall.
+    if [ -f "${ETC:-$(dirname "$ALLOW_FILE")}/vpn_forward.enabled" ]; then
+      "$IPT" -C FORWARD -i "$dev" -j ACCEPT 2>/dev/null || "$IPT" -I FORWARD 1 -i "$dev" -j ACCEPT 2>/dev/null || true
+      "$IPT" -C FORWARD -o "$dev" -j ACCEPT 2>/dev/null || "$IPT" -I FORWARD 1 -o "$dev" -j ACCEPT 2>/dev/null || true
+      "$IPT" -t nat -C POSTROUTING -o "$dev" -j MASQUERADE 2>/dev/null || "$IPT" -t nat -I POSTROUTING 1 -o "$dev" -j MASQUERADE 2>/dev/null || true
+    fi
   done
   return 0
 }
 
 # --- 3. lompatan induk -> SENTINEL (definisi ada di blok kompatibilitas) ---
 
+# ---- rencana aturan atomik ----
+# Saat FW_PLAN berisi nama berkas, setiap "-A SENTINEL ..." tidak langsung
+# dijalankan melainkan ditulis ke berkas itu, lalu fw_plan_commit
+# menerapkannya sekaligus dengan iptables-restore --noflush. Deklarasi
+# ":SENTINEL - [0:0]" mengosongkan chain itu di dalam transaksi yang sama,
+# jadi tidak pernah ada saat chain setengah jadi.
+FW_PLAN=""
+FW_PLAN_STATE=/www/server/sentinel/run/.fw-plan.sha
+fw_plan_line() {
+  local a out=""
+  for a in "$@"; do
+    case "$a" in
+      *[[:space:]\"\'\\]*) a="\"${a//\"/\\\"}\"" ;;
+    esac
+    out="$out${out:+ }$a"
+  done
+  printf '%s\n' "$out" >> "$FW_PLAN"
+}
+fw_plan_commit() {
+  local f="$1" rbin
+  rbin="${IPT_BIN}-restore"
+  [ -x "$rbin" ] || rbin="$(command -v iptables-restore 2>/dev/null)"
+  [ -n "$rbin" ] || return 1
+  { printf '*filter\n:%s - [0:0]\n' "$CHAIN"; cat "$f"; printf 'COMMIT\n'; } > "$f.r"
+  "$rbin" -w 10 --noflush < "$f.r" 2>/dev/null
+}
+
+# Antarmuka internet (rute bawaan). Jaringan privat hanya dipercaya bila
+# TIDAK datang dari antarmuka ini: alamat 10/8, 172.16/12, 192.168/16 yang
+# muncul di eth0 pasti dipalsukan (rp_filter tidak menolaknya karena rute
+# bawaan juga lewat eth0), dan dulu langsung lolos dari semua batas.
+wan_if() {
+  ip -4 route show default 2>/dev/null | awk '{for(i=1;i<NF;i++) if($i=="dev"){print $(i+1); exit}}'
+}
+
+# Penyetelan conntrack untuk banjir SYN terdistribusi. Hanya MENAIKKAN batas
+# (tidak pernah menurunkan nilai yang sudah lebih besar) dan memendekkan
+# masa tunggu SYN_RECV supaya tabel tidak penuh oleh SYN palsu. Tabel penuh
+# menolak SEMUA koneksi baru, termasuk SSH dan panel.
+tune_conntrack() {
+  local mem_kb max cur
+  [ -w /proc/sys/net/netfilter/nf_conntrack_max ] || return 0
+  mem_kb="$(awk '/^MemTotal/{print $2}' /proc/meminfo 2>/dev/null)"
+  max=131072
+  [ "${mem_kb:-0}" -ge 3000000 ] && max=262144
+  cur="$(cat /proc/sys/net/netfilter/nf_conntrack_max 2>/dev/null || echo 0)"
+  if [ "${cur:-0}" -lt "$max" ]; then
+    sysctl -qw net.netfilter.nf_conntrack_max="$max" 2>/dev/null && \
+      say "conntrack: nf_conntrack_max $cur -> $max"
+  fi
+  cur="$(cat /proc/sys/net/netfilter/nf_conntrack_tcp_timeout_syn_recv 2>/dev/null || echo 0)"
+  if [ "${cur:-0}" -gt 30 ]; then
+    sysctl -qw net.netfilter.nf_conntrack_tcp_timeout_syn_recv=30 2>/dev/null && \
+      say "conntrack: timeout SYN_RECV $cur -> 30 detik"
+  fi
+  return 0
+}
+
+# Port yang dipublikasikan Docker (DNAT) lewat FORWARD, bukan INPUT, sehingga
+# chain SENTINEL tidak pernah melihatnya. Pasang ban dan threat intel juga di
+# DOCKER-USER (chain resmi untuk aturan pengguna di depan Docker).
+docker_guard() {
+  "$IPT" -S DOCKER-USER >/dev/null 2>&1 || return 0
+  # edisi Free: perlindungan port Docker (fw_advanced) adalah fitur Pro; lepas lompatan lama bila ada
+  while "$IPT" -D DOCKER-USER -j SENTINEL_DOCKER 2>/dev/null; do :; done
+  return 0
+}
+
+# Seluruh isi chain SENTINEL, berurutan. Dipanggil dua kali bila restore
+# atomik gagal, jadi tidak boleh punya efek samping selain "-A SENTINEL".
+fw_rules() {
+  local net wan
+  wan="$(wan_if)"
+
+  # 0) PANIC. Timer memasang ulang chain ini setiap 5 menit; tanpa baris ini
+  #    panic hilang diam-diam sementara status masih melaporkan AKTIF.
+  if [ -f "$PANIC_FLAG_FILE" ] && "$IPT" -S "$PANIC_CHAIN" >/dev/null 2>&1; then
+    "$IPT" -A "$CHAIN" -j "$PANIC_CHAIN"
+  fi
+
+  # 1) subnet privat dan loopback: diteruskan, KECUALI bila datang dari
+  #    antarmuka internet (pasti alamat palsu).
+  "$IPT" -A "$CHAIN" -m set --match-set aapanel.ipv4.whitelist src -j RETURN
+  for net in 127.0.0.0/8 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16; do
+    if [ -n "$wan" ]; then
+      "$IPT" -A "$CHAIN" ! -i "$wan" -s "$net" -j RETURN
+    else
+      "$IPT" -A "$CHAIN" -s "$net" -j RETURN
+    fi
+  done
+
+  # 2) whitelist persisten (allowlist.txt)
+  install_allow_rules
+
+  # 2a) deteksi otomatis koneksi WireGuard & VPN lain (auto-whitelist & routing)
+  auto_detect_vpn_whitelist
+
+  # 2a') Paket berstatus INVALID (bendera TCP ngawur, bukan bagian koneksi
+  #      mana pun) dibuang. Diletakkan setelah whitelist.
+  if have_mod conntrack; then
+    "$IPT" -A "$CHAIN" -m conntrack --ctstate INVALID \
+      -m comment --comment "sentinel:invalid-drop" -j DROP
+  fi
+
+  # 2b) GEO-BAN: setelah whitelist (pilihan operator selalu menang), sebelum
+  #     ban. Hanya port web, termasuk UDP 443 (HTTP/3 / QUIC): tanpa itu
+  #     klien dari negara terblokir cukup beralih ke QUIC.
+  if "$IPSET" list "$SET_GEO" >/dev/null 2>&1; then
+    "$IPSET" flush "$SET_GEO" 2>/dev/null || true
+  fi
+  if [ "${GEO_DIKUNCI:-0}" = 1 ]; then say "geo-ban tidak aktif (butuh paket Pro; pengaturan tetap tersimpan)"; else say "geo-ban tidak aktif (set kosong atau mode off)"; fi
+
+  # 2c) GLOBAL THREAT INTEL: blokir seluruh CIDR botnet & C2 reputasi buruk (Spamhaus DROP/EDROP).
+  if [ "$SET_INTEL" ] && "$IPSET" list "$SET_INTEL" >/dev/null 2>&1 \
+     && [ "$("$IPSET" list "$SET_INTEL" 2>/dev/null | grep -c '^[0-9]')" -gt 0 ]; then
+    "$IPT" -A "$CHAIN" -m set --match-set "$SET_INTEL" src \
+      -m comment --comment "sentinel:intel-drop" -j DROP
+    say "threat intel aktif: $("$IPSET" list "$SET_INTEL" 2>/dev/null | grep -c '^[0-9]') CIDR reputasi buruk diblokir"
+  else
+    say "threat intel tidak aktif (set kosong atau belum diunduh)"
+  fi
+
+  # 3) BAN: temporal, diisi guardd. Semua protokol dan port, sebelum throttle.
+  "$IPT" -A "$CHAIN" -m set --match-set "$SET_BAN" src \
+    -m comment --comment "sentinel:ban-drop" -j DROP
+  say "ban aktif dari $SET_BAN (timeout bawaan 3600 detik)"
+
+  # 3a) Antrean review: HANYA penghitung (tanpa -j), diletakkan SETELAH ban.
+  #     Versi lama memakai -j RETURN sebelum ban: IP yang masih di antrean
+  #     (12 jam) lolos dari ban yang sudah disetujui operator, dari throttle,
+  #     dan dari default-drop port firewall.
+  "$IPT" -A "$CHAIN" -m set --match-set "$SET_REV" src \
+    -m comment --comment "sentinel:review"
+  say "antrian review aktif dari $SET_REV (tidak memblokir, hanya mencatat)"
+
+  # 4) THROTTLE per IP (hashlimit-mode srcip; dulu tanpa mode sehingga semua
+  #    IP throttle berbagi SATU ember 5/detik). Yang dibatasi adalah KONEKSI
+  #    BARU, bukan paket: satu halaman HTTPS = puluhan paket ACK, jadi batas
+  #    per paket praktis memutus klien dan memutus koneksi yang sudah jalan.
+  #    Dua batas (per detik dan per menit) masing-masing DROP; dulu keduanya
+  #    RETURN sehingga logikanya OR dan batas per menit justru menggandakan
+  #    jatah. Ditambah batas koneksi bersamaan dan pemutusan QUIC (UDP 443)
+  #    supaya throttle tidak bisa dihindari dengan pindah ke HTTP/3 atau
+  #    menumpuk koneksi keep-alive.
+  say "throttle per IP: tidak aktif (butuh paket Pro: fw_advanced)"
+
+  # 5) Anti SYN flood dan anti koneksi berkelanjutan, per IP.
+  if have_mod connlimit && have_mod conntrack; then
+    # Dibatasi ke port web: tanpa --dport, IP admin dengan banyak koneksi SSH/panel
+    # ikut terkunci.
+    "$IPT" -A "$CHAIN" -p tcp -m multiport --dports "$WEB_PORTS" --syn -m conntrack --ctstate NEW \
+      -m connlimit --connlimit-above "$SYN_MAX" --connlimit-mask 32 \
+      -m comment --comment "sentinel:syn-guard" -j DROP
+    "$IPT" -A "$CHAIN" -p tcp -m multiport --dports "$WEB_PORTS" -m conntrack \
+      --ctstate NEW -m connlimit --connlimit-above "$CONN_MAX" \
+      --connlimit-mask 32 \
+      -m comment --comment "sentinel:conn-guard" -j DROP
+    say "batas koneksi per IP: SYN $SYN_MAX, koneksi baru port web $CONN_MAX"
+  else
+    err "modul connlimit atau conntrack tidak ada, batas koneksi dilewati"
+  fi
+
+  # 5a) QUIC (UDP 443) per IP: batas paket yang longgar untuk klien sah
+  #     (unduhan besar lewat HTTP/3 ~ ribuan paket/detik) tetapi menahan
+  #     banjir UDP dari satu sumber.
+
+  # 6) Pengaman global. Hanya menyala bila nilainya diisi.
+  #    Tujuannya mencegah PHP-FPM jenuh total saat lonjakan besar.
+  if [ -n "$GLOBAL_RATE" ] && have_mod hashlimit && have_mod conntrack; then
+    "$IPT" -A "$CHAIN" -p tcp -m multiport --dports "$WEB_PORTS" -m conntrack \
+      --ctstate NEW -m hashlimit --hashlimit-upto "$GLOBAL_RATE" \
+      --hashlimit-burst "$GLOBAL_BURST" --hashlimit-name sentinel_global \
+      --hashlimit-htable-expire 600000 -j RETURN
+    "$IPT" -A "$CHAIN" -p tcp -m multiport --dports "$WEB_PORTS" -m conntrack \
+      --ctstate NEW -m comment --comment "sentinel:global-fuse" -j DROP
+    say "pengaman global aktif: ${GLOBAL_RATE} burst ${GLOBAL_BURST} pada port ${WEB_PORTS}"
+  else
+    say "pengaman global DIMATIKAN (SENTINEL_GLOBAL_RATE kosong)"
+  fi
+
+  # 7) Port Firewall Inbound: Arahkan ke SENTINEL_IN_PORTS bila chain tersedia
+  if "$IPT" -S SENTINEL_IN_PORTS >/dev/null 2>&1; then
+    "$IPT" -A "$CHAIN" -j SENTINEL_IN_PORTS
+    say "hook SENTINEL -> SENTINEL_IN_PORTS terpasang"
+  fi
+
+  # 8) Sisanya biarkan ke tahap berikutnya: nginx.
+  "$IPT" -A "$CHAIN" -j RETURN
+}
+
 do_install() {
   need_root
+  # Satu pemasangan pada satu waktu (timer 5 menit dan UI bisa bersamaan):
+  # pemasangan ganda mengacaukan urutan aturan, dan RETURN di tengah = fail-open.
+  mkdir -p /www/server/sentinel/run 2>/dev/null
+  exec 9>/www/server/sentinel/run/.fw-install.lock 2>/dev/null
+  if ! flock -n 9 2>/dev/null; then
+    say "pemasangan lain sedang berjalan, dilewati"
+    return 0
+  fi
   if ! "$IPT" -t filter -L INPUT -n >/dev/null 2>&1; then
     err "iptables tidak bisa membaca chain INPUT, keluar"
     exit 1
@@ -362,176 +597,45 @@ do_install() {
   # -diam setiap reboot -- persis jenis kegagalan senyap yang ingin
   # dihindari. Kalau mode terisi tetapi set kosong, isi ulang sekarang.
   # sentinel-fw.service berjalan saat boot, jadi ini yang memulihkannya.
-  if [ "$GEO_MODE" != "off" ] && [ -n "$GEO_NEGARA" ]; then
-    local isi_geo
-    isi_geo="$("$IPSET" list "$SET_GEO" 2>/dev/null | grep -c '^[0-9]')"
-    if [ "${isi_geo:-0}" -eq 0 ]; then
-      say "geo_mode=$GEO_MODE tetapi set kosong (kemungkinan habis reboot): mengisi ulang"
-      if geo_isi_set; then
-        say "geo-ban dipulihkan: $("$IPSET" list "$SET_GEO" 2>/dev/null | grep -c '^[0-9]') blok CIDR"
-      else
-        err "gagal memulihkan geo-ban; periksa $GEO_JSON dan kode negara"
-      fi
-    fi
-  else
-    # Bila mode off atau negara kosong: pastikan ipset dikosongkan agar tidak ada sisa CIDR lama
-    if "$IPSET" list "$SET_GEO" >/dev/null 2>&1; then
-      "$IPSET" flush "$SET_GEO" 2>/dev/null || true
-    fi
+  if "$IPSET" list "$SET_GEO" >/dev/null 2>&1; then
+    "$IPSET" flush "$SET_GEO" 2>/dev/null || true
   fi
 
+  tune_conntrack
   "$IPT" -N "$CHAIN" 2>/dev/null || true
-  "$IPT" -F "$CHAIN" 2>/dev/null || { err "gagal mengosongkan chain $CHAIN"; exit 1; }
 
-  # 1) subnet privat dan loopback: selalu diteruskan.
-  "$IPT" -A "$CHAIN" -m set --match-set aapanel.ipv4.whitelist src -j RETURN
-  local net
-  for net in 127.0.0.0/8 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16 169.254.0.0/16; do
-    "$IPT" -A "$CHAIN" -s "$net" -j RETURN
-  done
-
-  # 2) whitelist persisten (allowlist.txt)
-  install_allow_rules
-
-  # 2a) deteksi otomatis koneksi WireGuard & VPN lain (auto-whitelist & routing)
-  auto_detect_vpn_whitelist
-
-  # 2b) GEO-BAN: blokir seluruh blok CIDR negara terpilih.
-  #
-  #     Diletakkan SETELAH whitelist dan allowlist, dan SEBELUM review
-  #     serta ban. Urutan ini disengaja:
-  #       - Setelah whitelist: IP yang sengaja diizinkan operator harus
-  #         selalu menang, apa pun negaranya. Kalau geo di atas whitelist,
-  #         satu kesalahan kode negara mengunci operator keluar.
-  #       - Sebelum ban: geo lebih kuat dari ban (negara tidak berubah),
-  #         jadi wilayah terblokir tidak perlu dinilai lagi per IP.
-  #       - Sebelum review: IP yang sudah diblokir geo tidak boleh ikut
-  #         tercatat sebagai "menunggu keputusan" di antrean review.
-  #
-  #     Hanya berlaku di port web. SSH dan port panel tidak tersentuh,
-  #     supaya konfigurasi yang salah masih bisa diperbaiki.
-  if [ "$GEO_MODE" != "off" ] && [ -n "$GEO_NEGARA" ] \
-     && [ "$SET_GEO" ] && "$IPSET" list "$SET_GEO" >/dev/null 2>&1 \
-     && [ "$("$IPSET" list "$SET_GEO" 2>/dev/null | grep -c '^[0-9]')" -gt 0 ]; then
-    "$IPT" -A "$CHAIN" -p tcp -m multiport --dports "$GEO_PORTS" \
-      -m set --match-set "$SET_GEO" src \
-      -m comment --comment "sentinel:geo-drop" -j DROP
-    say "geo-ban aktif: $("$IPSET" list "$SET_GEO" 2>/dev/null | grep -c '^[0-9]') blok CIDR diblokir pada port $GEO_PORTS"
+  # Seluruh isi chain dipasang dalam SATU transaksi iptables-restore.
+  # Cara lama (flush lalu ~45 pemanggilan iptables satu per satu) membuka
+  # celah ~3 detik setiap 5 menit: selama itu ban-drop dan default-drop
+  # belum ada, IP yang diblokir bisa masuk, dan penghitung paket selalu
+  # kembali ke nol. Bila restore menolak rencana (mis. modul tidak ada),
+  # jatuh ke cara lama supaya perlindungan tetap terpasang.
+  local plan
+  plan="$(mktemp /www/server/sentinel/run/.fw-plan.XXXXXX 2>/dev/null || mktemp)"
+  FW_PLAN="$plan"
+  fw_rules
+  FW_PLAN=""
+  # Rencana identik dengan yang terakhir diterapkan dan chain live utuh: jangan sentuh.
+  # Timer berjalan tiap 5 menit; memasang ulang aturan yang sama hanya menghapus
+  # penghitung paket (statistik "Packet Counters" di panel selalu kembali ke nol).
+  local sha_baru sha_lama n_rencana n_live
+  sha_baru="$(sha256sum "$plan" | cut -c1-64)"
+  sha_lama="$(cat "$FW_PLAN_STATE" 2>/dev/null)"
+  n_rencana="$(grep -c '^-A' "$plan")"
+  n_live="$("$IPT" -S "$CHAIN" 2>/dev/null | grep -c "^-A $CHAIN ")"
+  if [ "$sha_baru" = "$sha_lama" ] && [ "$n_rencana" = "$n_live" ]; then
+    say "aturan $CHAIN tidak berubah ($n_live aturan), tidak dipasang ulang (penghitung paket dipertahankan)"
+  elif fw_plan_commit "$plan"; then
+    printf '%s\n' "$sha_baru" > "$FW_PLAN_STATE" 2>/dev/null
+    say "aturan $CHAIN dipasang atomik ($n_rencana aturan)"
   else
-    if "$IPSET" list "$SET_GEO" >/dev/null 2>&1; then
-      "$IPSET" flush "$SET_GEO" 2>/dev/null || true
-    fi
-    say "geo-ban tidak aktif (set kosong atau mode off)"
+    rm -f "$FW_PLAN_STATE" 2>/dev/null
+    err "iptables-restore menolak rencana; memasang per aturan (cara lama)"
+    "$IPT" -F "$CHAIN" 2>/dev/null || { err "gagal mengosongkan chain $CHAIN"; rm -f "$plan" "$plan.r"; exit 1; }
+    fw_rules
   fi
-
-  # 2c) GLOBAL THREAT INTEL: blokir seluruh CIDR botnet & C2 reputasi buruk (Spamhaus DROP/EDROP).
-  if [ "$SET_INTEL" ] && "$IPSET" list "$SET_INTEL" >/dev/null 2>&1 \
-     && [ "$("$IPSET" list "$SET_INTEL" 2>/dev/null | grep -c '^[0-9]')" -gt 0 ]; then
-    "$IPT" -A "$CHAIN" -m set --match-set "$SET_INTEL" src \
-      -m comment --comment "sentinel:intel-drop" -j DROP
-    say "threat intel aktif: $("$IPSET" list "$SET_INTEL" 2>/dev/null | grep -c '^[0-9]') CIDR reputasi buruk diblokir"
-  else
-    say "threat intel tidak aktif (set kosong atau belum diunduh)"
-  fi
-
-  # 3) BAN: temporal, diisi guardd. Sepenuhnya di kernel sehingga tetap
-  #    berlaku walau guardd mati atau restart.
-  #
-  #    WAJIB SEBELUM aturan throttle. Saat eskalasi, satu IP bisa saja
-  #    ada di KEDUA set sekaligus: set throttle timeoutnya 1800 detik
-  #    sedangkan ban 3600 detik. Kalau throttle diletakkan lebih dulu,
-  #    IP itu akan lolos lewat aturan "izinkan sampai batas laju" dan
-  #    ban tidak akan pernah berlaku -- tepat untuk IP yang paling
-  #    berbahaya.
-  # Antrean review. Sengaja TIDAK memakai -j DROP: IP yang masuk
-  # daftar ini hanya dicatat, bukan diblokir. Tujuannya operator
-  # bisa memutuskan, bukan memblokir otomatis.
-  #
-  # Harus DILETAKKAN sebelum aturan ban. Kalau berada setelahnya, IP
-  # yang sudah diblokir akan sampai ke sini lebih dulu dan tercatat
-  # sebagai masih menunggu keputusan, padahal sebenarnya sudah
-  # diblokir.
-  "$IPT" -A "$CHAIN" -m set --match-set "$SET_REV" src \
-    -m comment --comment "sentinel:review" -j RETURN
-  say "antrian review aktif dari $SET_REV (tidak memblokir, hanya mencatat)"
-
-  "$IPT" -A "$CHAIN" -m set --match-set "$SET_BAN" src \
-    -m comment --comment "sentinel:ban-drop" -j DROP
-  say "ban aktif dari $SET_BAN (timeout bawaan 3600 detik)"
-
-  # 4) THROTTLE: IP mencurigakan tapi belum layak di-ban.
-  #    Hanya berlaku pada port web. Aturan pertama mengizinkan sampai
-  #    batas laju, aturan kedua membuang sisanya.
-  if have_mod hashlimit; then
-    # 4a. Aturan per DETIK. Menahan ledakan sesaat. bursting
-    #     short-lived tapi besar, misalnya 200 request dalam 1 detik.
-    "$IPT" -A "$CHAIN" -p tcp -m multiport --dports "$WEB_PORTS" \
-      -m set --match-set "$SET_THR" src \
-      -m hashlimit --hashlimit-upto "$THROTTLE_RPS/second" \
-      --hashlimit-burst "$THROTTLE_BURST" \
-      --hashlimit-name sentinel_thr \
-      --hashlimit-htable-expire 600000 -j RETURN
-
-    # 4b. Aturan per MENIT. Menahan penyalahgunaan BERLANGSUNG yang lolos
-    #     dari aturan per detik: 4 rps terus-menerus di bawah 5 rps, tapi
-    #     240 per menit. Tanpa aturan ini penyerang tidak pernah tertangkap.
-    #     Nilai 0 berarti dimatikan.
-    if [ "$THROTTLE_RPM" -gt 0 ]; then
-      "$IPT" -A "$CHAIN" -p tcp -m multiport --dports "$WEB_PORTS" \
-        -m set --match-set "$SET_THR" src \
-        -m hashlimit --hashlimit-upto "$THROTTLE_RPM/minute" \
-        --hashlimit-burst "$THROTTLE_BURST" \
-        --hashlimit-name sentinel_thr_min \
-        --hashlimit-htable-expire 600000 -j RETURN
-      say "throttle per menit: maksimal ${THROTTLE_RPM} rpm"
-    else
-      say "throttle per menit: DIMATIKAN (throttle_rpm = 0)"
-    fi
-
-    "$IPT" -A "$CHAIN" -p tcp -m multiport --dports "$WEB_PORTS" \
-      -m set --match-set "$SET_THR" src \
-      -m comment --comment "sentinel:throttle-drop" -j DROP
-    say "throttle per detik: maksimal ${THROTTLE_RPS} rps, burst ${THROTTLE_BURST}"
-  else
-    err "modul hashlimit tidak ada, aturan throttle dilewati"
-  fi
-
-  # 5) Anti SYN flood dan anti koneksi berkelanjutan, per IP.
-  if have_mod connlimit && have_mod conntrack; then
-    "$IPT" -A "$CHAIN" -p tcp --syn -m conntrack --ctstate NEW \
-      -m connlimit --connlimit-above "$SYN_MAX" --connlimit-mask 32 \
-      -m comment --comment "sentinel:syn-guard" -j DROP
-    "$IPT" -A "$CHAIN" -p tcp -m multiport --dports "$WEB_PORTS" -m conntrack \
-      --ctstate NEW -m connlimit --connlimit-above "$CONN_MAX" \
-      --connlimit-mask 32 \
-      -m comment --comment "sentinel:conn-guard" -j DROP
-    say "batas koneksi per IP: SYN $SYN_MAX, koneksi baru port web $CONN_MAX"
-  else
-    err "modul connlimit atau conntrack tidak ada, batas koneksi dilewati"
-  fi
-
-  # 6) Pengaman global. Hanya menyala bila nilainya diisi.
-  #    Tujuannya mencegah PHP-FPM jenuh total saat lonjakan besar.
-  if [ -n "$GLOBAL_RATE" ] && have_mod hashlimit && have_mod conntrack; then
-    "$IPT" -A "$CHAIN" -p tcp -m multiport --dports "$WEB_PORTS" -m conntrack \
-      --ctstate NEW -m hashlimit --hashlimit-upto "$GLOBAL_RATE" \
-      --hashlimit-burst "$GLOBAL_BURST" --hashlimit-name sentinel_global \
-      --hashlimit-htable-expire 600000 -j RETURN
-    "$IPT" -A "$CHAIN" -p tcp -m multiport --dports "$WEB_PORTS" -m conntrack \
-      --ctstate NEW -m comment --comment "sentinel:global-fuse" -j DROP
-    say "pengaman global aktif: ${GLOBAL_RATE} burst ${GLOBAL_BURST} pada port ${WEB_PORTS}"
-  else
-    say "pengaman global DIMATIKAN (SENTINEL_GLOBAL_RATE kosong)"
-  fi
-
-  # 7) Port Firewall Inbound: Arahkan ke SENTINEL_IN_PORTS bila chain tersedia
-  if "$IPT" -S SENTINEL_IN_PORTS >/dev/null 2>&1; then
-    "$IPT" -A "$CHAIN" -j SENTINEL_IN_PORTS
-    say "hook SENTINEL -> SENTINEL_IN_PORTS terpasang"
-  fi
-
-  # 8) Sisanya biarkan ke tahap berikutnya: nginx.
-  "$IPT" -A "$CHAIN" -j RETURN
+  rm -f "$plan" "$plan.r"
+  docker_guard
 
   # 8) Hook + verifikasi. hook_chain memakai induk yang dipilih di awal
   #    (IN_BT bila ada, INPUT bila tidak). Verifikasi memakai binary
@@ -548,7 +652,13 @@ do_install() {
 
   # 9) EGRESS GUARD: pulihkan status egress bila aktif atau terkonfigurasi on
   if [ -f "$EGRESS_FLAG_FILE" ] || [ "$EGRESS_MODE" = "on" ]; then
-    do_egress_on
+    # edisi Free: Egress Guard adalah fitur Pro; lepas sisa aturan lama, penanda dan pengaturan operator tidak dihapus
+    while "$IPT" -S OUTPUT 2>/dev/null | grep -q -- "-j $EGRESS_CHAIN"; do
+      "$IPT" -D OUTPUT -m owner --uid-owner "$WEB_UID" -j "$EGRESS_CHAIN" 2>/dev/null || break
+    done
+    "$IPT" -F "$EGRESS_CHAIN" 2>/dev/null || true
+    "$IPT" -X "$EGRESS_CHAIN" 2>/dev/null || true
+    say "Egress Guard: tidak aktif (butuh paket Pro; penanda dipertahankan)"
   fi
 
   # 10) PORT FIREWALL: terapkan aturan port masuk & keluar jika ports.json ada
@@ -557,7 +667,7 @@ do_install() {
     /www/server/panel/pyenv/bin/python3 /www/server/sentinel/bin/sentinel-ports.py apply >/dev/null 2>&1 || python3 /www/server/sentinel/bin/sentinel-ports.py apply >/dev/null 2>&1 || true
   fi
 
-  say "selesai. periksa dengan: $IPT -S $CHAIN"
+  say "selesai. periksa dengan: $IPT_BIN -S $CHAIN"
 }
 
 do_remove() {
@@ -634,11 +744,9 @@ panic_ports() {
   # lama lalu jatuh ke daftar hardcode 80/443. Itu sangat berbahaya:
   # operator mengira hanya port uji yang ditutup, padahal situs produksi
   # yang kena. Karena itu masanya dibersihkan di sini.
-  local pp out
-  pp="$(panel_ports)"
-  out="$WEB_PORTS"
-  if [ -n "$pp" ]; then out="$out,$pp"; fi
-  printf '%s' "$out" | sed 's/,,*/,/g; s/^,//; s/,$//'
+  # Port panel TIDAK ikut ditutup (dulu ikut, padahal komentar dan UI
+  # menjanjikan panel tetap bisa dibuka untuk mencabut panic).
+  printf '%s' "$WEB_PORTS" | sed 's/,,*/,/g; s/^,//; s/,$//'
 }
 
 do_panic_on() {
@@ -677,6 +785,9 @@ do_panic_on() {
     "$IPT" -X "$PANIC_CHAIN" 2>/dev/null
     exit 1
   fi
+  # HTTP/3 (QUIC) juga ditutup; tanpa ini situs tetap melayani lewat UDP 443.
+  "$IPT" -A "$PANIC_CHAIN" -p udp --dport 443 \
+    -m comment --comment "sentinel:panic-block-quic" -j DROP 2>/dev/null || true
 
   # 3) Pasang hook. Di-chain SENTINEL bila chain itu ter-hook ke induk
   #    (ikut whitelist dan ban), kalau tidak langsung ke induk yang sama
@@ -757,50 +868,8 @@ do_panic_status() {
 # ==================================================================
 do_egress_on() {
   need_root
-  if ! have_mod owner; then
-    err "modul iptables owner tidak didukung di kernel ini"
-    return 1
-  fi
-
-  "$IPT" -N "$EGRESS_CHAIN" 2>/dev/null || true
-  "$IPT" -F "$EGRESS_CHAIN" 2>/dev/null || { err "gagal mengosongkan chain $EGRESS_CHAIN"; return 1; }
-
-  # 1) Loopback interface
-  "$IPT" -A "$EGRESS_CHAIN" -o lo -j ACCEPT
-
-  # 2) Koneksi balasan / established
-  if have_mod conntrack; then
-    "$IPT" -A "$EGRESS_CHAIN" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-  fi
-
-  # 3) DNS query (UDP & TCP 53)
-  "$IPT" -A "$EGRESS_CHAIN" -p udp --dport 53 -j ACCEPT
-  "$IPT" -A "$EGRESS_CHAIN" -p tcp --dport 53 -j ACCEPT
-
-  # 4) Web API & Git HTTPS keluar (HTTP 80, HTTPS 443, Git 9418)
-  "$IPT" -A "$EGRESS_CHAIN" -p tcp -m multiport --dports 80,443,9418 -j ACCEPT
-
-  # 5) SSH keluar untuk Git clone/pull/push (GitHub, GitLab, Bitbucket: port 22, 2222)
-  "$IPT" -A "$EGRESS_CHAIN" -p tcp -m multiport --dports 22,2222 -j ACCEPT
-
-  # 6) Submission email (587, 465)
-  "$IPT" -A "$EGRESS_CHAIN" -p tcp -m multiport --dports 587,465 -j ACCEPT
-
-  # 7) Blokir seluruh koneksi keluar lainnya
-  if ! "$IPT" -A "$EGRESS_CHAIN" -m comment --comment "sentinel:egress-block" \
-       -j REJECT --reject-with icmp-port-unreachable 2>/dev/null; then
-    "$IPT" -A "$EGRESS_CHAIN" -m comment --comment "sentinel:egress-block" -j DROP
-  fi
-
-  # Hook ke chain OUTPUT untuk UID pekerja web
-  while "$IPT" -S OUTPUT 2>/dev/null | grep -qxF -- "-A OUTPUT -m owner --uid-owner $WEB_UID -j $EGRESS_CHAIN"; do
-    "$IPT" -D OUTPUT -m owner --uid-owner "$WEB_UID" -j "$EGRESS_CHAIN" 2>/dev/null || break
-  done
-  "$IPT" -I OUTPUT 1 -m owner --uid-owner "$WEB_UID" -j "$EGRESS_CHAIN"
-
-  mkdir -p /www/server/sentinel/run
-  printf 'on\nuid=%s\nports=22,53,80,443,465,587,2222,9418\nsince=%s\n' "$WEB_UID" "$(date '+%Y-%m-%d %H:%M:%S')" > "$EGRESS_FLAG_FILE"
-  say "EGRESS GUARD AKTIF: lalu lintas keluar UID $WEB_UID (www) dibatasi ke DNS, HTTP, HTTPS, Git SSH, SMTP"
+  err "Egress Guard membutuhkan paket Pro"
+  return 1
 }
 
 do_egress_off() {
@@ -836,7 +905,7 @@ do_backend() {
   b="$(detect_backend)"
   split="$(backend_split)"
   induk="$(hook_parent)"
-  printf 'backend=%s\nhook=%s\nbinary=%s\n' "$b" "$induk" "$IPT"
+  printf 'backend=%s\nhook=%s\nbinary=%s\n' "$b" "$induk" "$IPT_BIN"
   if command -v ufw >/dev/null 2>&1; then
     printf 'ufw=%s\n' "$(ufw status 2>/dev/null | head -1 | tr -d '\r')"
   else
@@ -881,87 +950,14 @@ GEO_JSON="${SENTINEL_GEO_JSON:-/www/server/panel/data/firewall/GeoLite2-Country.
 # aman dipanggil dari dalam do_install tanpa rekursi.
 # Mengembalikan 0 bila set terisi, bukan-0 bila gagal/kosong.
 geo_isi_set() {
-  [ "$GEO_MODE" = "off" ] && return 1
-  [ -n "$GEO_NEGARA" ] || return 1
-  [ -f "$GEO_JSON" ] || return 1
-  ensure_set "$SET_GEO" 0
-
-  # Bangun isi ipset restore langsung dari Python: satu transaksi
-  # "flush <set>" + "add <set> <cidr>" per baris. JSON parsing di shell
-  # rapuh, dan 'ipset add' satu per satu untuk 100 ribu blok akan
-  # memakan waktu lama serta meninggalkan set setengah terisi bila
-  # dihentikan di tengah.
-  local tmp
-  tmp="$(mktemp /tmp/sentinel-geo.XXXXXX)" || return 1
-  local py_bin="python3"
-  if [ -x /www/server/panel/pyenv/bin/python3 ]; then
-    py_bin="/www/server/panel/pyenv/bin/python3"
-  fi
-  if ! GEO_JSON="$GEO_JSON" GEO_MODE="$GEO_MODE" GEO_NEGARA="$GEO_NEGARA" \
-       SET_GEO="$SET_GEO" "$py_bin" - > "$tmp" <<'PY'
-import json, os, sys
-try:
-    data = json.load(open(os.environ['GEO_JSON']))
-except Exception:
-    sys.exit(1)
-mode = os.environ['GEO_MODE']
-ingin = set(x for x in os.environ['GEO_NEGARA'].split(',') if x)
-setname = os.environ['SET_GEO']
-out = []
-for entri in data:
-    kode = entri.get('brief') or entri.get('code') or ''
-    if not kode:
-        continue
-    pilih = (kode in ingin) if mode == 'block' else (kode not in ingin)
-    if pilih:
-        out.extend(entri.get('ips') or [])
-if not out:
-    sys.exit(2)
-print('flush %s' % setname)
-for cidr in out:
-    print('add %s %s' % (setname, cidr))
-PY
-  then
-    rm -f "$tmp"
-    return 1
-  fi
-
-  if ! "$IPSET" restore < "$tmp" 2>/dev/null; then
-    rm -f "$tmp"
-    return 1
-  fi
-  rm -f "$tmp"
-  return 0
+  return 1      # edisi Free: geo-ban adalah fitur Pro
 }
 
 do_geo_apply() {
   need_root
-  if [ "$GEO_MODE" = "off" ] || [ -z "$GEO_NEGARA" ]; then
-    say "geo_mode=off atau daftar negara kosong: tidak ada yang diblokir"
-    do_geo_clear
-    return 0
-  fi
-  if [ ! -f "$GEO_JSON" ]; then
-    err "berkas geo tidak ada: $GEO_JSON"
-    return 1
-  fi
-
-  if ! geo_isi_set; then
-    err "tidak ada blok CIDR cocok; periksa kode negara (contoh sah: CN, RU, US)"
-    return 1
-  fi
-
-  local isi
-  isi="$("$IPSET" list "$SET_GEO" 2>/dev/null | grep -c '^[0-9]')"
-  if [ "${isi:-0}" -eq 0 ]; then
-    err "ipset $SET_GEO kosong setelah restore; geo-ban GAGAL"
-    return 1
-  fi
-  say "geo-ban aktif: $isi blok CIDR di $SET_GEO"
-
-  # Pasang ulang aturan supaya perubahannya langsung berlaku.
-  bash "$0" install >/dev/null 2>&1 || err "aturan kernel gagal dipasang ulang"
-  say "aturan kernel dipasang ulang"
+  say "geo_mode=off atau daftar negara kosong: tidak ada yang diblokir"
+  do_geo_clear
+  return 0
 }
 
 do_geo_clear() {
@@ -1035,8 +1031,29 @@ do_ports_reset() {
   python3 /www/server/sentinel/bin/sentinel-ports.py reset
 }
 
+# Self-heal ringan (dipanggil dari timer 5 menit setelah install):
+# - guardd yang "hidup" tetapi membeku (status.json tidak diperbarui) di-restart;
+# - kesehatan WAF diperiksa; WAF yang merusak nginx dicabut dengan aman.
+# Tidak menyentuh apa pun yang bukan milik plugin.
+heal_services() {
+  command -v systemctl >/dev/null 2>&1 || return 0
+  local sj=/www/server/sentinel/run/status.json now mt
+  if systemctl is-active --quiet sentinel.service 2>/dev/null && [ -f "$sj" ]; then
+    now=$(date +%s); mt=$(stat -c %Y "$sj" 2>/dev/null || echo "$now")
+    if [ $((now - mt)) -gt 300 ]; then
+      say "heal: status.json guardd basi $((now - mt))s, restart sentinel.service"
+      systemctl restart sentinel.service 2>/dev/null || true
+    fi
+  fi
+  if [ -x /www/server/sentinel/bin/sentinel-waf.sh ]; then
+    /www/server/sentinel/bin/sentinel-waf.sh guard 2>&1 | while IFS= read -r l; do say "heal: $l"; done
+  fi
+  return 0
+}
+
 case "${1:-status}" in
-  install) do_install ;;
+  install) do_install; heal_services ;;
+  heal)    heal_services ;;
   remove)  do_remove ;;
   flush)   do_flush ;;
   status)  do_status ;;
@@ -1053,5 +1070,5 @@ case "${1:-status}" in
   ports-apply)  do_ports_apply ;;
   ports-status) do_ports_status ;;
   ports-reset)  do_ports_reset ;;
-  *) echo "Usage: $0 {install|remove|flush|status|backend|panic-on|panic-off|panic-status|egress-on|egress-off|egress-status|geo-apply|geo-clear|geo-status|ports-apply|ports-status|ports-reset}"; exit 1 ;;
+  *) echo "Usage: $0 {install|heal|remove|flush|status|backend|panic-on|panic-off|panic-status|egress-on|egress-off|egress-status|geo-apply|geo-clear|geo-status|ports-apply|ports-status|ports-reset}"; exit 1 ;;
 esac

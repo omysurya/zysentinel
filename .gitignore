@@ -19,3 +19,7 @@ dist/
 Thumbs.db
 .vscode/
 .idea/
+
+# Cache build konektor Coraza (modul, libcoraza, tarball bahan); dibuat di server
+coraza-cache/
+.uninstalled

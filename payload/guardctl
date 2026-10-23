@@ -37,6 +37,34 @@ is_systemd() {
   [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1
 }
 
+# Stop bersifat SINKRON: guardd butuh beberapa detik untuk menutup diri. Tanpa menunggu, "start" berikutnya
+# ditolak kunci instans (.guardd.lock) lalu proses lama keluar = tidak ada daemon sama sekali, dan uninstall
+# menghapus berkas/aturan di bawah daemon yang masih hidup. Tunggu hingga 10 detik, lalu SIGTERM, lalu SIGKILL.
+guardd_pids() {  # hanya guardd milik Sentinel (biner di .../sentinel/..., juga bila sudah terhapus: "(deleted)")
+  local p
+  for p in $(pgrep -x guardd 2>/dev/null); do
+    case "$(readlink "/proc/$p/exe" 2>/dev/null)" in */sentinel/*) printf '%s ' "$p";; esac
+  done
+}
+tunggu_keluar() {  # tunggu_keluar <jumlah langkah 0,2 detik>
+  local i=0
+  while [ "$i" -lt "$1" ]; do
+    [ -z "$(guardd_pids)" ] && return 0
+    sleep 0.2; i=$((i + 1))
+  done
+  [ -z "$(guardd_pids)" ]
+}
+pastikan_berhenti() {
+  tunggu_keluar 50 && return 0
+  # shellcheck disable=SC2046
+  kill $(guardd_pids) 2>/dev/null
+  tunggu_keluar 25 && return 0
+  # shellcheck disable=SC2046
+  kill -9 $(guardd_pids) 2>/dev/null
+  if [ "$(get_lang)" = "id" ]; then say "guardd tidak menutup diri; dihentikan paksa (SIGKILL)"; else say "guardd did not exit; force-killed (SIGKILL)"; fi
+  tunggu_keluar 10
+}
+
 ctl() {
   if [ ! -S "$SOCK" ]; then
     if [ "$(get_lang)" = "id" ]; then
@@ -163,6 +191,7 @@ case "${1:-}" in
     ctl "allow $2"
     ;;
   rescan) ctl "rescan" ;;
+  learnload) ctl "learnload" ;;
   flush)  ctl "flush" ;;
 
   panic|panic-on|panic-off|panic-status)
@@ -225,6 +254,8 @@ case "${1:-}" in
         }
       fi
     fi
+    # juga proses guardd di luar systemd (mis. dijalankan manual): stop baru selesai bila tidak ada guardd tersisa
+    pastikan_berhenti
     ;;
 
   restart)
@@ -275,10 +306,18 @@ case "${1:-}" in
       if [ "$(get_lang)" = "id" ]; then err "config tidak ditemukan: $CONF"; else err "config not found: $CONF"; fi
       exit 1
     fi
+    # Kunci dan nilai masuk ke sed dan ke berkas konfigurasi yang dibaca daemon
+    # sebagai root: tolak apa pun yang bisa menyuntikkan perintah sed ('e'),
+    # baris baru, atau kunci palsu.
+    case "$key" in *[!A-Za-z0-9_]*) err "key tidak valid: hanya huruf, angka, dan _"; exit 1 ;; esac
+    case "$val" in *$'\n'*|*$'\r'*) err "nilai tidak boleh memuat baris baru"; exit 1 ;; esac
     before="$CONF.$(date +%Y%m%d%H%M%S).bak"
     cp -p "$CONF" "$before"
+    # simpan paling banyak 5 cadangan terbaru (hanya milik berkas ini)
+    ls -1t "$CONF".*.bak 2>/dev/null | tail -n +6 | while IFS= read -r old; do rm -f -- "$old"; done
+    esc=$(printf '%s' "$val" | sed -e 's/[\\|&]/\\&/g')
     if grep -qE "^[[:space:]]*$key[[:space:]]*=" "$CONF"; then
-      sed -i -E "s|^[[:space:]]*$key[[:space:]]*=.*|$key = $val|" "$CONF"
+      sed -i -E "s|^[[:space:]]*$key[[:space:]]*=.*|$key = $esc|" "$CONF"
     else
       printf '%s = %s\n' "$key" "$val" >> "$CONF"
     fi
@@ -322,18 +361,8 @@ case "${1:-}" in
     ;;
 
   scan-ai)
-    target="${2:-/www/wwwroot}"
-    sage_bin="${SENTINEL_BIN:-/www/server/sentinel/bin}/sentinel-sage.py"
-    if [ ! -f "$sage_bin" ]; then
-      sage_bin="/www/server/panel/plugin/sentinel/payload/sentinel-sage.py"
-    fi
-    if [ ! -f "$sage_bin" ]; then
-      if [ "$(get_lang)" = "id" ]; then err "sentinel-sage.py tidak ditemukan di $sage_bin"; else err "sentinel-sage.py not found at $sage_bin"; fi
-      exit 1
-    fi
-    py_bin="/www/server/panel/pyenv/bin/python3"
-    [ ! -x "$py_bin" ] && py_bin="python3"
-    "$py_bin" "$sage_bin" scan "$target"
+    if [ "$(get_lang)" = "id" ]; then err "SAGE AI Safety membutuhkan paket Max (av_engines)"; else err "SAGE AI Safety requires the Max plan (av_engines)"; fi
+    exit 1
     ;;
 
   logs)
@@ -361,6 +390,7 @@ pakai: guardctl <perintah>
   unreview <ip>     lepas dari antrian review tanpa memblokir
   allow <ip>        whitelist permanen (bertahan setelah restart)
   rescan            paksa penemuan ulang daftar access log sekarang juga
+  learnload         muat ulang pelajaran dari keputusan operator (learned.tsv)
   flush             paksa penulisan statistik ke database
   panic-on          blokir seluruh akses web (port web saja, SSH tetap aman)
   panic-off         cabut blokir panic
@@ -384,6 +414,7 @@ Usage: guardctl <command>
   unreview <ip>     remove IP from review queue without banning
   allow <ip>        permanent whitelist (persists across restarts)
   rescan            force redetection of access log files now
+  learnload         reload lessons learned from operator decisions (learned.tsv)
   flush             flush statistics to database
   panic-on          emergency lockdown web access (SSH remains accessible)
   panic-off         disable panic lockdown
