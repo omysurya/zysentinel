@@ -66,7 +66,7 @@ sentinel_main.py  ── Controller: reads state, validates inputs, lifecycle ma
 ### Method 1: aaPanel App Store (Recommended GUI) / Metode App Store
 
 #### English:
-1. **Download Release:** Download `zysentinel-v1.6.2.zip` (or `sentinel.zip`) from [GitHub Releases](https://github.com/omysurya/zysentinel/releases/latest).
+1. **Download Release:** Download `zysentinel-v1.6.3.zip` (or `sentinel.zip`) from [GitHub Releases](https://github.com/omysurya/zysentinel/releases/latest).
 2. **Access aaPanel:** Log in to your aaPanel dashboard (`https://<YOUR-SERVER-IP>:<PANEL-PORT>/`).
 3. **Open App Store:** Navigate to **App Store** on the left menu.
 4. **Import Plugin:** Click **Import third-party plugin** (or **Import plugin**) located at the top-right corner.
@@ -75,7 +75,7 @@ sentinel_main.py  ── Controller: reads state, validates inputs, lifecycle ma
 7. **Launch Dashboard:** Click on **ZySentinel** in the App Store to open the centralized security monitoring dashboard.
 
 #### Bahasa Indonesia:
-1. **Unduh Paket Rilis:** Unduh berkas `zysentinel-v1.6.2.zip` (atau `sentinel.zip`) dari [GitHub Releases](https://github.com/omysurya/zysentinel/releases/latest).
+1. **Unduh Paket Rilis:** Unduh berkas `zysentinel-v1.6.3.zip` (atau `sentinel.zip`) dari [GitHub Releases](https://github.com/omysurya/zysentinel/releases/latest).
 2. **Buka aaPanel:** Masuk ke dasbor web aaPanel Anda (`https://<IP-SERVER>:<PORT-PANEL>/`).
 3. **Buka App Store:** Klik menu **App Store** pada bilah navigasi sebelah kiri.
 4. **Impor Plugin:** Klik tombol **Import third-party plugin** (atau **Import plugin**) di kanan atas.
@@ -92,8 +92,8 @@ sentinel_main.py  ── Controller: reads state, validates inputs, lifecycle ma
 # 1. Pastikan direktori plugin panel tersedia / Ensure plugin directory exists
 mkdir -p /www/server/panel/plugin
 
-# 2. Clone repositori resmi / Clone official repository (branch v1.6.2)
-git clone -b v1.6.2 https://github.com/omysurya/zysentinel.git /www/server/panel/plugin/sentinel
+# 2. Clone repositori resmi / Clone official repository (branch v1.6.3)
+git clone -b v1.6.3 https://github.com/omysurya/zysentinel.git /www/server/panel/plugin/sentinel
 
 # 3. Jalankan skrip instalasi / Execute installation script
 cd /www/server/panel/plugin/sentinel
@@ -107,7 +107,7 @@ bash /www/server/sentinel/bin/sentinel-fw.sh status
 #### B. Install via GitHub Release Archive (ZIP):
 ```bash
 # 1. Unduh rilis zip resmi dari GitHub / Download official release zip from GitHub
-curl -fsSL -o /tmp/sentinel.zip https://github.com/omysurya/zysentinel/releases/download/v1.6.2/zysentinel-v1.6.2.zip
+curl -fsSL -o /tmp/sentinel.zip https://github.com/omysurya/zysentinel/releases/download/v1.6.3/zysentinel-v1.6.3.zip
 
 # 2. Ekstrak ke folder plugin / Extract to plugin directory
 mkdir -p /www/server/panel/plugin
@@ -123,11 +123,11 @@ bash install.sh install
 ## Lifecycle Management & Updates / Pemeliharaan & Pembaruan
 
 ### 1. Automatic Updates from GitHub / Pembaruan Otomatis dari GitHub
-- **Via Web UI:** In the ZySentinel header, click the version badge `v1.6.2` or go to **Settings ➔ Maintenance**, click **Check GitHub Update**, and apply the update directly with one click.
+- **Via Web UI:** In the ZySentinel header, click the version badge `v1.6.3` or go to **Settings ➔ Maintenance**, click **Check GitHub Update**, and apply the update directly with one click.
 - **Via Terminal (CLI):**
   ```bash
   cd /www/server/panel/plugin/sentinel
-  git pull origin v1.6.2
+  git pull origin v1.6.3
   bash install.sh update
   ```
   *Idempotent Update: Updates binaries and scripts without overwriting custom operator configs (`guardd.conf`, `ports.json`, `proc_whitelist.json`, notification tokens, or audit logs).*

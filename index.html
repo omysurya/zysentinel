@@ -407,7 +407,7 @@ button.sn-tile{font-size:13px}
 			<h2>
 				<div class="sn-brand">
 					<div class="sn-brand-icon" data-i18n-title="tip_brand_logo" title="ZySentinel Cyber Defense">
-						<img src="/static/img/soft_ico/ico-sentinel.png?v=1.6.2" alt="ZySentinel" width="34" height="34" onerror="this.style.display='none';this.nextElementSibling.style.display='block';">
+						<img src="/static/img/soft_ico/ico-sentinel.png?v=1.6.3" alt="ZySentinel" width="34" height="34" onerror="this.style.display='none';this.nextElementSibling.style.display='block';">
 						<svg viewBox="0 0 24 24" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none">
 							<path d="M12 2L3 7v6c0 5.55 3.84 10.74 9 12 5.16-1.26 9-6.45 9-12V7l-9-5z"/>
 							<path d="M12 8v8"/>
@@ -416,13 +416,13 @@ button.sn-tile{font-size:13px}
 					</div>
 					<div class="sn-brand-text">
 						<div class="sn-brand-title">ZYSENS<span class="sn-accent">_</span></div>
-						<div class="sn-brand-sub">ZYSENTINEL v1.6.2</div>
+						<div class="sn-brand-sub">ZYSENTINEL v1.6.3</div>
 					</div>
 				</div>
 			</h2>
 			<span style="flex:1"></span>
 			<span id="snPlanBadge" class="sn-badge sn-planpill p-free" style="cursor:pointer;display:none" onclick="snUpgradeDialog({})" title="Plan">FREE</span>
-			<span id="snVerBadge" class="sn-badge" style="background:rgba(0,240,255,0.08);color:var(--accent-cyan);border:1px solid var(--border-cyan);cursor:pointer" onclick="snBukaMaintenance('update')" data-i18n-title="tip_ver_info" title="Version Information & Updates">v1.6.2</span>
+			<span id="snVerBadge" class="sn-badge" style="background:rgba(0,240,255,0.08);color:var(--accent-cyan);border:1px solid var(--border-cyan);cursor:pointer" onclick="snBukaMaintenance('update')" data-i18n-title="tip_ver_info" title="Version Information & Updates">v1.6.3</span>
 			<button id="btnHeaderMaint" class="sn-btn sn-sm" onclick="snBukaMaintenance()" style="background:rgba(16,185,129,0.1);color:var(--accent-green);border:1px solid var(--border-accent);font-weight:600" data-i18n="btn_maintenance" data-i18n-title="tip_maintenance" title="Open Maintenance, Updates & Diagnostics">⚙️ Maintenance</button>
 			<span class="sn-mclose" onclick="snTutup()" data-i18n-title="tip_close" title="Close ZySentinel Dashboard">✕</span>
 		</div>
@@ -1641,7 +1641,7 @@ button.sn-tile{font-size:13px}
 									Memeriksa rilis terbaru dari repository resmi GitHub (<span class="sn-mono">omysurya/zysentinel</span>). Melakukan patch versi dan pembaruan biner tanpa menghapus data atau konfigurasi Anda.
 								</p>
 								<div style="display:flex;align-items:center;justify-content:space-between;margin-top:auto">
-									<span id="snUpdStatusTxt" style="font-size:11.5px;color:var(--ink-3)">Versi: v1.6.2</span>
+									<span id="snUpdStatusTxt" style="font-size:11.5px;color:var(--ink-3)">Versi: v1.6.3</span>
 									<button class="sn-btn pri" onclick="snCheckUpdate()" data-i18n="btn_check_update" data-i18n-title="tip_check_update" title="Periksa dan Pasang Pembaruan dari Repository GitHub Resmi">Cek & Update</button>
 								</div>
 							</div>
@@ -1710,7 +1710,7 @@ button.sn-tile{font-size:13px}
 
 <script>
 /* Versi plugin: SATU-SATUNYA literal versi di skrip, ditanam _client/versi.py dari nama cabang rilis (release/vX.Y.Z) */
-var SN_VERSI = '1.6.2';
+var SN_VERSI = '1.6.3';
 
 /* Sanitasi otomatis untuk menghapus event handler usang atau tidak valid pada document */
 function snSanitizeEvents(){
