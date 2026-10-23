@@ -1,0 +1,18 @@
+name: Pemeriksaan edisi Free (I1)
+
+# Repositori publik ini adalah edisi FREE. Fitur berbayar (Pro/Max) tidak boleh diimplementasikan di sini:
+# setiap push dan pull request diperiksa .github/i1_check.py (dibangkitkan dari sumber edisi; jangan disunting manual).
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  i1:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tidak ada berkas/rujukan fitur berbayar, sintaks Python dan shell sah
+        run: python3 .github/i1_check.py .

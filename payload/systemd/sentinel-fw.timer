@@ -1,6 +1,6 @@
 [Unit]
 Description=Sentinel pasang ulang aturan firewall secara berkala
-Documentation=file:/www/docs/2026-10-02-fitur-sentinel-monitoring-firewall.md
+Documentation=https://github.com/omysurya/zysentinel
 
 [Timer]
 # Setiap 5 menit, dihitung dari kalender, bukan dari aktivitas unit.

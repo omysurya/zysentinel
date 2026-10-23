@@ -1,6 +1,6 @@
 [Unit]
 Description=Sentinel guardd (monitoring dan klasifikasi serangan)
-Documentation=file:/www/docs/2026-10-02-fitur-sentinel-monitoring-firewall.md
+Documentation=https://github.com/omysurya/zysentinel
 After=network-online.target
 Wants=network-online.target
 

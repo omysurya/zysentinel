@@ -163,6 +163,24 @@
 .sn-defcon-badge{font-family:var(--mono-font);font-size:14px;font-weight:800;letter-spacing:1.5px;padding:6px 14px;border-radius:6px;background:rgba(3,7,18,0.7);color:#fff;border:1px solid var(--border-accent);box-shadow:var(--accent-green-glow)}
 
 /* ---- Sub-Tab Dalam ---- */
+/* Lencana paket (Pro | Max): menu dan tombol tetap tampil, yang belum termasuk paket aktif diberi lencana */
+.sn-plan{display:inline-flex;align-items:center;gap:3px;margin-left:6px;padding:0 6px;border-radius:9px;font-family:var(--mono-font);font-size:9.5px;font-weight:800;letter-spacing:.6px;line-height:16px;vertical-align:middle;border:1px solid;cursor:pointer;text-transform:uppercase}
+.sn-plan::before{content:"\2726";font-size:9px}
+.sn-plan-pro{color:#38bdf8;background:rgba(56,189,248,.12);border-color:rgba(56,189,248,.5)}
+.sn-plan-max{color:#f59e0b;background:rgba(245,158,11,.12);border-color:rgba(245,158,11,.55)}
+.sn-plan:hover{filter:brightness(1.25)}
+/* Edisi Free: fitur berbayar tampil berlencana SOON dan tidak dapat diklik/dipilih (penegakan tetap di server dan daemon) */
+.sn-plan-soon{color:#a78bfa;background:rgba(167,139,250,.12);border-color:rgba(167,139,250,.5);cursor:default}
+.sn-plan-soon::before{content:"\23F3"}
+.sn-soon{pointer-events:none!important;opacity:.55;cursor:not-allowed!important;user-select:none}
+.sn-planpill{font-weight:800;letter-spacing:.8px}
+.sn-planpill.p-free{background:rgba(148,163,184,.12);color:#94a3b8;border:1px solid rgba(148,163,184,.4)}
+.sn-planpill.p-pro{background:rgba(56,189,248,.12);color:#38bdf8;border:1px solid rgba(56,189,248,.5)}
+.sn-planpill.p-max{background:rgba(245,158,11,.12);color:#f59e0b;border:1px solid rgba(245,158,11,.55)}
+.sn-planpill.p-dev{background:rgba(16,185,129,.12);color:#10b981;border:1px solid rgba(16,185,129,.45)}
+.sn-upg td,.sn-upg th{padding:5px 8px;font-size:12px;border-bottom:1px solid rgba(255,255,255,.06);text-align:center}
+.sn-upg td:first-child,.sn-upg th:first-child{text-align:left}
+.sn-upg .cur{background:rgba(0,240,255,.07)}
 .sn-tabs{padding:0 0 10px;border-bottom:1px solid var(--border-subtle);display:flex;gap:4px;flex-wrap:wrap}
 .sn-tabs span{display:inline-block;padding:7px 13px;cursor:pointer;font-family:var(--mono-font);font-size:12.5px;
   color:var(--text-muted);border-radius:var(--radius-sm);font-weight:600;
@@ -403,6 +421,7 @@ button.sn-tile{font-size:13px}
 				</div>
 			</h2>
 			<span style="flex:1"></span>
+			<span id="snPlanBadge" class="sn-badge sn-planpill p-free" style="cursor:pointer;display:none" onclick="snUpgradeDialog({})" title="Plan">FREE</span>
 			<span id="snVerBadge" class="sn-badge" style="background:rgba(0,240,255,0.08);color:var(--accent-cyan);border:1px solid var(--border-cyan);cursor:pointer" onclick="snBukaMaintenance('update')" data-i18n-title="tip_ver_info" title="Version Information & Updates">v1.6.2</span>
 			<button id="btnHeaderMaint" class="sn-btn sn-sm" onclick="snBukaMaintenance()" style="background:rgba(16,185,129,0.1);color:var(--accent-green);border:1px solid var(--border-accent);font-weight:600" data-i18n="btn_maintenance" data-i18n-title="tip_maintenance" title="Open Maintenance, Updates & Diagnostics">⚙️ Maintenance</button>
 			<span class="sn-mclose" onclick="snTutup()" data-i18n-title="tip_close" title="Close ZySentinel Dashboard">✕</span>
@@ -1690,6 +1709,9 @@ button.sn-tile{font-size:13px}
 </div>
 
 <script>
+/* Versi plugin: SATU-SATUNYA literal versi di skrip, ditanam _client/versi.py dari nama cabang rilis (release/vX.Y.Z) */
+var SN_VERSI = '1.6.2';
+
 /* Sanitasi otomatis untuk menghapus event handler usang atau tidak valid pada document */
 function snSanitizeEvents(){
 	try {
@@ -1994,7 +2016,7 @@ var SN_I18N = {
 		tip_refresh_packet_counters: "Refresh Packet Counters",
 		tip_mode_monitor_only: "Switch Mode to Monitor: Log Without Blocking",
 		tip_mode_enable_blocking: "Switch Mode to Enforce: Block Violators in Kernel",
-		brand_sub: "ZYSENTINEL v1.6.2",
+		brand_sub: "ZYSENTINEL v" + SN_VERSI,
 		btn_maintenance: "⚙️ Maintenance",
 		btn_feedback: "💬 Feedback",
 		tab_dashboard: "Dashboard",
@@ -2649,7 +2671,7 @@ var SN_I18N = {
 		tip_refresh_packet_counters: "Segarkan Penghitung Paket",
 		tip_mode_monitor_only: "Alihkan Mode ke Monitor: Mencatat Tanpa Memblokir",
 		tip_mode_enable_blocking: "Alihkan Mode ke Enforce: Blokir Pelanggar di Kernel",
-		brand_sub: "ZYSENTINEL v1.6.2",
+		brand_sub: "ZYSENTINEL v" + SN_VERSI,
 		btn_maintenance: "⚙️ Pemeliharaan",
 		btn_feedback: "💬 Feedback",
 		tab_dashboard: "Dashboard",
@@ -3352,7 +3374,7 @@ function snInjectGtm(){
 		}
 		try {
 			window.gtag('event', 'sentinel_active', {
-				'app_version': '1.6.2',
+				'app_version': SN_VERSI,
 				'server_host': window.location.hostname || 'unknown-ip'
 			});
 		} catch(e){}
@@ -3370,11 +3392,11 @@ function snEsc(s){
 		.replace(/'/g, '&#39;');
 }
 
-/* Format versi ZySentinel agar konsisten dengan standar branch/tag 'v1.6.2' */
+/* Format versi ZySentinel agar konsisten dengan standar branch/tag 'vX.Y.Z'; kosong/versi bawaan lama = versi plugin */
 function snFmtVer(v){
-	if(!v || v === '-' || v === 'undefined') return 'v1.6.2';
+	if(!v || v === '-' || v === 'undefined') return 'v' + SN_VERSI;
 	var s = String(v).trim();
-	if(s === '1.0.0' || s === '1.6' || s === '1.6.0') return 'v1.6.2';
+	if(s === '1.0.0' || s === '1.6' || s === '1.6.0') return 'v' + SN_VERSI;
 	return (s.charAt(0).toLowerCase() === 'v') ? s : ('v' + s);
 }
 
@@ -3701,6 +3723,8 @@ function snAjax(method, data, cb, pIdx, btnEl, isSilent){
 			cb(null);
 			return;
 		}
+		/* fitur di luar paket aktif / batas paket terlampaui: tawarkan Upgrade, bukan galat generik */
+		if(r && r.upgrade && !isSilent){ try{ snUpgradeDialog(r.upgrade, msg); }catch(e){} cb(null); return; }
 		/* penolakan dari server: pengguna harus tahu alasannya */
 		if(isUserAction){
 			snGalatTampil({judul: isEn ? 'Request was refused' : 'Permintaan ditolak oleh server',
@@ -3739,7 +3763,7 @@ function snAjax(method, data, cb, pIdx, btnEl, isSilent){
 		for(var i = 0; i < daftar.length; i++){ try{ daftar[i][fn](a, b2); }catch(e){} }
 	};
 
-	$.ajax({
+	var xhrSenyap = $.ajax({
 		url: '/plugin?action=a&name=sentinel&s=' + method,
 		type: 'POST',
 		headers: headers,
@@ -3757,10 +3781,68 @@ function snAjax(method, data, cb, pIdx, btnEl, isSilent){
 		},
 		error: function(xhr, status){
 			doneCleanup();
+			if(xhr && xhr.__snBatal){ return; }     /* dibatalkan karena dialog terbuka: bukan galat, tidak ditampilkan */
 			selesaiGalat(xhr, status);
 			bagi('err', xhr, status);
 		}
 	});
+	/* Permintaan SENYAP (penyegaran otomatis) dilacak supaya bisa dibatalkan saat dialog terbuka. Yang digabung dengan
+	   permintaan pengguna (ada penunggu di SN_INFLIGHT) tidak pernah dibatalkan. */
+	if(isSilent && xhrSenyap && typeof xhrSenyap.abort === 'function'){
+		xhrSenyap.__snKunci = kunci;
+		SN_SILENT_XHR.push(xhrSenyap);
+		var lepas = function(){ var i = SN_SILENT_XHR.indexOf(xhrSenyap); if(i >= 0) SN_SILENT_XHR.splice(i, 1); };
+		if(typeof xhrSenyap.always === 'function'){ xhrSenyap.always(lepas); }
+	}
+}
+
+/* ---------- jeda pemantau latar selama dialog terbuka ---------- */
+/* Selama ada dialog (layer.open/confirm/alert, bukan toast layer.msg atau pemuat) di atas dasbor: penyegaran otomatis
+   tidak menembak permintaan baru dan permintaan senyap yang sedang berjalan dibatalkan, supaya dialog tidak patah-patah.
+   Begitu dialog terakhir ditutup, satu putaran penyegaran dijalankan lagi. */
+var SN_SILENT_XHR = [];
+var SN_LATAR_ANTRE = [];
+var SN_DLG_TERBUKA = false;
+/* Tugas latar sekali jalan (mis. telemetri 4 dtk setelah dibuka): bila dialog terbuka, ditunda sampai tertutup. */
+function snLatar(fn){
+	if(snDialogTerbuka()){ SN_DLG_TERBUKA = true; if(SN_LATAR_ANTRE.indexOf(fn) < 0){ SN_LATAR_ANTRE.push(fn); } return; }
+	fn();
+}
+var SN_DLG_OBS = null;
+function snDialogTerbuka(){
+	var els = document.querySelectorAll('.layui-layer');
+	for(var i = 0; i < els.length; i++){
+		if(/layui-layer-(msg|loading|tips)(\s|$)/.test(els[i].className)) continue;
+		if(els[i].style.display === 'none') continue;
+		return true;
+	}
+	return false;
+}
+function snBatalSenyap(){
+	var a = SN_SILENT_XHR.slice();
+	SN_SILENT_XHR.length = 0;
+	for(var i = 0; i < a.length; i++){
+		var x = a[i];
+		if(x.__snKunci && SN_INFLIGHT[x.__snKunci] && SN_INFLIGHT[x.__snKunci].length){ continue; }   /* ada penunggu: biarkan selesai */
+		x.__snBatal = true;
+		if(x.__snKunci){ delete SN_INFLIGHT[x.__snKunci]; }
+		try{ x.abort(); }catch(e){}
+	}
+}
+function snPantauDialog(){
+	if(SN_DLG_OBS || typeof MutationObserver === 'undefined' || !document.body) return;
+	SN_DLG_OBS = new MutationObserver(function(){
+		var t = snDialogTerbuka();
+		if(t === SN_DLG_TERBUKA) return;
+		SN_DLG_TERBUKA = t;
+		if(t){ snBatalSenyap(); }
+		else {
+			var antre = SN_LATAR_ANTRE.splice(0);
+			for(var i = 0; i < antre.length; i++){ try{ antre[i](); }catch(e){} }
+			if(SN_TIMER){ snAutoTick(); }       /* dialog terakhir ditutup: lanjutkan penyegaran sekarang */
+		}
+	});
+	SN_DLG_OBS.observe(document.body, {childList: true});
 }
 
 /* ---------- Sistem Auto-Refresh Fleksibel & Terkendali Pengguna ---------- */
@@ -3798,7 +3880,11 @@ function snStartAutoRefresh(sec){
 	sec = sec || SN_AUTO_REFRESH_SEC;
 	if(!sec || sec <= 0) return;
 
-	SN_TIMER = setInterval(function(){
+	SN_TIMER = setInterval(snAutoTick, sec * 1000);
+}
+
+function snAutoTick(){
+	{
 		var m = document.getElementById('snModal');
 		if(!m || !document.body.contains(m)){
 			if(SN_TIMER){ clearInterval(SN_TIMER); SN_TIMER = null; }
@@ -3808,6 +3894,8 @@ function snStartAutoRefresh(sec){
 			if(SN_TIMER){ clearInterval(SN_TIMER); SN_TIMER = null; }
 			return;
 		}
+		/* Dialog terbuka: jeda (tidak ada permintaan latar sampai dialog ditutup) */
+		if(snDialogTerbuka()){ SN_DLG_TERBUKA = true; return; }
 
 		// Animasi halus pada ikon auto-refresh sebagai indikator visual
 		var ico = $('#icoAutoRefresh');
@@ -3842,7 +3930,7 @@ function snStartAutoRefresh(sec){
 		else if($('#top-waf').hasClass('on')){
 			snWafMuat(null, true);
 		}
-	}, sec * 1000);
+	}
 }
 
 /* ---------- kerangka dialog ---------- */
@@ -3856,8 +3944,10 @@ function snBuka(){
 	document.body.style.overflow = 'hidden';
 	/* Mulai timer auto-refresh sesuai preferensi pengguna (default: 0 = manual/off) */
 	snInitAutoRefresh();
+	snPantauDialog();
 	/* Pemuatan awal instan dan bersih: HANYA muat data dashboard aktif */
 	setTimeout(function(){
+		snLicMuat();       /* paket aktif: lencana Pro | Max pada menu dan tombol */
 		snStatus();        /* statistik utama & lencana status ribbon instan */
 		snBans();          /* tabel IP yang diblokir pada tab dashboard */
 		snPanicMuat();     /* kondisi tombol panik */
@@ -3867,7 +3957,7 @@ function snBuka(){
 		}, 250);
 		/* Telemetri (skrip pihak ketiga) ditunda sampai tampilan selesai
 		   dan peramban menganggur; bukan bagian dari render awal. */
-		setTimeout(function(){ if($('#snModal').hasClass('on')){ snInitTelemetry(); } }, 4000);
+		setTimeout(function(){ if($('#snModal').hasClass('on')){ snLatar(snInitTelemetry); } }, 4000);
 	}, 30);
 }
 function snTutupLapis(){
@@ -4202,6 +4292,70 @@ function snEliteLoad(btn, isSilent){
 	}, null, btn, isSilent);
 }
 
+/* ---------- PHP2Shell (CVE-2026-109618 / 109619): paparan versi PHP, mitigasi, pemindai memori ---------- */
+var SN_PHP_DIALOG = null;
+function snPhpHtml(d){
+	var isEn = (SN_LANG !== 'id');
+	var v = d.versi || [], h = '';
+	var st = {rentan: [isEn ? 'VULNERABLE' : 'RENTAN', 'sn-bad'], tanpa_perbaikan: [isEn ? 'NO OFFICIAL FIX' : 'TANPA PERBAIKAN RESMI', 'sn-bad'], diperbaiki: [isEn ? 'FIXED' : 'SUDAH DIPERBAIKI', 'sn-ok']};
+	h += '<div class="sn-note" style="margin-bottom:10px;font-size:12px">' + (isEn
+		? 'Two PHP flaws (CVE-2026-109618, CVE-2026-109619, patched 21 Oct 2026) allow memory corruption in PHP workers. <b>Upgrading PHP is the only complete fix.</b> Turning off <code>session.upload_progress</code> only closes one path. ZySentinel adds a safety net: it logs, and optionally kills, worker behaviour typical after exploitation.'
+		: 'Dua kerentanan PHP (CVE-2026-109618, CVE-2026-109619, diperbaiki 21 Okt 2026) memungkinkan korupsi memori pada worker PHP. <b>Memperbarui PHP adalah satu-satunya perbaikan lengkap.</b> Mematikan <code>session.upload_progress</code> hanya menutup satu jalur. ZySentinel menambah jaring pengaman: mencatat, dan bila diaktifkan mematikan, perilaku worker yang khas setelah eksploitasi.') + '</div>';
+	h += '<table class="sn-tb"><thead><tr><th>PHP</th><th>' + (isEn ? 'Version' : 'Versi') + '</th><th>Status</th><th>' + (isEn ? 'Fixed in' : 'Perbaikan di') + '</th><th>upload_progress</th><th>pearcmd.php</th><th></th></tr></thead><tbody>';
+	for(var i = 0; i < v.length; i++){
+		var x = v[i], s = st[x.status] || [x.status, 'sn-bad'];
+		h += '<tr><td class="sn-mono">' + snEsc(x.dir) + '</td><td class="sn-mono">' + snEsc(x.versi) + '</td>'
+			+ '<td><span class="sn-badge ' + s[1] + '">' + snEsc(s[0]) + '</span></td><td class="sn-mono">' + snEsc(x.perbaikan) + '</td>'
+			+ '<td>' + (x.upload_progress ? '<span class="sn-badge sn-bad">' + (isEn ? 'ON' : 'AKTIF') + '</span>' : '<span class="sn-badge sn-ok">OFF</span>') + '</td>'
+			+ '<td>' + (x.pearcmd ? (isEn ? 'present' : 'ada') : '-') + '</td>'
+			+ '<td>' + (x.upload_progress ? '<button class="sn-btn" onclick="snPhpMatikan(\'' + snEsc(x.dir) + '\')">' + (isEn ? 'Turn off upload_progress' : 'Matikan upload_progress') + '</button>' : '') + '</td></tr>';
+	}
+	if(!v.length){ h += '<tr><td colspan="7" class="sn-empty">' + (isEn ? 'No PHP version found under /www/server/php' : 'Tidak ada versi PHP di /www/server/php') + '</td></tr>'; }
+	h += '</tbody></table>';
+	var m = d.memscan || {};
+	h += '<div style="font-weight:600;margin:14px 0 6px">' + (isEn ? 'Worker memory scanner (sentinel-memscan)' : 'Pemindai memori worker (sentinel-memscan)') + '</div>'
+		+ '<table class="sn-tb"><tbody>'
+		+ '<tr><td>' + (isEn ? 'Binary installed' : 'Biner terpasang') + '</td><td>' + (m.terpasang ? '<span class="sn-badge sn-ok">OK</span>' : '<span class="sn-badge sn-bad">' + (isEn ? 'MISSING (reinstall the plugin)' : 'TIDAK ADA (pasang ulang plugin)') + '</span>') + '</td><td></td></tr>'
+		+ '<tr><td>' + (isEn ? 'Scanning (every ' + snEsc(m.interval || '30') + ' s)' : 'Pemindaian (tiap ' + snEsc(m.interval || '30') + ' dtk)') + '</td><td>' + (m.aktif ? 'ON' : 'OFF') + '</td>'
+		+ '<td><button class="sn-btn" onclick="snMemscanSet(\'memscan\',\'' + (m.aktif ? 'off' : 'on') + '\')">' + (m.aktif ? (isEn ? 'Turn off' : 'Matikan') : (isEn ? 'Turn on' : 'Aktifkan')) + '</button></td></tr>'
+		+ '<tr><td>' + (isEn ? 'Kill the process on a high-confidence finding: memfd, /dev/shm, in-memory ELF (needs Process Guard = ENFORCE)' : 'Bunuh proses pada temuan berkeyakinan tinggi: memfd, /dev/shm, ELF di memori (butuh Process Guard = ENFORCE)') + '</td><td>' + (m.kill ? (m.kill_mode === 'on' ? (isEn ? 'ON (incl. deleted libraries)' : 'ON (termasuk pustaka terhapus)') : 'ON') : (isEn ? 'OFF (audit only)' : 'OFF (hanya audit)')) + '</td>'
+		+ '<td><button class="sn-btn" onclick="snMemscanSet(\'memscan_kill\',\'' + (m.kill ? 'off' : 'tinggi') + '\')">' + (m.kill ? (isEn ? 'Audit only' : 'Hanya audit') : (isEn ? 'Enable kill' : 'Aktifkan bunuh')) + '</button></td></tr>'
+		+ '<tr><td colspan="3" style="font-size:11.5px;color:var(--ink-2)">' + (isEn ? 'Scanned: PHP workers, Node.js, Python, Ruby, Java, Deno, Bun, .NET, and any non-root process listening on TCP (Go/Rust servers). A worker that starts a child process is scanned immediately.' : 'Dipindai: worker PHP, Node.js, Python, Ruby, Java, Deno, Bun, .NET, dan proses non-root apa pun yang listen TCP (server Go/Rust). Worker yang menjalankan proses anak dipindai seketika.') + '</td></tr>'
+		+ '</tbody></table>';
+	h += '<div class="sn-note" style="margin-top:10px;font-size:11.5px">' + (isEn
+		? 'Also: update PHP via aaPanel, set <code>fatal_error_backtraces=0</code> on PHP 8.5, remove or block <code>pearcmd.php</code>, never expose php-fpm to the network. Findings appear in Elite Defence &rarr; EDR as MEM_*, WORKER_* and PTRACE_WEB.'
+		: 'Juga: perbarui PHP lewat aaPanel, setel <code>fatal_error_backtraces=0</code> di PHP 8.5, hapus atau blokir <code>pearcmd.php</code>, jangan buka php-fpm ke jaringan. Temuan tampil di Elite Defence &rarr; EDR sebagai MEM_*, WORKER_*, dan PTRACE_WEB.') + '</div>';
+	return h;
+}
+function snPhpDetail(){
+	var isEn = (SN_LANG !== 'id');
+	snAjax('get_php_exposure', {}, function(d){
+		if(!d) return;
+		if(SN_PHP_DIALOG !== null){ try{ layer.close(SN_PHP_DIALOG); }catch(e){} }
+		/* isi sudah ada saat dibuka, tinggi kosong (lihat snDefconDetail) */
+		SN_PHP_DIALOG = layer.open({type: 1, title: isEn ? 'PHP2Shell Exposure (CVE-2026-109618 / 109619)' : 'Paparan PHP2Shell (CVE-2026-109618 / 109619)', area: ['860px', ''],
+			maxHeight: Math.floor(window.innerHeight * 0.9), shadeClose: true, content: '<div style="padding:14px 16px" id="phpBody">' + snPhpHtml(d) + '</div>',
+			btn: [isEn ? 'Close' : 'Tutup'], end: function(){ SN_PHP_DIALOG = null; }});
+	});
+}
+function snPhpMatikan(dir){
+	var isEn = (SN_LANG !== 'id');
+	layer.confirm(isEn ? ('Set session.upload_progress.enabled = Off on PHP ' + dir + '? A php.ini backup is made, php-fpm is syntax-checked and reloaded gracefully, and the change is verified.')
+		: ('Setel session.upload_progress.enabled = Off pada PHP ' + dir + '? Dibuat cadangan php.ini, php-fpm diuji sintaksis lalu di-reload halus, dan perubahan diverifikasi.'),
+		{title: 'PHP ' + dir, btn: isEn ? ['Confirm', 'Cancel'] : ['Konfirmasi', 'Batal']}, function(idx){
+		layer.close(idx);
+		var pIdx = snProgress(isEn ? 'Updating php.ini and reloading php-fpm...' : 'Memperbarui php.ini dan reload php-fpm...');
+		snAjax('set_php_mitigation', {version: dir}, function(msg){
+			if(!msg){ return; }      /* ditolak server: snAjax sudah menampilkan alasannya dan memanggil cb(null) */
+			layer.msg(msg, {time: 6000});
+			snPhpDetail(); snEliteLoad(null, true);
+		}, pIdx);
+	});
+}
+function snMemscanSet(k, v){
+	snAjax('set_memscan', {key: k, value: v}, function(msg){ if(!msg){ return; } layer.msg(msg); snPhpDetail(); });
+}
+
 /* ---------- dialog DEFCON: indikator yang diukur + refresh berprogres ---------- */
 function snDefconNamaIndikator(k){
 	var isEn = (SN_LANG !== 'id');
@@ -4212,7 +4366,8 @@ function snDefconNamaIndikator(k){
 		persistensi: [isEn ? 'System persistence changes (cron, systemd, ld.so, profile.d, sudoers.d)' : 'Perubahan persistensi sistem (cron, systemd, ld.so, profile.d, sudoers.d)', '', ''],
 		egress: [isEn ? 'Egress Guard (anti reverse shell)' : 'Egress Guard (anti reverse shell)', isEn ? 'Active' : 'Aktif', isEn ? 'Inactive' : 'Nonaktif'],
 		proc_guard: [isEn ? 'Process Guard (EDR) service' : 'Layanan Process Guard (EDR)', isEn ? 'Running' : 'Berjalan', isEn ? 'Not running' : 'Tidak berjalan'],
-		intel: [isEn ? 'Global Threat Intel blocks (CIDR)' : 'Blok Global Threat Intel (CIDR)', '', isEn ? 'Empty' : 'Kosong']
+		intel: [isEn ? 'Global Threat Intel blocks (CIDR)' : 'Blok Global Threat Intel (CIDR)', '', isEn ? 'Empty' : 'Kosong'],
+		php_rentan: [isEn ? 'PHP versions without the PHP2Shell fix (info, does not change the level)' : 'Versi PHP tanpa perbaikan PHP2Shell (informasi, tidak mengubah level)', '', '']
 	};
 	return n[k] || [k, '', ''];
 }
@@ -4234,7 +4389,7 @@ function snDefconHtml(){
 		var nilai = (nm[1] && x.baik) ? nm[1] : ((nm[2] && !x.baik) ? nm[2] : String(Number(x.nilai) || 0));
 		h += '<tr><td>' + snEsc(nm[0]) + '</td><td class="r sn-mono">' + snEsc(nilai) + '</td>'
 			+ '<td>' + (x.baik ? '<span class="sn-badge sn-ok">OK</span>' : '<span class="sn-badge sn-bad">' + (isEn ? 'ATTENTION' : 'PERHATIAN') + '</span>') + '</td>'
-			+ '<td><span style="color:' + (SN_DEFCON_WARNA[x.level] || '#94a3b8') + '">DEFCON ' + x.level + '</span></td></tr>';
+			+ '<td><span style="color:' + (SN_DEFCON_WARNA[x.level] || '#94a3b8') + '">' + (x.level ? 'DEFCON ' + x.level : 'info') + '</span></td></tr>';
 	}
 	h += '</tbody></table>';
 	h += '<div class="sn-note" style="margin-top:10px;font-size:11.5px">' + (isEn
@@ -4625,14 +4780,17 @@ function snStats(s, m){
 		[isEn ? 'Lines Read' : 'Baris Terbaca', (s.lines || 0).toLocaleString(), g, '&#128196;'],
 		[isEn ? 'Memory' : 'Memori', (m ? m.rss_mb : '0') + ' MB', b, '&#128190;'],
 		['DEFCON', (p && p.defcon ? 'DEFCON ' + p.defcon : '...'), (p && SN_DEFCON_WARNA[p.defcon]) || b, '&#127919;', 'snDefconDetail()',
-			p && p.defcon ? snDefconTeks(p).judul + (isEn ? ' (click for details)' : ' (klik untuk rincian)') : '']
+			p && p.defcon ? snDefconTeks(p).judul + (isEn ? ' (click for details)' : ' (klik untuk rincian)') : '', 'snDefconCard'],
+		['PHP2Shell', (p && p.php_exposure ? (p.php_exposure.rentan > 0 ? p.php_exposure.rentan + (isEn ? ' vulnerable' : ' rentan') : (isEn ? 'Patched' : 'Aman')) : '...'),
+			(p && p.php_exposure ? (p.php_exposure.rentan > 0 ? '#f97316' : '#10b981') : b), '&#128737;', 'snPhpDetail()',
+			isEn ? 'PHP versions vs CVE-2026-109618/109619 (click for details)' : 'Versi PHP terhadap CVE-2026-109618/109619 (klik untuk rincian)', 'snPhpCard']
 	];
 	var h = '';
 	for(var i = 0; i < kartu.length; i++){
 		var val = kartu[i][1];
 		var valStr = String(val);
 		var fsize = (valStr.length > 12) ? 'font-size:13px;' : (valStr.length > 8 ? 'font-size:14.5px;' : 'font-size:16px;');
-		var klik = kartu[i][4] ? ' id="snDefconCard" role="button" tabindex="0" style="cursor:pointer" onclick="' + kartu[i][4] + '" title="' + snEsc(kartu[i][5] || '') + '"' : '';
+		var klik = kartu[i][4] ? ' id="' + (kartu[i][6] || '') + '" role="button" tabindex="0" style="cursor:pointer" onclick="' + kartu[i][4] + '" title="' + snEsc(kartu[i][5] || '') + '"' : '';
 		h += '<div class="sn-stat"' + klik + '><div class="ic" style="background:' + kartu[i][2] + '1a;border:1px solid ' + kartu[i][2] + '55;color:' + kartu[i][2] + '">' + kartu[i][3] + '</div>'
 			+ '<div class="tx"><div class="k" title="' + kartu[i][0] + '">' + kartu[i][0] + '</div>'
 			+ '<div class="v" style="' + fsize + (kartu[i][4] ? 'color:' + kartu[i][2] + ';' : '') + '" title="' + valStr + '">' + val + '</div></div></div>';
@@ -7204,7 +7362,226 @@ function snUploadScanServiceToggle(action){
 }
 
 /* Menyegarkan tampilan aktif setelah operasi panjang (pembaruan, pasang). */
+/* ===================== LISENSI / PAKET (Free, Pro, Max) =====================
+   Semua menu dan tombol fitur TETAP tampil. Yang belum termasuk paket aktif diberi lencana PRO atau MAX
+   (sesuai peta fitur dari get_license.needed). Mengklik tombolnya tidak menjalankan fitur: server menolak
+   dan snAjax membuka dialog Upgrade. Keputusan paket TIDAK diambil di sini (hanya tampilan); penegakan ada di
+   server panel dan daemon. Build pengembangan (mode "open") membuka semua fitur dan tidak memberi lencana. */
+var SN_LIC = null, SN_PLANS = null, SN_UPG = {cur: 'IDR', per: 'm', info: {}, msg: '', idx: null, order: ''};
+var SN_FEAT_LABEL = {
+	enforce: ['Pemblokiran otomatis', 'Automatic blocking'], learn: ['Learned Rules', 'Learned Rules'],
+	geo_ban: ['Blokir per negara', 'Country block'], threat_sync: ['Sinkron Threat Intel', 'Threat Intel sync'],
+	waf_full: ['WAF semua vhost + aturan ZySentinel', 'WAF all vhosts + ZySentinel rules'], waf_premium: ['Paket aturan WAF premium', 'Premium WAF rule pack'],
+	upload_scan: ['Upload Protection realtime', 'Realtime Upload Protection'], upload_gate: ['Gerbang fanotify strict', 'Strict fanotify gate'],
+	av_scheduled: ['Antivirus terjadwal', 'Scheduled antivirus'], av_engines: ['Engine judol, ransomware, mining, Sage AI', 'Judol, ransomware, mining, Sage AI engines'],
+	sweeper: ['Sweeper webshell', 'Webshell Sweeper'], sweeper_auto: ['Sweeper karantina otomatis + jadwal', 'Sweeper auto-quarantine + schedule'],
+	proc_enforce: ['Process Guard (enforce)', 'Process Guard (enforce)'], egress: ['Egress Guard', 'Egress Guard'],
+	integ_web: ['Integritas berkas web', 'Web file integrity'], notify: ['Notifikasi webhook', 'Webhook notifications'],
+	notify_multi: ['Notifikasi banyak endpoint', 'Multi-endpoint notifications'], selfheal: ['Pemulihan mandiri layanan', 'Service self-heal'],
+	ports_unlimited: ['Aturan port tak terbatas', 'Unlimited port rules'], fw_advanced: ['Anti-DDoS terkonfigurasi', 'Configurable anti-DDoS'],
+	thresholds: ['Ambang skor kustom', 'Custom score thresholds'], fw_global: ['Pengaman global kustom', 'Custom global safeguard'],
+	threat_feed: ['Feed reputasi ZySens', 'ZySens reputation feed'], memscan: ['Pemindai memori PHP2Shell', 'PHP2Shell memory scanner']
+};
+/* [pemilih CSS, fitur]. Menu dan tombol dicari lewat atribut onclick supaya penandaan tidak bergantung pada id. */
+var SN_LIC_MAP = [
+	['#tileBlock', 'enforce'],
+	['.sn-tabs span[onclick*="snSub(\'learned\'"]', 'learn'], ['[onclick*="snLearnedModal"]', 'learn'], ['[onclick*="snLearnedToggle"]', 'learn'],
+	['[onclick*="snGeoBanSimpan"]', 'geo_ban'], ['[onclick*="snFwrGeoOn"]', 'geo_ban'], ['[onclick*="snSyncIntel"]', 'threat_sync'],
+	['.sn-tabs span[onclick*="snWafTab(\'zy\'"]', 'waf_full'], ['[onclick*="snZyModul"]', 'waf_full'], ['[onclick*="snZySetting"]', 'waf_full'],
+	['[onclick*="snZyListAdd"]', 'waf_full'], ['[onclick*="snWafRule"]', 'waf_full'],
+	['.sn-tabs span[onclick*="snWafTab(\'upload\'"]', 'upload_scan'], ['[onclick*="snUploadVhostToggle"]', 'upload_scan'], ['[onclick*="snUploadScanServiceToggle"]', 'upload_scan'],
+	['[onclick*="snMulaiScanRealtime"]', 'av_scheduled'],
+	['.sn-tabs span[onclick*="snAvSub(\'sweeper\'"]', 'sweeper'], ['[onclick*="snSwStart"]', 'sweeper'], ['[onclick*="snSwCalibrate"]', 'sweeper'], ['[onclick*="snSwBuild"]', 'sweeper'],
+	['.sn-tabs span[onclick*="snAvSub(\'integ\'"]', 'integ_web'], ['[onclick*="snAvBaseline"]', 'integ_web'], ['[onclick*="snAvCheck"]', 'integ_web'],
+	['[onclick*="snToggleEgress"]', 'egress'], ['[onclick*="snToggleProc"]', 'proc_enforce'], ['[onclick*="snMemscanSet"]', 'memscan'],
+	['[onclick*="snQuickWhitelistModal"]', 'proc_enforce'], ['[onclick*="snProcWlDelete"]', 'proc_enforce'], ['[onclick*="snProcWlToggle"]', 'proc_enforce'],
+	['.sn-tabs span[onclick*="snSub(\'notif\'"]', 'notify'], ['[onclick*="snNotifUji"]', 'notify']
+];
+$.each(['watch_score', 'throttle_score', 'ban_score', 'weight_scan', 'weight_brute', 'weight_badua', 'weight_distinct', 'cap_scan', 'cap_brute',
+	'cap_badua', 'cap_distinct', 'ban_seconds', 'ban_seconds_max', 'max_ips'], function(_, k){ SN_LIC_MAP.push(['#c_' + k, 'thresholds']); });
+
+function snLicIzin(f){
+	if(!SN_LIC) return true;                              /* belum diketahui: jangan menandai apa pun */
+	if(SN_LIC.mode === 'open') return true;               /* build pengembangan: semua terbuka */
+	return $.inArray(f, SN_LIC.features || []) >= 0;
+}
+function snLicLabel(f){ var l = SN_FEAT_LABEL[f]; return l ? l[(SN_LANG === 'id') ? 0 : 1] : f; }
+function snEdisiFree(){ return !!(SN_LIC && SN_LIC.edition === 'free'); }
+/* Edisi Free (repositori publik): fitur berbayar belum tersedia di edisi ini. Lencana SOON, elemen dinonaktifkan
+   (tidak bisa diklik/dipilih), tanpa dialog Upgrade. Build Pro berlisensi Free tetap memakai lencana PRO/MAX + Upgrade. */
+function snLicSoon($e, form, f){
+	var isEn = (SN_LANG !== 'id'), tip = isEn ? (snLicLabel(f) + ': coming soon') : (snLicLabel(f) + ': segera hadir');
+	var $b = form ? $e.next('.sn-plan') : $e.children('.sn-plan');
+	if(!$b.length){
+		$b = $('<span data-lic-feat="' + f + '"></span>');
+		if(form) $e.after($b); else $e.append($b);
+	}
+	$b.off('click').attr('class', 'sn-plan sn-plan-soon').text('SOON').attr('title', tip);
+	if(form && !$e.prop('disabled')){ $e.data('snSoonDis', 1).prop('disabled', true); }   /* hanya yang kita nonaktifkan yang kelak diaktifkan lagi */
+	$e.addClass('sn-locked sn-soon').attr({'aria-disabled': 'true', 'title': tip});
+}
+function snLicLepasSoon($e, $b){
+	if($b && $b.hasClass('sn-plan-soon')) $b.remove();
+	if($e.data('snSoonDis')){ $e.prop('disabled', false).removeData('snSoonDis'); }
+	if($e.hasClass('sn-soon')) $e.removeClass('sn-soon').removeAttr('aria-disabled title');
+}
+function snLicTandai(){
+	if(!SN_LIC) return;
+	var isEn = (SN_LANG !== 'id'), free = snEdisiFree();
+	$.each(SN_LIC_MAP, function(_, m){
+		var $els; try{ $els = $(m[0]); }catch(e){ return; }
+		var f = m[1], ok = snLicIzin(f), need = ((SN_LIC.needed || {})[f] === 'max') ? 'max' : 'pro';
+		$els.each(function(){
+			var $e = $(this), form = $e.is('input,select,textarea');
+			var $b = form ? $e.next('.sn-plan') : $e.children('.sn-plan');
+			if(ok){ snLicLepasSoon($e, $b); $b.remove(); $e.removeClass('sn-locked'); return; }
+			if(free){ snLicSoon($e, form, f); return; }
+			snLicLepasSoon($e, $b); $b = form ? $e.next('.sn-plan') : $e.children('.sn-plan');
+			var tip = isEn ? ('Requires the ' + need.toUpperCase() + ' plan. Click to see plans.') : ('Butuh paket ' + need.toUpperCase() + '. Klik untuk melihat paket.');
+			if($b.length){ $b.attr('class', 'sn-plan sn-plan-' + need).text(need.toUpperCase()).attr('title', tip); return; }
+			$b = $('<span class="sn-plan sn-plan-' + need + '" data-lic-feat="' + f + '"></span>').text(need.toUpperCase()).attr('title', tip)
+				.on('click', function(ev){ ev.stopPropagation(); ev.preventDefault(); snUpgradeDialog({feature: f, plan: need, current: SN_LIC.plan}); });
+			if(form) $e.after($b); else $e.append($b);
+			$e.addClass('sn-locked');
+		});
+	});
+}
+function snLicHeader(){
+	var $b = $('#snPlanBadge');
+	if(!SN_LIC){ $b.hide(); return; }
+	var isEn = (SN_LANG !== 'id'), open = SN_LIC.mode === 'open', pl = open ? 'dev' : (SN_LIC.plan || 'free');
+	var tip = open ? (isEn ? 'Development build: all features unlocked' : 'Build pengembangan: semua fitur terbuka')
+		: (isEn ? 'Current plan: ' : 'Paket aktif: ') + pl.toUpperCase() + (SN_LIC.state === 'grace' ? (isEn ? ' (grace period, please renew)' : ' (masa tenggang, segera perpanjang)') : '') + (isEn ? '. Click for plans.' : '. Klik untuk melihat paket.');
+	$b.attr('class', 'sn-badge sn-planpill p-' + pl).text(open ? 'DEV' : pl.toUpperCase()).attr('title', tip).show();
+}
+function snLicMuat(cb){
+	snAjax('get_license', {}, function(d){
+		if(d && typeof d === 'object'){ SN_LIC = d; snLicHeader(); snLicTandai(); }
+		if(cb) cb(SN_LIC);
+	}, null, null, true);
+}
+(function(){   /* konten dirender belakangan (tabel, dialog): tandai ulang; idempoten sehingga tidak berputar */
+	var t = null;
+	function jadwal(){ if(t) return; t = setTimeout(function(){ t = null; try{ snLicTandai(); }catch(e){} }, 120); }
+	$(function(){
+		var root = document.querySelector('.sn-mbody') || document.body;
+		if(window.MutationObserver) new MutationObserver(jadwal).observe(root, {childList: true, subtree: true});
+	});
+})();
+
+function snUpgHarga(p, per){
+	var pr = ((SN_PLANS && SN_PLANS.plans && SN_PLANS.plans[p]) || {}).price || {}, v = pr[per];
+	if(v === undefined) return '-';
+	return (SN_UPG.cur === 'IDR') ? ('Rp ' + Number(v).toLocaleString('id-ID')) : ('$' + (v / 100).toFixed(2).replace(/\.00$/, ''));
+}
+function snUpgIsi(){
+	var isEn = (SN_LANG !== 'id'), L = SN_LIC || {}, cur = L.plan || 'free', info = SN_UPG.info || {};
+	var h = '<div id="snUpg" style="padding:14px 18px;max-height:76vh;overflow:auto">';
+	if(L.mode === 'open') h += '<div class="sn-note" style="margin-bottom:10px">' + (isEn ? 'Development build: every feature is unlocked, so there is nothing to buy here.' : 'Build pengembangan: semua fitur terbuka, tidak ada yang perlu dibeli di sini.') + '</div>';
+	if(SN_UPG.msg) h += '<div class="sn-note" style="margin-bottom:10px">' + snEscH(SN_UPG.msg) + '</div>';
+	else if(info.feature) h += '<div class="sn-note" style="margin-bottom:10px"><b>' + snEscH(snLicLabel(info.feature)) + '</b> ' + (isEn ? 'requires the ' : 'membutuhkan paket ') + '<b>' + String(info.plan || 'pro').toUpperCase() + '</b>' + (isEn ? ' plan or higher.' : ' atau lebih tinggi.') + '</div>';
+	h += '<div style="margin-bottom:10px">' + (isEn ? 'Current plan: ' : 'Paket aktif: ') + '<span class="sn-badge sn-planpill p-' + (L.mode === 'open' ? 'dev' : cur) + '">' + (L.mode === 'open' ? 'DEV' : cur.toUpperCase()) + '</span>';
+	if(L.paid_until) h += ' <span style="color:var(--ink-3);font-size:12px">' + (isEn ? 'paid until ' : 'dibayar hingga ') + snEscH(new Date(L.paid_until * 1000).toLocaleDateString()) + '</span>';
+	if(L.has_code) h += ' <span class="sn-mono" style="font-size:11.5px;color:var(--ink-3)">' + snEscH(L.code || '') + '</span>';
+	h += '</div>';
+	h += '<div style="display:flex;gap:8px;margin-bottom:8px;flex-wrap:wrap"><span class="sn-btn sn-sm" data-act="cur" data-v="IDR">IDR (Midtrans)</span><span class="sn-btn sn-sm" data-act="cur" data-v="USD">USD (PayPal)</span>'
+		+ '<span style="flex:1"></span><span class="sn-btn sn-sm" data-act="per" data-v="m">' + (isEn ? 'Monthly' : 'Bulanan') + '</span><span class="sn-btn sn-sm" data-act="per" data-v="y">' + (isEn ? 'Yearly (10x)' : 'Tahunan (10x)') + '</span></div>';
+	if(!SN_PLANS){ h += '<div class="sn-note" style="margin-bottom:8px">' + (isEn ? 'Plan list could not be loaded (license server unreachable). You can still enter an existing license code below.' : 'Daftar paket tidak dapat dimuat (server lisensi tidak terjangkau). Anda tetap dapat memasukkan kode lisensi di bawah.') + '</div>'; }
+	else {
+		var P = SN_PLANS.plans || {};
+		h += '<table class="sn-upg" style="width:100%;border-collapse:collapse"><thead><tr><th></th>';
+		$.each(['free', 'pro', 'max'], function(_, p){ h += '<th class="' + (p === cur ? 'cur' : '') + '">' + p.toUpperCase() + '<div style="font-weight:400;color:var(--ink-3)">' + (p === 'free' ? '-' : snUpgHarga(p, SN_UPG.per)) + '</div></th>'; });
+		h += '</tr></thead><tbody>';
+		$.each(SN_PLANS.features || [], function(_, f){
+			h += '<tr' + (info.feature === f ? ' style="background:rgba(245,158,11,.10)"' : '') + '><td>' + snEscH(snLicLabel(f)) + '</td>';
+			$.each(['free', 'pro', 'max'], function(_, p){ h += '<td class="' + (p === cur ? 'cur' : '') + '">' + (($.inArray(f, (P[p] || {}).features || []) >= 0) ? '&#10003;' : '&ndash;') + '</td>'; });
+			h += '</tr>';
+		});
+		var lim = function(p, k){ var v = ((P[p] || {}).limits || {})[k]; return v === null || v === undefined ? '&infin;' : v; };
+		$.each([['waf_vhosts', 'vhost WAF'], ['port_rules', isEn ? 'Port rules' : 'Aturan port'], ['upload_vhosts', 'vhost Upload Protection']], function(_, r){
+			h += '<tr><td>' + r[1] + '</td>'; $.each(['free', 'pro', 'max'], function(_, p){ h += '<td class="' + (p === cur ? 'cur' : '') + '">' + lim(p, r[0]) + '</td>'; }); h += '</tr>';
+		});
+		h += '</tbody></table>';
+		if(L.mode !== 'open'){
+			h += '<div style="display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap"><input id="snUpgEmail" class="sn-inp" type="email" placeholder="email@domain.com" style="flex:1;min-width:200px">'
+				+ '<span class="sn-btn" data-act="buy" data-v="pro" style="color:#38bdf8">' + (isEn ? 'Buy PRO' : 'Beli PRO') + '</span><span class="sn-btn" data-act="buy" data-v="max" style="color:#f59e0b">' + (isEn ? 'Buy MAX' : 'Beli MAX') + '</span></div>';
+			if(SN_UPG.order) h += '<div class="sn-note" style="margin-top:8px">' + (isEn ? 'Order ' : 'Pesanan ') + '<b>' + snEscH(SN_UPG.order) + '</b>. ' + (isEn ? 'After paying, press ' : 'Setelah membayar, tekan ') + '<span class="sn-btn sn-sm" data-act="cek">' + (isEn ? 'Check payment' : 'Cek pembayaran') + '</span></div>';
+		}
+	}
+	if(L.mode !== 'open'){
+		h += '<div style="display:flex;gap:8px;align-items:center;margin-top:12px;flex-wrap:wrap"><input id="snUpgCode" class="sn-inp" placeholder="ZYS-XXXXX-XXXXX-XXXXX-XXXXX" style="flex:1;min-width:260px" maxlength="29">'
+			+ '<span class="sn-btn" data-act="aktif">' + (isEn ? 'Activate code' : 'Aktifkan kode') + '</span>' + (L.has_code ? '<span class="sn-btn dgr" data-act="lepas">' + (isEn ? 'Release license' : 'Lepas lisensi') + '</span>' : '') + '</div>';
+		h += '<div style="margin-top:8px;color:var(--ink-3);font-size:11.5px">' + (isEn ? 'One license is bound to one server IP. To move servers, contact the developer.' : 'Satu lisensi terikat ke satu IP server. Untuk pindah server, hubungi developer.') + '</div>';
+	}
+	return h + '</div>';
+}
+function snUpgGambar(){
+	if(SN_UPG.idx === null || !$('#snUpg').length) return;
+	var $o = $('#snUpg').parent(); $o.html(snUpgIsi()); snUpgTanda();
+}
+function snUpgTanda(){
+	$('#snUpg [data-act="cur"][data-v="' + SN_UPG.cur + '"],#snUpg [data-act="per"][data-v="' + SN_UPG.per + '"]').css({borderColor: 'var(--accent-cyan)', color: 'var(--accent-cyan)'});
+}
+function snUpgradeDialog(info, msg){
+	var isEn = (SN_LANG !== 'id');
+	if(snEdisiFree()){   /* edisi Free: tidak ada pembelian di edisi ini; fitur berbayar "segera hadir" */
+		var f = (info || {}).feature;
+		try{ layer.msg((f ? snLicLabel(f) + ': ' : '') + (isEn ? 'coming soon to this edition.' : 'segera hadir di edisi ini.'), {icon: 0, time: 2600}); }catch(e){}
+		return;
+	}
+	SN_UPG.info = info || {}; SN_UPG.msg = msg || '';
+	if(SN_UPG.idx !== null){ try{ layer.close(SN_UPG.idx); }catch(e){} SN_UPG.idx = null; }
+	var buka = function(){
+		SN_UPG.idx = layer.open({type: 1, title: isEn ? 'Plans & Upgrade' : 'Paket & Upgrade', area: [Math.min(820, $(window).width() - 20) + 'px', 'auto'], shadeClose: true,
+			content: snUpgIsi(), end: function(){ SN_UPG.idx = null; }});
+		snUpgTanda();
+	};
+	var lanjut = function(){
+		snAjax('get_plans', {currency: SN_UPG.cur}, function(d){ SN_PLANS = d || null; buka(); }, null, null, true);
+	};
+	if(SN_LIC) lanjut(); else snLicMuat(lanjut);
+}
+$(document).on('click', '#snUpg [data-act]', function(){
+	var $t = $(this), act = $t.data('act'), v = String($t.data('v') || ''), isEn = (SN_LANG !== 'id');
+	if(act === 'cur'){ SN_UPG.cur = v; snAjax('get_plans', {currency: v}, function(d){ SN_PLANS = d || SN_PLANS; snUpgGambar(); }, null, null, true); }
+	else if(act === 'per'){ SN_UPG.per = v; snUpgGambar(); }
+	else if(act === 'buy'){
+		var em = $.trim($('#snUpgEmail').val());
+		if(!/^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,190}\.[A-Za-z]{2,24}$/.test(em)){ layer.msg(isEn ? 'Enter a valid email address' : 'Masukkan alamat email yang valid', {time: 2500}); return; }
+		snAjax('license_checkout', {email: em, plan: v, period: SN_UPG.per, gateway: SN_UPG.cur === 'IDR' ? 'midtrans' : 'paypal'}, function(d){
+			if(!d) return;
+			SN_UPG.order = d.order_id || '';
+			if(d.pay_url) window.open(d.pay_url, '_blank', 'noopener');
+			layer.msg(isEn ? 'Payment page opened in a new tab' : 'Halaman pembayaran dibuka di tab baru', {time: 3000});
+			snLicMuat(function(){ snUpgGambar(); });
+		}, null, $t[0]);
+	}
+	else if(act === 'cek'){
+		snAjax('license_refresh', {order_id: SN_UPG.order}, function(d){
+			if(!d) return;
+			layer.msg(d.ok ? (isEn ? 'Plan updated: ' : 'Paket diperbarui: ') + String(d.plan).toUpperCase() : (isEn ? 'Payment not confirmed yet (' : 'Pembayaran belum terkonfirmasi (') + (d.state || '-') + ')', {time: 3500});
+			snLicMuat(function(){ snUpgGambar(); });
+		}, null, $t[0]);
+	}
+	else if(act === 'aktif'){
+		var code = $.trim($('#snUpgCode').val()).toUpperCase();
+		if(!/^ZYS(-[A-HJ-NP-Z2-9]{5}){4}$/.test(code)){ layer.msg(isEn ? 'Invalid license code format' : 'Format kode lisensi tidak valid', {time: 2500}); return; }
+		snAjax('license_activate', {code: code}, function(d){
+			if(!d) return;
+			layer.msg((isEn ? 'Activated: ' : 'Aktif: ') + String(d.plan || '').toUpperCase(), {time: 3000});
+			snLicMuat(function(){ snUpgGambar(); snStatus(null, true); });
+		}, null, $t[0]);
+	}
+	else if(act === 'lepas'){
+		layer.confirm(isEn ? 'Release this license from the server? The plan returns to Free; your configuration is kept.' : 'Lepas lisensi dari server ini? Paket kembali ke Free; konfigurasi tetap dipertahankan.', {icon: 3, title: isEn ? 'Confirm' : 'Konfirmasi'}, function(i){
+			layer.close(i);
+			snAjax('license_deactivate', {}, function(d){ if(d){ layer.msg(d, {time: 3000}); snLicMuat(function(){ snUpgGambar(); snStatus(null, true); }); } }, null, $t[0]);
+		});
+	}
+});
+
 function snMuatSemua(){
+	snLicMuat();
 	snStatus(null, true);
 	snTopSegar();
 }
@@ -9044,7 +9421,7 @@ function snDoFreshInstall(){
 			layer.close(idx);
 			var loadIdx = layer.msg(isEn ? 'Running ZySentinel Fresh Install, please wait...' : 'Menjalankan Fresh Install ZySentinel, mohon tunggu...', {time:0, shade:[0.4,'#000']});
 			if(typeof gtag === 'function'){
-				gtag('event', 'install_fresh', {'event_category': 'lifecycle', 'app_version': '1.6.2'});
+				gtag('event', 'install_fresh', {'event_category': 'lifecycle', 'app_version': SN_VERSI});
 			}
 			snAjax('run_lifecycle_action', {action: 'fresh'}, function(res){
 				layer.close(loadIdx);
@@ -9095,7 +9472,7 @@ function snCheckUpdate(){
 	snAjax('check_github_update', {}, function(data){
 		layer.close(loadIdx);
 		if(!data) return;
-		var vCur = snEsc(snFmtVer(data.current_version || 'v1.6.2'));
+		var vCur = snEsc(snFmtVer(data.current_version || ('v' + SN_VERSI)));
 		var vLat = snEsc(snFmtVer(data.latest_version || vCur));
 		var hasUpd = data.has_update;
 		var notes = snEsc(data.release_notes || (isEn ? 'No release notes.' : 'Tidak ada catatan rilis.'));
@@ -9133,7 +9510,7 @@ function snDoUpdate(){
 	var isEn = (SN_LANG !== 'id');
 	var loadIdx = layer.msg(isEn ? 'Downloading and applying ZySentinel update...' : 'Mengunduh dan menerapkan pembaruan ZySentinel...', {time:0, shade:[0.4,'#000']});
 	if(typeof gtag === 'function'){
-		gtag('event', 'install_update', {'event_category': 'lifecycle', 'app_version': '1.6.2'});
+		gtag('event', 'install_update', {'event_category': 'lifecycle', 'app_version': SN_VERSI});
 	}
 	snAjax('run_lifecycle_action', {action: 'update'}, function(res){
 		layer.close(loadIdx);
@@ -9153,7 +9530,7 @@ function snDoSelfHeal(){
 			layer.close(idx);
 			var pIdx = snProgress(isEn ? 'Running diagnostics and self-heal...' : 'Menjalankan diagnostik dan perbaikan mandiri...');
 			if(typeof gtag === 'function'){
-				gtag('event', 'install_repair', {'event_category': 'lifecycle', 'app_version': '1.6.2'});
+				gtag('event', 'install_repair', {'event_category': 'lifecycle', 'app_version': SN_VERSI});
 			}
 			snAjax('run_lifecycle_action', {action: 'repair'}, function(res){
 				if(res){
@@ -9192,7 +9569,7 @@ function snDoUninstall(){
 			layer.close(idx);
 			var pIdx = snProgress(isEn ? 'Uninstalling ZySentinel and cleaning files completely...' : 'Mencabut dan meng-uninstall ZySentinel secara total...');
 			if(typeof gtag === 'function'){
-				gtag('event', 'uninstall_clean', {'event_category': 'lifecycle', 'app_version': '1.6.2'});
+				gtag('event', 'uninstall_clean', {'event_category': 'lifecycle', 'app_version': SN_VERSI});
 			}
 			snAjax('run_lifecycle_action', {action: 'uninstall', confirm: txt}, function(res){
 				if(res){

@@ -62,6 +62,7 @@ MODULES = {
     'probe_cve':       ('8000420-8000429', 'Eksploit router/IoT/CVE dan trik path traversal ;/'),
     'probe_archive':   ('8000430-8000439', 'Tebakan nama arsip cadangan di root situs'),
     'probe_secrets':   ('8000440-8000449', 'Berkas berawalan titik, kredensial, internal Laravel, skrip di .well-known'),
+    'php2shell':       ('8000450-8000459', 'Medan upload-progress PHP (jalur PHP2Shell CVE-2026-109618/109619), bawaan hanya dicatat'),
 }
 MODE_ENGINE = {'block': 'On', 'monitor': 'DetectionOnly', 'disable': 'Off'}
 LISTS = ('ip_white', 'ip_black', 'url_white', 'url_black')
@@ -461,6 +462,12 @@ def gen_crs_setup(conf):
             % (pl, th, th * 2) + extra)
 
 
+def premium_include():
+    """Jalur modul premium waf_premium (DATA SecLang) bila lisensi saat ini mengizinkan dan semua pemeriksaan
+    (hash, tanda tangan server, kebijakan data-saja) lolos lagi; selain itu None. Tidak pernah menjalankan isinya."""
+    return None      # edisi Free: modul aturan premium (waf_premium) adalah fitur Max
+
+
 def gen_main(conf):
     ada = crs_ada()
     inc = ['# Dibuat oleh sentinel-zyrules.py. Dimuat oleh semua vhost (nginx/Coraza, Apache/OpenLiteSpeed ModSecurity).',
@@ -477,6 +484,10 @@ def gen_main(conf):
             if conf.get('rule.%s' % nama, 'on') != 'off':
                 inc.append('Include %s' % path)
     inc.append('Include %s/zysentinel-after.conf' % ZY_DIR)
+    prem = premium_include()
+    if prem:
+        inc.append('# modul premium (paket Max), dilewati bila lisensi tidak mengizinkan')
+        inc.append('Include %s' % prem)
     inc.append('Include %s/disable.conf' % GEN)
     inc.append('Include %s/zysentinel-exclusions.local.conf' % ZY_DIR)
     return '\n'.join(inc) + '\n'

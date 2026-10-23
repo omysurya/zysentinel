@@ -58,6 +58,10 @@ fi
 
 clam_ada()     { command -v clamscan >/dev/null 2>&1; }
 clamd_ada()    { [ -S "${CLAMD_SOCKET:-/var/run/clamav/clamd.ctl}" ]; }
+# ---- gerbang lisensi: mesin premium (ransomware, judol, mining, SAGE AI) adalah fitur Max (av_engines). Gagal tertutup:
+# biner pemverifikasi hilang/rusak = hanya ClamAV dan Rkhunter. Mesin 'both' (bawaan) TIDAK lagi membuka mesin premium tanpa lisensi.
+av_premium_ok() { return 1; }      # edisi Free: mesin premium adalah fitur Max
+
 rkhunter_ada() { [ -x "$RKHUNTER_BIN" ] || command -v rkhunter >/dev/null 2>&1; }
 
 # ==================================================================
@@ -412,56 +416,20 @@ integ_notif() {
 }
 
 do_baseline() {
-  [ $# -ge 1 ] || { err "pakai: baseline <path> [label]"; return 1; }
-  local path="$1" label="${2:-$(basename "$path")}"
-  [ -d "$path" ] || { err "path bukan direktori: $path"; return 1; }
-  local out; out="$(baseline_path "$label")"
-  mkdir -p "$(dirname "$out")"
-  integ_hitung "$path" > "$out.tmp" && mv -f "$out.tmp" "$out"
-  rm -f "$LAST_DIR/integ-$label.txt"
-  say "baseline $label: $(grep -c . "$out") berkas direkam"
+  err "integritas berkas web per vhost adalah fitur Pro (integ_web)"
+  return 1
 }
 
 do_check() {
-  [ $# -ge 1 ] || { err "pakai: check <path> [label]"; return 1; }
-  local path="$1" label="${2:-$(basename "$path")}" notif="${3:-}"
-  local base; base="$(baseline_path "$label")"
-  [ -f "$base" ] || { err "belum ada baseline untuk $label; jalankan baseline dulu"; return 1; }
-  local now; now="$(mktemp /tmp/zysentinel-id.XXXXXX)"
-  integ_hitung "$path" > "$now"
-  local out="$LAST_DIR/integ-$label.txt" lama
-  lama="$(mktemp /tmp/zysentinel-il.XXXXXX)"
-  [ -f "$out" ] && cp "$out" "$lama"
-  integ_banding "$base" "$now" | LC_ALL=C sort > "$out.tmp" && mv -f "$out.tmp" "$out"
-  if [ -n "$notif" ]; then
-    # hanya perubahan yang belum pernah dilaporkan (supaya tidak berulang tiap jam)
-    LC_ALL=C sort "$lama" -o "$lama"
-    LC_ALL=C comm -13 "$lama" "$out" > "$lama.baru"
-    integ_notif "$label" "$lama.baru"
-    rm -f "$lama.baru"
-  fi
-  rm -f "$now" "$lama"
-  say "integritas $label: $(grep -c . "$out") perubahan"
+  err "integritas berkas web per vhost adalah fitur Pro (integ_web)"
+  return 1
 }
 
 # Semua vhost di /www/wwwroot: vhost tanpa baseline dibuatkan baseline (tanpa laporan),
 # sisanya diperiksa dan perubahan BARU dikirim sebagai notifikasi. Dipanggil timer per jam.
 do_check_all() {
-  local d label n=0
-  for d in /www/wwwroot/*; do
-    [ -d "$d" ] || continue
-    label="$(basename "$d" | tr -dc 'A-Za-z0-9._-')"
-    [ -n "$label" ] || continue
-    if [ -f "$(baseline_path "$label")" ]; then
-      do_check "$d" "$label" notif
-    else
-      do_baseline "$d" "$label"
-    fi
-    n=$((n + 1))
-  done
-  [ -f "$BASE_DIR/sys-persistence.txt" ] || do_baseline_sys
-  do_check_sys notif
-  say "check-all selesai: $n vhost"
+  err "integritas berkas web per vhost adalah fitur Pro (integ_web)"
+  return 1
 }
 
 do_integ_list() {
@@ -858,170 +826,12 @@ EOF
     fi
   fi
 
-  # ------------------------------------------------------------------
-  # TAHAP 3: DETEKSI ARTEFAK RANSOMWARE & RANSOM NOTES
-  # ------------------------------------------------------------------
-  if [ "$engine" = "ransomware" ] || [ "$engine" = "all" ] || [ "$engine" = "both" ]; then
-    echo ""
-    echo "----------------------------------------------------------------------"
-    echo "[*] [TAHAP 3] Deteksi Artefak Ransomware & Berkas Terenkripsi"
-    echo "----------------------------------------------------------------------"
-    if [ ! -d "$path" ] && [ ! -f "$path" ]; then
-      echo "[-] Path target tidak ditemukan untuk analisis ransomware."
-    else
-      echo "[*] Memindai ekstensi terenkripsi ransomware pada $path..."
-      local r_ext_pattern='.*\.(locked|crypto|locky|enc|wnry|wannacry|cerber|ryuk|phobos|dharma|blackcat|lockbit|mallox|makop|hive|alfa)$'
-      local r_files
-      r_files="$(find "$path" -maxdepth 6 -type f 2>/dev/null | grep -E -i "$r_ext_pattern" | head -n 50 || true)"
-      if [ -n "$r_files" ]; then
-        local r_count=0
-        while IFS= read -r rf; do
-          [ -z "$rf" ] && continue
-          echo "[!] BERKAS TERENKRIPSI RANSOMWARE: $rf"
-          r_count=$((r_count + 1))
-          found_malware=$((found_malware + 1))
-        done <<< "$r_files"
-        echo "[!] Ditemukan $r_count berkas mencurigakan ber-ekstensi ransomware!"
-      else
-        echo "[OK] Ekstensi Berkas: Tidak ditemukan berkas terkunci/terenkripsi ransomware."
-      fi
-
-      echo "[*] Memindai berkas pesan tebusan (ransom notes)..."
-      local r_notes
-      r_notes="$(find "$path" -maxdepth 6 -type f \( \
-        -iname "*README*RESTORE*" -o -iname "*HOW*TO*DECRYPT*" -o \
-        -iname "*DECRYPT*INSTRUCTIONS*" -o -iname "*RESTORE*FILES*" -o \
-        -iname "*RECOVERY*KEY*" -o -iname "*LOCKBIT*README*" -o \
-        -iname "*HELP_DECRYPT*" \) 2>/dev/null | head -n 30 || true)"
-      if [ -n "$r_notes" ]; then
-        local rn_count=0
-        while IFS= read -r rnf; do
-          [ -z "$rnf" ] && continue
-          echo "[!] RANSOM NOTE DITEMUKAN: $rnf"
-          rn_count=$((rn_count + 1))
-          warnings_count=$((warnings_count + 1))
-        done <<< "$r_notes"
-        echo "[!] Ditemukan $rn_count berkas catatan pemerasan/tebusan ransomware!"
-      else
-        echo "[OK] Ransom Notes: Tidak ditemukan berkas catatan tebusan ransomware."
-      fi
-    fi
-  fi
-
-  # ------------------------------------------------------------------
-  # TAHAP 4: DETEKSI DEFACEMENT & INJEKSI JUDOL (JUDI ONLINE / SLOT GACOR)
-  # ------------------------------------------------------------------
-  if [ "$engine" = "judol" ] || [ "$engine" = "all" ] || [ "$engine" = "both" ]; then
-    echo ""
-    echo "----------------------------------------------------------------------"
-    echo "[*] [TAHAP 4] Deteksi Injeksi Defacement Judol (Judi Online & Slot Gacor)"
-    echo "----------------------------------------------------------------------"
-    if [ ! -d "$path" ] && [ ! -f "$path" ]; then
-      echo "[-] Path target tidak ditemukan untuk analisis judol."
-    else
-      echo "[*] Memindai berkas web (.php, .html, .js, .txt) terhadap injeksi judol..."
-      local judol_kw='slot88|slot[ _-]*gacor|maxwin|zeus[ _-]*slot|pragmatic[ _-]*play|situs[ _-]*judi|judi[ _-]*online|daftar[ _-]*slot|bocoran[ _-]*rtp|link[ _-]*gacor|toto[ _-]*macau|agen[ _-]*togel|sbobet88'
-      local judol_files
-      judol_files="$(grep -r -E -i -l "$judol_kw" "$path" \
-        --exclude-dir=vendor --exclude-dir=node_modules --exclude-dir=.git --exclude-dir=cache \
-        --include="*.php" --include="*.html" --include="*.htm" --include="*.js" --include="*.txt" --include=".htaccess" 2>/dev/null | head -n 50 || true)"
-      if [ -n "$judol_files" ]; then
-        local j_count=0
-        while IFS= read -r jf; do
-          [ -z "$jf" ] && continue
-          local cuplikan; cuplikan="$(grep -E -i -m 1 "$judol_kw" "$jf" 2>/dev/null | tr -s ' ' | cut -c 1-80 || true)"
-          echo "[!] INJEKSI JUDOL TERDETEKSI: $jf"
-          echo "    Cuplikan Konten: $cuplikan"
-          j_count=$((j_count + 1))
-          warnings_count=$((warnings_count + 1))
-        done <<< "$judol_files"
-        echo "[!] Peringatan: Ditemukan $j_count berkas yang terindikasi injeksi/spam judi online!"
-      else
-        echo "[OK] Analisis Judol: Bersih. Tidak ditemukan injeksi kata kunci slot gacor / judi online."
-      fi
-    fi
-  fi
-
-  # ------------------------------------------------------------------
-  # TAHAP 5: DETEKSI IN-BROWSER WEB MINER (CRYPTOJACKING)
-  # ------------------------------------------------------------------
-  if [ "$engine" = "mining" ] || [ "$engine" = "all" ] || [ "$engine" = "both" ]; then
-    echo ""
-    echo "----------------------------------------------------------------------"
-    echo "[*] [TAHAP 5] Deteksi Skrip Web Miner (In-Browser Cryptojacking)"
-    echo "----------------------------------------------------------------------"
-    if [ ! -d "$path" ] && [ ! -f "$path" ]; then
-      echo "[-] Path target tidak ditemukan untuk analisis webminer."
-    else
-      echo "[*] Memindai pustaka & skrip penambang kripto browser..."
-      local miner_kw='coinhive|coin-hive|webminepool|crypto-loot|cryptonight\.wasm|minr\.pw|stratum\+tcp'
-      local miner_files
-      miner_files="$(grep -r -E -i -l "$miner_kw" "$path" \
-        --exclude-dir=vendor --exclude-dir=node_modules --exclude-dir=.git \
-        --include="*.php" --include="*.html" --include="*.htm" --include="*.js" 2>/dev/null | head -n 30 || true)"
-      if [ -n "$miner_files" ]; then
-        local m_count=0
-        while IFS= read -r mf; do
-          [ -z "$mf" ] && continue
-          echo "[!] WEBMINER TERDETEKSI: $mf"
-          m_count=$((m_count + 1))
-          warnings_count=$((warnings_count + 1))
-        done <<< "$miner_files"
-        echo "[!] Peringatan: Ditemukan $m_count skrip webminer tertanam pada berkas situs!"
-      else
-        echo "[OK] Web Miner: Bersih. Tidak ditemukan pustaka cryptojacking browser."
-      fi
-    fi
-  fi
-
-  # ------------------------------------------------------------------
-  # TAHAP 6: DETEKSI AI SAFETY, PROMPT INJECTION & TOXIC SKILLS (SAGE)
-  # ------------------------------------------------------------------
-  if [ "$engine" = "sage" ] || [ "$engine" = "all" ] || [ "$engine" = "both" ] || [ "$engine" = "ai" ] || [ "$engine" = "scan-ai" ]; then
-    echo ""
-    echo "----------------------------------------------------------------------"
-    echo "[*] [TAHAP 6] Deteksi AI Safety, Prompt Injection & Toxic Skills (SAGE)"
-    echo "----------------------------------------------------------------------"
-    local sage_bin="/www/server/sentinel/bin/sentinel-sage.py"
-    [ ! -f "$sage_bin" ] && sage_bin="/www/server/panel/plugin/sentinel/payload/sentinel-sage.py"
-    if [ ! -f "$sage_bin" ]; then
-      echo "[-] Mesin SAGE AI Safety (sentinel-sage.py) tidak ditemukan."
-    elif [ ! -d "$path" ] && [ ! -f "$path" ]; then
-      echo "[-] Path target tidak ditemukan untuk analisis AI Safety."
-    else
-      echo "[*] Menjalankan pemindaian SAGE AI Safety pada $path..."
-      local py_bin="/www/server/panel/pyenv/bin/python3"
-      [ ! -x "$py_bin" ] && py_bin="python3"
-
-      local q_arg=""
-      if [ "${ACTION_ON_DETECT:-quarantine}" = "quarantine" ]; then
-        q_arg="--quarantine $(q_files)"
-      fi
-
-      local sage_tmp; sage_tmp="$(mktemp /tmp/zysentinel-sage.XXXXXX)"
-      $py_bin "$sage_bin" scan "$path" $q_arg > "$sage_tmp" 2>&1 || true
-
-      local sage_infected=0
-      while IFS= read -r s_line; do
-        [ -z "$s_line" ] && continue
-        echo "$s_line"
-        case "$s_line" in
-          *"[!] ANCAMAN AI TERDETEKSI:"*)
-            sage_infected=$((sage_infected + 1))
-            found_malware=$((found_malware + 1))
-            ;;
-        esac
-      done < "$sage_tmp"
-      rm -f "$sage_tmp"
-
-      if [ "$sage_infected" -eq 0 ]; then
-        echo "[OK] SAGE AI Safety: Bersih. Tidak ditemukan prompt injection, toxic skills, atau aturan berbahaya."
-      else
-        echo "[!] SAGE AI Safety: Terdeteksi $sage_infected ancaman instruksi berbahaya / toxic skills!"
-      fi
-    fi
-  fi
-
+  local premium=0
+  av_premium_ok && premium=1
+  case "$engine" in
+    ransomware|judol|mining|sage|ai|scan-ai)
+      [ "$premium" = 1 ] || echo "[-] Mesin $engine membutuhkan paket Max (av_engines); hanya ClamAV dan Rkhunter yang tersedia." ;;
+  esac
   # ------------------------------------------------------------------
   # RINGKASAN AKHIR
   # ------------------------------------------------------------------

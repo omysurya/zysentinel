@@ -8,13 +8,21 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VERSION="${1:-$(grep -o '"versions": "[^"]*"' "$SCRIPT_DIR/info.json" | cut -d'"' -f4 || echo "1.6.2")}"
+# Versi: sumber tunggal info.json (ditanam versi.py dari nama cabang rilis release/vX.Y.Z); argumen 1 hanya boleh sama.
+INFO_VERSION="$(python3 "$SCRIPT_DIR/versi.py" sekarang)"
+VERSION="${1:-$INFO_VERSION}"
+[ "$VERSION" = "$INFO_VERSION" ] || { echo "[GAGAL] versi $VERSION tidak sama dengan info.json ($INFO_VERSION): python3 versi.py terapkan" >&2; exit 1; }
+python3 "$SCRIPT_DIR/versi.py" periksa || { echo "[GAGAL] string versi tidak konsisten: python3 versi.py terapkan" >&2; exit 1; }
 OUT_DIR="${2:-/www/backup}"
 STAGE_DIR="/tmp/sentinel_build_staging"
 
 echo "===================================================================="
 echo " [ZySentinel] Membangun Paket Distribusi Bersih (Versi: v${VERSION})"
 echo "===================================================================="
+
+# 0. Edisi Free: tidak ada mode lisensi; semua fitur edisi ini tersedia tanpa server lisensi.
+LIC_OPEN=1
+echo "[*] Edisi Free (https://github.com/omysurya/zysentinel)"
 
 # 1. Biner guardd dikompilasi dari SUMBER (hardening) dan diberi stempel hash sumber.
 #    Dulu biner payload hanya disalin dari server yang sedang berjalan sehingga
@@ -31,18 +39,6 @@ elif [ "$(sha256sum "$SRC_C" | awk '{print $1}')" != "$(cat "$SCRIPT_DIR/payload
     exit 1
 fi
 
-# 1a. Mesin Sweeper (C): dikompilasi dari sumber dengan stempel hash. Bila gcc tidak ada, rilis tetap dibuat
-#     (Sweeper akan menyusun sendiri saat dipasang atau memakai mesin Python), tetapi tanpa biner payload.
-SW_C="$SCRIPT_DIR/payload/sentinel-sweeper.c"
-if command -v gcc >/dev/null 2>&1; then
-    echo "[*] Mengompilasi payload/sentinel-sweeper dari sentinel-sweeper.c (canary, PIE, RELRO)..."
-    gcc -O2 -std=gnu11 -Wall -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -pie -Wl,-z,relro,-z,now \
-        -o "$SCRIPT_DIR/payload/sentinel-sweeper" "$SW_C" -lm
-    chmod 755 "$SCRIPT_DIR/payload/sentinel-sweeper"
-    sha256sum "$SW_C" | awk '{print $1}' > "$SCRIPT_DIR/payload/sentinel-sweeper.srchash"
-else
-    echo "[!] gcc tidak ada: biner payload/sentinel-sweeper tidak diperbarui" >&2
-fi
 
 # 1b. Penjaga: update_zip aaPanel memilih folder TERAKHIR (urutan os.walk)
 #     yang berisi info.json + install.sh. Bila payload/ juga punya keduanya,
@@ -64,10 +60,19 @@ rsync -rltD --exclude='.git' \
             --exclude='*.bak' \
             --exclude='__pycache__' \
             --exclude='*.pyc' \
+            --exclude='*.orig' \
+            --exclude='*.rej' \
             --exclude='coraza-cache' \
             --exclude='build-release.sh' \
+            --exclude='release-pro.sh' \
+            --exclude='bump-version.sh' \
+            --exclude='versi.py' \
+            --exclude='release-all.sh' \
+            --exclude='CONTRIBUTING.md' \
+            --exclude='edition' \
             --exclude='tests' \
             "$SCRIPT_DIR/" "$STAGE_DIR/sentinel/"
+
 
 # 4. Pastikan izin eksekusi berkas skrip & library
 chmod 755 "$STAGE_DIR/sentinel/install.sh"
@@ -75,7 +80,6 @@ chmod 755 "$STAGE_DIR/sentinel/payload"/*.sh \
           "$STAGE_DIR/sentinel/payload"/*.py \
           "$STAGE_DIR/sentinel/payload"/guardctl 2>/dev/null || true
 [ -f "$STAGE_DIR/sentinel/payload/guardd" ] && chmod 755 "$STAGE_DIR/sentinel/payload/guardd" || true
-[ -f "$STAGE_DIR/sentinel/payload/sentinel-sweeper" ] && chmod 755 "$STAGE_DIR/sentinel/payload/sentinel-sweeper" || true
 find "$STAGE_DIR/sentinel/payload/systemd" -type f -exec chmod 644 {} + 2>/dev/null || true
 [ -f "$STAGE_DIR/sentinel/payload/init.d/sentinel" ] && chmod 755 "$STAGE_DIR/sentinel/payload/init.d/sentinel" || true
 
@@ -83,6 +87,7 @@ find "$STAGE_DIR/sentinel/payload/systemd" -type f -exec chmod 644 {} + 2>/dev/n
 mkdir -p "$OUT_DIR"
 TARGET_ZIP="$OUT_DIR/sentinel.zip"
 VERSIONED_ZIP="$OUT_DIR/zysentinel-v${VERSION}.zip"
+# Rilis ENFORCE (Pro) memakai nama BERBEDA supaya tidak pernah tertukar dengan aset garis publik: zysentinel-pro-vX.Y.Z.zip
 
 echo "[*] Mengompresi paket ke $TARGET_ZIP..."
 rm -f "$TARGET_ZIP" "$VERSIONED_ZIP" "/tmp/sentinel.zip"
@@ -90,8 +95,9 @@ rm -f "$TARGET_ZIP" "$VERSIONED_ZIP" "/tmp/sentinel.zip"
 cp -f "$TARGET_ZIP" "$VERSIONED_ZIP"
 cp -f "$TARGET_ZIP" "/tmp/sentinel.zip"
 
-# 6. Hitung Checksum
+# 6. Hitung Checksum (SHA256SUMS.txt memuat berkas bernama versi; pembaruan klien membacanya dari aset rilis)
 SHA256="$(sha256sum "$TARGET_ZIP" | cut -d' ' -f1)"
+( cd "$OUT_DIR" && sha256sum "$(basename "$VERSIONED_ZIP")" > SHA256SUMS.txt )
 ZIP_SIZE="$(ls -lh "$TARGET_ZIP" | awk '{print $5}')"
 
 # 7. Bersihkan staging

@@ -163,4 +163,13 @@ review_score    = 100
 # Notifikasi. URL kosong berarti daemon tidak menulis antrean notifikasi.
 notify_url     = ""
 notify_token   = ""
-notify_url     = ""
+
+# Process Guard: pemindai memori worker (sentinel-memscan, jaring pengaman PHP2Shell CVE-2026-109618/109619).
+# Dipindai berkala (memscan_interval) dan SEKETIKA saat worker menjalankan proses anak.
+# memscan_kill (berlaku hanya bila proc_guard = enforce):
+#   tinggi (bawaan) = bunuh worker pada memfd, /dev/shm, ELF anonim; on = juga pustaka terhapus di jalur tulis;
+#   off = hanya mencatat. memscan_ignore = awalan jalur, dipisah koma, untuk pustaka sah dari tempat tak lazim.
+# memscan          = on
+# memscan_interval = 30
+# memscan_kill     = tinggi
+# memscan_ignore   =

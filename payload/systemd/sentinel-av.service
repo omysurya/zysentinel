@@ -1,12 +1,12 @@
 [Unit]
 Description=ZySentinel Antivirus scheduled scan
-Documentation=file:/www/docs/
+Documentation=https://github.com/omysurya/zysentinel
 After=network.target clamav-daemon.service sentinel.service
 
 [Service]
 Type=oneshot
-ExecStart=/www/server/sentinel/bin/sentinel-av.sh scan-all
-ExecStartPost=/www/server/sentinel/bin/sentinel-av.sh check-sys
+# edisi Free: pemindaian terjadwal seluruh situs (av_scheduled) adalah fitur Pro; hanya integritas sistem yang diperiksa
+ExecStart=/www/server/sentinel/bin/sentinel-av.sh check-sys
 RemainAfterExit=no
 
 Nice=10

@@ -185,6 +185,9 @@ conf_get() {
   fi
   [ -n "$v" ] && printf '%s' "$v" || printf '%s' "$2"
 }
+# ---- gerbang lisensi (paket berlangganan). Gagal tertutup: biner pemverifikasi hilang/rusak = fitur berbayar mati.
+# ZYS_LICENSE_BIN hanya untuk uji. Yang dikunci hanya otomatisasi dan kedalaman; firewall dasar, ban manual, panic tetap Free.
+FW_ADV=0      # edisi Free: anti-DDoS lanjutan (fw_advanced) adalah fitur Pro
 EGRESS_MODE="${SENTINEL_EGRESS_MODE:-$(conf_get egress_guard off)}"
 THROTTLE_RPS="${SENTINEL_THROTTLE_RPS:-$(conf_get throttle_rps 5)}"
 THROTTLE_BURST="${SENTINEL_THROTTLE_BURST:-$(conf_get throttle_burst 15)}"
@@ -203,6 +206,8 @@ case "$THROTTLE_BURST" in ''|*[!0-9]*|0) THROTTLE_BURST=15 ;; esac
 GEO_MODE="${SENTINEL_GEO_MODE:-$(conf_get geo_mode off)}"
 GEO_NEGARA="${SENTINEL_GEO_NEGARA:-$(conf_get geo_negara '')}"
 case "$GEO_MODE" in off|block|allow) ;; *) GEO_MODE="off" ;; esac
+# Geo-ban adalah fitur Pro. Tanpa lisensi mode dianggap off (set geo dikosongkan di bawah); pengaturan operator tidak dihapus.
+if [ "$GEO_MODE" != "off" ]; then GEO_MODE="off"; GEO_DIKUNCI=1; fi
 # Normalisasi daftar negara: huruf besar, tanpa spasi, tanpa kode ganda.
 GEO_NEGARA="$(printf '%s' "$GEO_NEGARA" | tr 'a-z' 'A-Z' | tr -d ' \t')"
 # Cadera global anti keledai-server. KOSONGKAN variabel ini untuk
@@ -420,28 +425,8 @@ tune_conntrack() {
 # DOCKER-USER (chain resmi untuk aturan pengguna di depan Docker).
 docker_guard() {
   "$IPT" -S DOCKER-USER >/dev/null 2>&1 || return 0
-  # Sudah utuh (lompatan, ban, intel sesuai keberadaan set, RETURN): jangan sentuh.
-  local cur ada_intel=0
-  "$IPSET" list "$SET_INTEL" >/dev/null 2>&1 && ada_intel=1
-  cur="$("$IPT" -S SENTINEL_DOCKER 2>/dev/null)"
-  if "$IPT" -S DOCKER-USER 2>/dev/null | grep -qxF -- "-A DOCKER-USER -j SENTINEL_DOCKER" \
-     && printf '%s\n' "$cur" | grep -q 'sentinel:docker-ban' \
-     && [ "$(printf '%s\n' "$cur" | grep -c 'sentinel:docker-intel')" = "$ada_intel" ] \
-     && [ "$(printf '%s\n' "$cur" | grep '^-A ' | tail -1)" = "-A SENTINEL_DOCKER -j RETURN" ]; then
-    return 0
-  fi
-  "$IPT" -N SENTINEL_DOCKER 2>/dev/null || true
-  "$IPT" -F SENTINEL_DOCKER 2>/dev/null || return 0
-  "$IPT" -A SENTINEL_DOCKER -m set --match-set "$SET_BAN" src \
-    -m comment --comment "sentinel:docker-ban" -j DROP 2>/dev/null
-  "$IPSET" list "$SET_INTEL" >/dev/null 2>&1 && \
-    "$IPT" -A SENTINEL_DOCKER -m set --match-set "$SET_INTEL" src \
-      -m comment --comment "sentinel:docker-intel" -j DROP 2>/dev/null
-  "$IPT" -A SENTINEL_DOCKER -j RETURN
-  if ! "$IPT" -S DOCKER-USER 2>/dev/null | grep -qxF -- "-A DOCKER-USER -j SENTINEL_DOCKER"; then
-    "$IPT" -I DOCKER-USER 1 -j SENTINEL_DOCKER 2>/dev/null && \
-      say "ban dan threat intel juga berlaku untuk port Docker (DOCKER-USER)"
-  fi
+  # edisi Free: perlindungan port Docker (fw_advanced) adalah fitur Pro; lepas lompatan lama bila ada
+  while "$IPT" -D DOCKER-USER -j SENTINEL_DOCKER 2>/dev/null; do :; done
   return 0
 }
 
@@ -484,22 +469,10 @@ fw_rules() {
   # 2b) GEO-BAN: setelah whitelist (pilihan operator selalu menang), sebelum
   #     ban. Hanya port web, termasuk UDP 443 (HTTP/3 / QUIC): tanpa itu
   #     klien dari negara terblokir cukup beralih ke QUIC.
-  if [ "$GEO_MODE" != "off" ] && [ -n "$GEO_NEGARA" ] \
-     && [ "$SET_GEO" ] && "$IPSET" list "$SET_GEO" >/dev/null 2>&1 \
-     && [ "$("$IPSET" list "$SET_GEO" 2>/dev/null | grep -c '^[0-9]')" -gt 0 ]; then
-    "$IPT" -A "$CHAIN" -p tcp -m multiport --dports "$GEO_PORTS" \
-      -m set --match-set "$SET_GEO" src \
-      -m comment --comment "sentinel:geo-drop" -j DROP
-    "$IPT" -A "$CHAIN" -p udp -m multiport --dports "$GEO_PORTS" \
-      -m set --match-set "$SET_GEO" src \
-      -m comment --comment "sentinel:geo-drop-udp" -j DROP
-    say "geo-ban aktif: $("$IPSET" list "$SET_GEO" 2>/dev/null | grep -c '^[0-9]') blok CIDR diblokir pada port $GEO_PORTS (tcp+udp)"
-  else
-    if "$IPSET" list "$SET_GEO" >/dev/null 2>&1; then
-      "$IPSET" flush "$SET_GEO" 2>/dev/null || true
-    fi
-    say "geo-ban tidak aktif (set kosong atau mode off)"
+  if "$IPSET" list "$SET_GEO" >/dev/null 2>&1; then
+    "$IPSET" flush "$SET_GEO" 2>/dev/null || true
   fi
+  if [ "${GEO_DIKUNCI:-0}" = 1 ]; then say "geo-ban tidak aktif (butuh paket Pro; pengaturan tetap tersimpan)"; else say "geo-ban tidak aktif (set kosong atau mode off)"; fi
 
   # 2c) GLOBAL THREAT INTEL: blokir seluruh CIDR botnet & C2 reputasi buruk (Spamhaus DROP/EDROP).
   if [ "$SET_INTEL" ] && "$IPSET" list "$SET_INTEL" >/dev/null 2>&1 \
@@ -533,36 +506,7 @@ fw_rules() {
   #    jatah. Ditambah batas koneksi bersamaan dan pemutusan QUIC (UDP 443)
   #    supaya throttle tidak bisa dihindari dengan pindah ke HTTP/3 atau
   #    menumpuk koneksi keep-alive.
-  if have_mod hashlimit && have_mod conntrack; then
-    "$IPT" -A "$CHAIN" -p tcp -m multiport --dports "$WEB_PORTS" \
-      -m set --match-set "$SET_THR" src --syn -m conntrack --ctstate NEW \
-      -m hashlimit --hashlimit-above "$THROTTLE_RPS/second" \
-      --hashlimit-burst "$THROTTLE_BURST" --hashlimit-mode srcip \
-      --hashlimit-name sentinel_thr_s --hashlimit-htable-expire 600000 \
-      -m comment --comment "sentinel:throttle-rate" -j DROP
-    if [ "$THROTTLE_RPM" -gt 0 ]; then
-      "$IPT" -A "$CHAIN" -p tcp -m multiport --dports "$WEB_PORTS" \
-        -m set --match-set "$SET_THR" src --syn -m conntrack --ctstate NEW \
-        -m hashlimit --hashlimit-above "$THROTTLE_RPM/minute" \
-        --hashlimit-burst "$THROTTLE_BURST" --hashlimit-mode srcip \
-        --hashlimit-name sentinel_thr_m --hashlimit-htable-expire 600000 \
-        -m comment --comment "sentinel:throttle-rpm" -j DROP
-      say "throttle per menit: maksimal ${THROTTLE_RPM} koneksi baru/menit per IP"
-    else
-      say "throttle per menit: DIMATIKAN (throttle_rpm = 0)"
-    fi
-    if have_mod connlimit; then
-      "$IPT" -A "$CHAIN" -p tcp -m multiport --dports "$WEB_PORTS" \
-        -m set --match-set "$SET_THR" src --syn \
-        -m connlimit --connlimit-above "$THROTTLE_CONN" --connlimit-mask 32 \
-        -m comment --comment "sentinel:throttle-conn" -j DROP
-    fi
-    "$IPT" -A "$CHAIN" -p udp --dport 443 -m set --match-set "$SET_THR" src \
-      -m comment --comment "sentinel:throttle-quic" -j DROP
-    say "throttle per IP: ${THROTTLE_RPS} koneksi baru/detik (burst ${THROTTLE_BURST}), maks ${THROTTLE_CONN} koneksi bersamaan, QUIC ditutup"
-  else
-    err "modul hashlimit/conntrack tidak ada, aturan throttle dilewati"
-  fi
+  say "throttle per IP: tidak aktif (butuh paket Pro: fw_advanced)"
 
   # 5) Anti SYN flood dan anti koneksi berkelanjutan, per IP.
   if have_mod connlimit && have_mod conntrack; then
@@ -583,12 +527,6 @@ fw_rules() {
   # 5a) QUIC (UDP 443) per IP: batas paket yang longgar untuk klien sah
   #     (unduhan besar lewat HTTP/3 ~ ribuan paket/detik) tetapi menahan
   #     banjir UDP dari satu sumber.
-  if have_mod hashlimit; then
-    "$IPT" -A "$CHAIN" -p udp --dport 443 \
-      -m hashlimit --hashlimit-above "$QUIC_PPS/second" --hashlimit-burst "$((QUIC_PPS * 2))" \
-      --hashlimit-mode srcip --hashlimit-name sentinel_quic --hashlimit-htable-expire 60000 \
-      -m comment --comment "sentinel:quic-flood" -j DROP
-  fi
 
   # 6) Pengaman global. Hanya menyala bila nilainya diisi.
   #    Tujuannya mencegah PHP-FPM jenuh total saat lonjakan besar.
@@ -659,22 +597,8 @@ do_install() {
   # -diam setiap reboot -- persis jenis kegagalan senyap yang ingin
   # dihindari. Kalau mode terisi tetapi set kosong, isi ulang sekarang.
   # sentinel-fw.service berjalan saat boot, jadi ini yang memulihkannya.
-  if [ "$GEO_MODE" != "off" ] && [ -n "$GEO_NEGARA" ]; then
-    local isi_geo
-    isi_geo="$("$IPSET" list "$SET_GEO" 2>/dev/null | grep -c '^[0-9]')"
-    if [ "${isi_geo:-0}" -eq 0 ]; then
-      say "geo_mode=$GEO_MODE tetapi set kosong (kemungkinan habis reboot): mengisi ulang"
-      if geo_isi_set; then
-        say "geo-ban dipulihkan: $("$IPSET" list "$SET_GEO" 2>/dev/null | grep -c '^[0-9]') blok CIDR"
-      else
-        err "gagal memulihkan geo-ban; periksa $GEO_JSON dan kode negara"
-      fi
-    fi
-  else
-    # Bila mode off atau negara kosong: pastikan ipset dikosongkan agar tidak ada sisa CIDR lama
-    if "$IPSET" list "$SET_GEO" >/dev/null 2>&1; then
-      "$IPSET" flush "$SET_GEO" 2>/dev/null || true
-    fi
+  if "$IPSET" list "$SET_GEO" >/dev/null 2>&1; then
+    "$IPSET" flush "$SET_GEO" 2>/dev/null || true
   fi
 
   tune_conntrack
@@ -728,7 +652,13 @@ do_install() {
 
   # 9) EGRESS GUARD: pulihkan status egress bila aktif atau terkonfigurasi on
   if [ -f "$EGRESS_FLAG_FILE" ] || [ "$EGRESS_MODE" = "on" ]; then
-    do_egress_on
+    # edisi Free: Egress Guard adalah fitur Pro; lepas sisa aturan lama, penanda dan pengaturan operator tidak dihapus
+    while "$IPT" -S OUTPUT 2>/dev/null | grep -q -- "-j $EGRESS_CHAIN"; do
+      "$IPT" -D OUTPUT -m owner --uid-owner "$WEB_UID" -j "$EGRESS_CHAIN" 2>/dev/null || break
+    done
+    "$IPT" -F "$EGRESS_CHAIN" 2>/dev/null || true
+    "$IPT" -X "$EGRESS_CHAIN" 2>/dev/null || true
+    say "Egress Guard: tidak aktif (butuh paket Pro; penanda dipertahankan)"
   fi
 
   # 10) PORT FIREWALL: terapkan aturan port masuk & keluar jika ports.json ada
@@ -938,50 +868,8 @@ do_panic_status() {
 # ==================================================================
 do_egress_on() {
   need_root
-  if ! have_mod owner; then
-    err "modul iptables owner tidak didukung di kernel ini"
-    return 1
-  fi
-
-  "$IPT" -N "$EGRESS_CHAIN" 2>/dev/null || true
-  "$IPT" -F "$EGRESS_CHAIN" 2>/dev/null || { err "gagal mengosongkan chain $EGRESS_CHAIN"; return 1; }
-
-  # 1) Loopback interface
-  "$IPT" -A "$EGRESS_CHAIN" -o lo -j ACCEPT
-
-  # 2) Koneksi balasan / established
-  if have_mod conntrack; then
-    "$IPT" -A "$EGRESS_CHAIN" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-  fi
-
-  # 3) DNS query (UDP & TCP 53)
-  "$IPT" -A "$EGRESS_CHAIN" -p udp --dport 53 -j ACCEPT
-  "$IPT" -A "$EGRESS_CHAIN" -p tcp --dport 53 -j ACCEPT
-
-  # 4) Web API & Git HTTPS keluar (HTTP 80, HTTPS 443, Git 9418)
-  "$IPT" -A "$EGRESS_CHAIN" -p tcp -m multiport --dports 80,443,9418 -j ACCEPT
-
-  # 5) SSH keluar untuk Git clone/pull/push (GitHub, GitLab, Bitbucket: port 22, 2222)
-  "$IPT" -A "$EGRESS_CHAIN" -p tcp -m multiport --dports 22,2222 -j ACCEPT
-
-  # 6) Submission email (587, 465)
-  "$IPT" -A "$EGRESS_CHAIN" -p tcp -m multiport --dports 587,465 -j ACCEPT
-
-  # 7) Blokir seluruh koneksi keluar lainnya
-  if ! "$IPT" -A "$EGRESS_CHAIN" -m comment --comment "sentinel:egress-block" \
-       -j REJECT --reject-with icmp-port-unreachable 2>/dev/null; then
-    "$IPT" -A "$EGRESS_CHAIN" -m comment --comment "sentinel:egress-block" -j DROP
-  fi
-
-  # Hook ke chain OUTPUT untuk UID pekerja web
-  while "$IPT" -S OUTPUT 2>/dev/null | grep -qxF -- "-A OUTPUT -m owner --uid-owner $WEB_UID -j $EGRESS_CHAIN"; do
-    "$IPT" -D OUTPUT -m owner --uid-owner "$WEB_UID" -j "$EGRESS_CHAIN" 2>/dev/null || break
-  done
-  "$IPT" -I OUTPUT 1 -m owner --uid-owner "$WEB_UID" -j "$EGRESS_CHAIN"
-
-  mkdir -p /www/server/sentinel/run
-  printf 'on\nuid=%s\nports=22,53,80,443,465,587,2222,9418\nsince=%s\n' "$WEB_UID" "$(date '+%Y-%m-%d %H:%M:%S')" > "$EGRESS_FLAG_FILE"
-  say "EGRESS GUARD AKTIF: lalu lintas keluar UID $WEB_UID (www) dibatasi ke DNS, HTTP, HTTPS, Git SSH, SMTP"
+  err "Egress Guard membutuhkan paket Pro"
+  return 1
 }
 
 do_egress_off() {
@@ -1062,87 +950,14 @@ GEO_JSON="${SENTINEL_GEO_JSON:-/www/server/panel/data/firewall/GeoLite2-Country.
 # aman dipanggil dari dalam do_install tanpa rekursi.
 # Mengembalikan 0 bila set terisi, bukan-0 bila gagal/kosong.
 geo_isi_set() {
-  [ "$GEO_MODE" = "off" ] && return 1
-  [ -n "$GEO_NEGARA" ] || return 1
-  [ -f "$GEO_JSON" ] || return 1
-  ensure_set "$SET_GEO" 0
-
-  # Bangun isi ipset restore langsung dari Python: satu transaksi
-  # "flush <set>" + "add <set> <cidr>" per baris. JSON parsing di shell
-  # rapuh, dan 'ipset add' satu per satu untuk 100 ribu blok akan
-  # memakan waktu lama serta meninggalkan set setengah terisi bila
-  # dihentikan di tengah.
-  local tmp
-  tmp="$(mktemp /tmp/sentinel-geo.XXXXXX)" || return 1
-  local py_bin="python3"
-  if [ -x /www/server/panel/pyenv/bin/python3 ]; then
-    py_bin="/www/server/panel/pyenv/bin/python3"
-  fi
-  if ! GEO_JSON="$GEO_JSON" GEO_MODE="$GEO_MODE" GEO_NEGARA="$GEO_NEGARA" \
-       SET_GEO="$SET_GEO" "$py_bin" - > "$tmp" <<'PY'
-import json, os, sys
-try:
-    data = json.load(open(os.environ['GEO_JSON']))
-except Exception:
-    sys.exit(1)
-mode = os.environ['GEO_MODE']
-ingin = set(x for x in os.environ['GEO_NEGARA'].split(',') if x)
-setname = os.environ['SET_GEO']
-out = []
-for entri in data:
-    kode = entri.get('brief') or entri.get('code') or ''
-    if not kode:
-        continue
-    pilih = (kode in ingin) if mode == 'block' else (kode not in ingin)
-    if pilih:
-        out.extend(entri.get('ips') or [])
-if not out:
-    sys.exit(2)
-print('flush %s' % setname)
-for cidr in out:
-    print('add %s %s' % (setname, cidr))
-PY
-  then
-    rm -f "$tmp"
-    return 1
-  fi
-
-  if ! "$IPSET" restore < "$tmp" 2>/dev/null; then
-    rm -f "$tmp"
-    return 1
-  fi
-  rm -f "$tmp"
-  return 0
+  return 1      # edisi Free: geo-ban adalah fitur Pro
 }
 
 do_geo_apply() {
   need_root
-  if [ "$GEO_MODE" = "off" ] || [ -z "$GEO_NEGARA" ]; then
-    say "geo_mode=off atau daftar negara kosong: tidak ada yang diblokir"
-    do_geo_clear
-    return 0
-  fi
-  if [ ! -f "$GEO_JSON" ]; then
-    err "berkas geo tidak ada: $GEO_JSON"
-    return 1
-  fi
-
-  if ! geo_isi_set; then
-    err "tidak ada blok CIDR cocok; periksa kode negara (contoh sah: CN, RU, US)"
-    return 1
-  fi
-
-  local isi
-  isi="$("$IPSET" list "$SET_GEO" 2>/dev/null | grep -c '^[0-9]')"
-  if [ "${isi:-0}" -eq 0 ]; then
-    err "ipset $SET_GEO kosong setelah restore; geo-ban GAGAL"
-    return 1
-  fi
-  say "geo-ban aktif: $isi blok CIDR di $SET_GEO"
-
-  # Pasang ulang aturan supaya perubahannya langsung berlaku.
-  bash "$0" install >/dev/null 2>&1 || err "aturan kernel gagal dipasang ulang"
-  say "aturan kernel dipasang ulang"
+  say "geo_mode=off atau daftar negara kosong: tidak ada yang diblokir"
+  do_geo_clear
+  return 0
 }
 
 do_geo_clear() {

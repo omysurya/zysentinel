@@ -1690,6 +1690,9 @@ button.sn-tile{font-size:13px}
 </div>
 
 <script>
+/* Versi plugin: SATU-SATUNYA literal versi di skrip, ditanam _client/versi.py dari nama cabang rilis (release/vX.Y.Z) */
+var SN_VERSI = '1.6.2';
+
 /* Sanitasi otomatis untuk menghapus event handler usang atau tidak valid pada document */
 function snSanitizeEvents(){
 	try {
@@ -1994,7 +1997,7 @@ var SN_I18N = {
 		tip_refresh_packet_counters: "Refresh Packet Counters",
 		tip_mode_monitor_only: "Switch Mode to Monitor: Log Without Blocking",
 		tip_mode_enable_blocking: "Switch Mode to Enforce: Block Violators in Kernel",
-		brand_sub: "ZYSENTINEL v1.6.2",
+		brand_sub: "ZYSENTINEL v" + SN_VERSI,
 		btn_maintenance: "⚙️ Maintenance",
 		btn_feedback: "💬 Feedback",
 		tab_dashboard: "Dashboard",
@@ -2649,7 +2652,7 @@ var SN_I18N = {
 		tip_refresh_packet_counters: "Segarkan Penghitung Paket",
 		tip_mode_monitor_only: "Alihkan Mode ke Monitor: Mencatat Tanpa Memblokir",
 		tip_mode_enable_blocking: "Alihkan Mode ke Enforce: Blokir Pelanggar di Kernel",
-		brand_sub: "ZYSENTINEL v1.6.2",
+		brand_sub: "ZYSENTINEL v" + SN_VERSI,
 		btn_maintenance: "⚙️ Pemeliharaan",
 		btn_feedback: "💬 Feedback",
 		tab_dashboard: "Dashboard",
@@ -3352,7 +3355,7 @@ function snInjectGtm(){
 		}
 		try {
 			window.gtag('event', 'sentinel_active', {
-				'app_version': '1.6.2',
+				'app_version': SN_VERSI,
 				'server_host': window.location.hostname || 'unknown-ip'
 			});
 		} catch(e){}
@@ -3370,11 +3373,11 @@ function snEsc(s){
 		.replace(/'/g, '&#39;');
 }
 
-/* Format versi ZySentinel agar konsisten dengan standar branch/tag 'v1.6.2' */
+/* Format versi ZySentinel agar konsisten dengan standar branch/tag 'vX.Y.Z'; kosong/versi bawaan lama = versi plugin */
 function snFmtVer(v){
-	if(!v || v === '-' || v === 'undefined') return 'v1.6.2';
+	if(!v || v === '-' || v === 'undefined') return 'v' + SN_VERSI;
 	var s = String(v).trim();
-	if(s === '1.0.0' || s === '1.6' || s === '1.6.0') return 'v1.6.2';
+	if(s === '1.0.0' || s === '1.6' || s === '1.6.0') return 'v' + SN_VERSI;
 	return (s.charAt(0).toLowerCase() === 'v') ? s : ('v' + s);
 }
 
@@ -3739,7 +3742,7 @@ function snAjax(method, data, cb, pIdx, btnEl, isSilent){
 		for(var i = 0; i < daftar.length; i++){ try{ daftar[i][fn](a, b2); }catch(e){} }
 	};
 
-	$.ajax({
+	var xhrSenyap = $.ajax({
 		url: '/plugin?action=a&name=sentinel&s=' + method,
 		type: 'POST',
 		headers: headers,
@@ -3757,10 +3760,68 @@ function snAjax(method, data, cb, pIdx, btnEl, isSilent){
 		},
 		error: function(xhr, status){
 			doneCleanup();
+			if(xhr && xhr.__snBatal){ return; }     /* dibatalkan karena dialog terbuka: bukan galat, tidak ditampilkan */
 			selesaiGalat(xhr, status);
 			bagi('err', xhr, status);
 		}
 	});
+	/* Permintaan SENYAP (penyegaran otomatis) dilacak supaya bisa dibatalkan saat dialog terbuka. Yang digabung dengan
+	   permintaan pengguna (ada penunggu di SN_INFLIGHT) tidak pernah dibatalkan. */
+	if(isSilent && xhrSenyap && typeof xhrSenyap.abort === 'function'){
+		xhrSenyap.__snKunci = kunci;
+		SN_SILENT_XHR.push(xhrSenyap);
+		var lepas = function(){ var i = SN_SILENT_XHR.indexOf(xhrSenyap); if(i >= 0) SN_SILENT_XHR.splice(i, 1); };
+		if(typeof xhrSenyap.always === 'function'){ xhrSenyap.always(lepas); }
+	}
+}
+
+/* ---------- jeda pemantau latar selama dialog terbuka ---------- */
+/* Selama ada dialog (layer.open/confirm/alert, bukan toast layer.msg atau pemuat) di atas dasbor: penyegaran otomatis
+   tidak menembak permintaan baru dan permintaan senyap yang sedang berjalan dibatalkan, supaya dialog tidak patah-patah.
+   Begitu dialog terakhir ditutup, satu putaran penyegaran dijalankan lagi. */
+var SN_SILENT_XHR = [];
+var SN_LATAR_ANTRE = [];
+var SN_DLG_TERBUKA = false;
+/* Tugas latar sekali jalan (mis. telemetri 4 dtk setelah dibuka): bila dialog terbuka, ditunda sampai tertutup. */
+function snLatar(fn){
+	if(snDialogTerbuka()){ SN_DLG_TERBUKA = true; if(SN_LATAR_ANTRE.indexOf(fn) < 0){ SN_LATAR_ANTRE.push(fn); } return; }
+	fn();
+}
+var SN_DLG_OBS = null;
+function snDialogTerbuka(){
+	var els = document.querySelectorAll('.layui-layer');
+	for(var i = 0; i < els.length; i++){
+		if(/layui-layer-(msg|loading|tips)(\s|$)/.test(els[i].className)) continue;
+		if(els[i].style.display === 'none') continue;
+		return true;
+	}
+	return false;
+}
+function snBatalSenyap(){
+	var a = SN_SILENT_XHR.slice();
+	SN_SILENT_XHR.length = 0;
+	for(var i = 0; i < a.length; i++){
+		var x = a[i];
+		if(x.__snKunci && SN_INFLIGHT[x.__snKunci] && SN_INFLIGHT[x.__snKunci].length){ continue; }   /* ada penunggu: biarkan selesai */
+		x.__snBatal = true;
+		if(x.__snKunci){ delete SN_INFLIGHT[x.__snKunci]; }
+		try{ x.abort(); }catch(e){}
+	}
+}
+function snPantauDialog(){
+	if(SN_DLG_OBS || typeof MutationObserver === 'undefined' || !document.body) return;
+	SN_DLG_OBS = new MutationObserver(function(){
+		var t = snDialogTerbuka();
+		if(t === SN_DLG_TERBUKA) return;
+		SN_DLG_TERBUKA = t;
+		if(t){ snBatalSenyap(); }
+		else {
+			var antre = SN_LATAR_ANTRE.splice(0);
+			for(var i = 0; i < antre.length; i++){ try{ antre[i](); }catch(e){} }
+			if(SN_TIMER){ snAutoTick(); }       /* dialog terakhir ditutup: lanjutkan penyegaran sekarang */
+		}
+	});
+	SN_DLG_OBS.observe(document.body, {childList: true});
 }
 
 /* ---------- Sistem Auto-Refresh Fleksibel & Terkendali Pengguna ---------- */
@@ -3798,7 +3859,11 @@ function snStartAutoRefresh(sec){
 	sec = sec || SN_AUTO_REFRESH_SEC;
 	if(!sec || sec <= 0) return;
 
-	SN_TIMER = setInterval(function(){
+	SN_TIMER = setInterval(snAutoTick, sec * 1000);
+}
+
+function snAutoTick(){
+	{
 		var m = document.getElementById('snModal');
 		if(!m || !document.body.contains(m)){
 			if(SN_TIMER){ clearInterval(SN_TIMER); SN_TIMER = null; }
@@ -3808,6 +3873,8 @@ function snStartAutoRefresh(sec){
 			if(SN_TIMER){ clearInterval(SN_TIMER); SN_TIMER = null; }
 			return;
 		}
+		/* Dialog terbuka: jeda (tidak ada permintaan latar sampai dialog ditutup) */
+		if(snDialogTerbuka()){ SN_DLG_TERBUKA = true; return; }
 
 		// Animasi halus pada ikon auto-refresh sebagai indikator visual
 		var ico = $('#icoAutoRefresh');
@@ -3842,7 +3909,7 @@ function snStartAutoRefresh(sec){
 		else if($('#top-waf').hasClass('on')){
 			snWafMuat(null, true);
 		}
-	}, sec * 1000);
+	}
 }
 
 /* ---------- kerangka dialog ---------- */
@@ -3856,6 +3923,7 @@ function snBuka(){
 	document.body.style.overflow = 'hidden';
 	/* Mulai timer auto-refresh sesuai preferensi pengguna (default: 0 = manual/off) */
 	snInitAutoRefresh();
+	snPantauDialog();
 	/* Pemuatan awal instan dan bersih: HANYA muat data dashboard aktif */
 	setTimeout(function(){
 		snStatus();        /* statistik utama & lencana status ribbon instan */
@@ -3867,7 +3935,7 @@ function snBuka(){
 		}, 250);
 		/* Telemetri (skrip pihak ketiga) ditunda sampai tampilan selesai
 		   dan peramban menganggur; bukan bagian dari render awal. */
-		setTimeout(function(){ if($('#snModal').hasClass('on')){ snInitTelemetry(); } }, 4000);
+		setTimeout(function(){ if($('#snModal').hasClass('on')){ snLatar(snInitTelemetry); } }, 4000);
 	}, 30);
 }
 function snTutupLapis(){
@@ -4202,6 +4270,70 @@ function snEliteLoad(btn, isSilent){
 	}, null, btn, isSilent);
 }
 
+/* ---------- PHP2Shell (CVE-2026-109618 / 109619): paparan versi PHP, mitigasi, pemindai memori ---------- */
+var SN_PHP_DIALOG = null;
+function snPhpHtml(d){
+	var isEn = (SN_LANG !== 'id');
+	var v = d.versi || [], h = '';
+	var st = {rentan: [isEn ? 'VULNERABLE' : 'RENTAN', 'sn-bad'], tanpa_perbaikan: [isEn ? 'NO OFFICIAL FIX' : 'TANPA PERBAIKAN RESMI', 'sn-bad'], diperbaiki: [isEn ? 'FIXED' : 'SUDAH DIPERBAIKI', 'sn-ok']};
+	h += '<div class="sn-note" style="margin-bottom:10px;font-size:12px">' + (isEn
+		? 'Two PHP flaws (CVE-2026-109618, CVE-2026-109619, patched 21 Oct 2026) allow memory corruption in PHP workers. <b>Upgrading PHP is the only complete fix.</b> Turning off <code>session.upload_progress</code> only closes one path. ZySentinel adds a safety net: it logs, and optionally kills, worker behaviour typical after exploitation.'
+		: 'Dua kerentanan PHP (CVE-2026-109618, CVE-2026-109619, diperbaiki 21 Okt 2026) memungkinkan korupsi memori pada worker PHP. <b>Memperbarui PHP adalah satu-satunya perbaikan lengkap.</b> Mematikan <code>session.upload_progress</code> hanya menutup satu jalur. ZySentinel menambah jaring pengaman: mencatat, dan bila diaktifkan mematikan, perilaku worker yang khas setelah eksploitasi.') + '</div>';
+	h += '<table class="sn-tb"><thead><tr><th>PHP</th><th>' + (isEn ? 'Version' : 'Versi') + '</th><th>Status</th><th>' + (isEn ? 'Fixed in' : 'Perbaikan di') + '</th><th>upload_progress</th><th>pearcmd.php</th><th></th></tr></thead><tbody>';
+	for(var i = 0; i < v.length; i++){
+		var x = v[i], s = st[x.status] || [x.status, 'sn-bad'];
+		h += '<tr><td class="sn-mono">' + snEsc(x.dir) + '</td><td class="sn-mono">' + snEsc(x.versi) + '</td>'
+			+ '<td><span class="sn-badge ' + s[1] + '">' + snEsc(s[0]) + '</span></td><td class="sn-mono">' + snEsc(x.perbaikan) + '</td>'
+			+ '<td>' + (x.upload_progress ? '<span class="sn-badge sn-bad">' + (isEn ? 'ON' : 'AKTIF') + '</span>' : '<span class="sn-badge sn-ok">OFF</span>') + '</td>'
+			+ '<td>' + (x.pearcmd ? (isEn ? 'present' : 'ada') : '-') + '</td>'
+			+ '<td>' + (x.upload_progress ? '<button class="sn-btn" onclick="snPhpMatikan(\'' + snEsc(x.dir) + '\')">' + (isEn ? 'Turn off upload_progress' : 'Matikan upload_progress') + '</button>' : '') + '</td></tr>';
+	}
+	if(!v.length){ h += '<tr><td colspan="7" class="sn-empty">' + (isEn ? 'No PHP version found under /www/server/php' : 'Tidak ada versi PHP di /www/server/php') + '</td></tr>'; }
+	h += '</tbody></table>';
+	var m = d.memscan || {};
+	h += '<div style="font-weight:600;margin:14px 0 6px">' + (isEn ? 'Worker memory scanner (sentinel-memscan)' : 'Pemindai memori worker (sentinel-memscan)') + '</div>'
+		+ '<table class="sn-tb"><tbody>'
+		+ '<tr><td>' + (isEn ? 'Binary installed' : 'Biner terpasang') + '</td><td>' + (m.terpasang ? '<span class="sn-badge sn-ok">OK</span>' : '<span class="sn-badge sn-bad">' + (isEn ? 'MISSING (reinstall the plugin)' : 'TIDAK ADA (pasang ulang plugin)') + '</span>') + '</td><td></td></tr>'
+		+ '<tr><td>' + (isEn ? 'Scanning (every ' + snEsc(m.interval || '30') + ' s)' : 'Pemindaian (tiap ' + snEsc(m.interval || '30') + ' dtk)') + '</td><td>' + (m.aktif ? 'ON' : 'OFF') + '</td>'
+		+ '<td><button class="sn-btn" onclick="snMemscanSet(\'memscan\',\'' + (m.aktif ? 'off' : 'on') + '\')">' + (m.aktif ? (isEn ? 'Turn off' : 'Matikan') : (isEn ? 'Turn on' : 'Aktifkan')) + '</button></td></tr>'
+		+ '<tr><td>' + (isEn ? 'Kill the process on a high-confidence finding: memfd, /dev/shm, in-memory ELF (needs Process Guard = ENFORCE)' : 'Bunuh proses pada temuan berkeyakinan tinggi: memfd, /dev/shm, ELF di memori (butuh Process Guard = ENFORCE)') + '</td><td>' + (m.kill ? (m.kill_mode === 'on' ? (isEn ? 'ON (incl. deleted libraries)' : 'ON (termasuk pustaka terhapus)') : 'ON') : (isEn ? 'OFF (audit only)' : 'OFF (hanya audit)')) + '</td>'
+		+ '<td><button class="sn-btn" onclick="snMemscanSet(\'memscan_kill\',\'' + (m.kill ? 'off' : 'tinggi') + '\')">' + (m.kill ? (isEn ? 'Audit only' : 'Hanya audit') : (isEn ? 'Enable kill' : 'Aktifkan bunuh')) + '</button></td></tr>'
+		+ '<tr><td colspan="3" style="font-size:11.5px;color:var(--ink-2)">' + (isEn ? 'Scanned: PHP workers, Node.js, Python, Ruby, Java, Deno, Bun, .NET, and any non-root process listening on TCP (Go/Rust servers). A worker that starts a child process is scanned immediately.' : 'Dipindai: worker PHP, Node.js, Python, Ruby, Java, Deno, Bun, .NET, dan proses non-root apa pun yang listen TCP (server Go/Rust). Worker yang menjalankan proses anak dipindai seketika.') + '</td></tr>'
+		+ '</tbody></table>';
+	h += '<div class="sn-note" style="margin-top:10px;font-size:11.5px">' + (isEn
+		? 'Also: update PHP via aaPanel, set <code>fatal_error_backtraces=0</code> on PHP 8.5, remove or block <code>pearcmd.php</code>, never expose php-fpm to the network. Findings appear in Elite Defence &rarr; EDR as MEM_*, WORKER_* and PTRACE_WEB.'
+		: 'Juga: perbarui PHP lewat aaPanel, setel <code>fatal_error_backtraces=0</code> di PHP 8.5, hapus atau blokir <code>pearcmd.php</code>, jangan buka php-fpm ke jaringan. Temuan tampil di Elite Defence &rarr; EDR sebagai MEM_*, WORKER_*, dan PTRACE_WEB.') + '</div>';
+	return h;
+}
+function snPhpDetail(){
+	var isEn = (SN_LANG !== 'id');
+	snAjax('get_php_exposure', {}, function(d){
+		if(!d) return;
+		if(SN_PHP_DIALOG !== null){ try{ layer.close(SN_PHP_DIALOG); }catch(e){} }
+		/* isi sudah ada saat dibuka, tinggi kosong (lihat snDefconDetail) */
+		SN_PHP_DIALOG = layer.open({type: 1, title: isEn ? 'PHP2Shell Exposure (CVE-2026-109618 / 109619)' : 'Paparan PHP2Shell (CVE-2026-109618 / 109619)', area: ['860px', ''],
+			maxHeight: Math.floor(window.innerHeight * 0.9), shadeClose: true, content: '<div style="padding:14px 16px" id="phpBody">' + snPhpHtml(d) + '</div>',
+			btn: [isEn ? 'Close' : 'Tutup'], end: function(){ SN_PHP_DIALOG = null; }});
+	});
+}
+function snPhpMatikan(dir){
+	var isEn = (SN_LANG !== 'id');
+	layer.confirm(isEn ? ('Set session.upload_progress.enabled = Off on PHP ' + dir + '? A php.ini backup is made, php-fpm is syntax-checked and reloaded gracefully, and the change is verified.')
+		: ('Setel session.upload_progress.enabled = Off pada PHP ' + dir + '? Dibuat cadangan php.ini, php-fpm diuji sintaksis lalu di-reload halus, dan perubahan diverifikasi.'),
+		{title: 'PHP ' + dir, btn: isEn ? ['Confirm', 'Cancel'] : ['Konfirmasi', 'Batal']}, function(idx){
+		layer.close(idx);
+		var pIdx = snProgress(isEn ? 'Updating php.ini and reloading php-fpm...' : 'Memperbarui php.ini dan reload php-fpm...');
+		snAjax('set_php_mitigation', {version: dir}, function(msg){
+			if(!msg){ return; }      /* ditolak server: snAjax sudah menampilkan alasannya dan memanggil cb(null) */
+			layer.msg(msg, {time: 6000});
+			snPhpDetail(); snEliteLoad(null, true);
+		}, pIdx);
+	});
+}
+function snMemscanSet(k, v){
+	snAjax('set_memscan', {key: k, value: v}, function(msg){ if(!msg){ return; } layer.msg(msg); snPhpDetail(); });
+}
+
 /* ---------- dialog DEFCON: indikator yang diukur + refresh berprogres ---------- */
 function snDefconNamaIndikator(k){
 	var isEn = (SN_LANG !== 'id');
@@ -4212,7 +4344,8 @@ function snDefconNamaIndikator(k){
 		persistensi: [isEn ? 'System persistence changes (cron, systemd, ld.so, profile.d, sudoers.d)' : 'Perubahan persistensi sistem (cron, systemd, ld.so, profile.d, sudoers.d)', '', ''],
 		egress: [isEn ? 'Egress Guard (anti reverse shell)' : 'Egress Guard (anti reverse shell)', isEn ? 'Active' : 'Aktif', isEn ? 'Inactive' : 'Nonaktif'],
 		proc_guard: [isEn ? 'Process Guard (EDR) service' : 'Layanan Process Guard (EDR)', isEn ? 'Running' : 'Berjalan', isEn ? 'Not running' : 'Tidak berjalan'],
-		intel: [isEn ? 'Global Threat Intel blocks (CIDR)' : 'Blok Global Threat Intel (CIDR)', '', isEn ? 'Empty' : 'Kosong']
+		intel: [isEn ? 'Global Threat Intel blocks (CIDR)' : 'Blok Global Threat Intel (CIDR)', '', isEn ? 'Empty' : 'Kosong'],
+		php_rentan: [isEn ? 'PHP versions without the PHP2Shell fix (info, does not change the level)' : 'Versi PHP tanpa perbaikan PHP2Shell (informasi, tidak mengubah level)', '', '']
 	};
 	return n[k] || [k, '', ''];
 }
@@ -4234,7 +4367,7 @@ function snDefconHtml(){
 		var nilai = (nm[1] && x.baik) ? nm[1] : ((nm[2] && !x.baik) ? nm[2] : String(Number(x.nilai) || 0));
 		h += '<tr><td>' + snEsc(nm[0]) + '</td><td class="r sn-mono">' + snEsc(nilai) + '</td>'
 			+ '<td>' + (x.baik ? '<span class="sn-badge sn-ok">OK</span>' : '<span class="sn-badge sn-bad">' + (isEn ? 'ATTENTION' : 'PERHATIAN') + '</span>') + '</td>'
-			+ '<td><span style="color:' + (SN_DEFCON_WARNA[x.level] || '#94a3b8') + '">DEFCON ' + x.level + '</span></td></tr>';
+			+ '<td><span style="color:' + (SN_DEFCON_WARNA[x.level] || '#94a3b8') + '">' + (x.level ? 'DEFCON ' + x.level : 'info') + '</span></td></tr>';
 	}
 	h += '</tbody></table>';
 	h += '<div class="sn-note" style="margin-top:10px;font-size:11.5px">' + (isEn
@@ -4625,14 +4758,17 @@ function snStats(s, m){
 		[isEn ? 'Lines Read' : 'Baris Terbaca', (s.lines || 0).toLocaleString(), g, '&#128196;'],
 		[isEn ? 'Memory' : 'Memori', (m ? m.rss_mb : '0') + ' MB', b, '&#128190;'],
 		['DEFCON', (p && p.defcon ? 'DEFCON ' + p.defcon : '...'), (p && SN_DEFCON_WARNA[p.defcon]) || b, '&#127919;', 'snDefconDetail()',
-			p && p.defcon ? snDefconTeks(p).judul + (isEn ? ' (click for details)' : ' (klik untuk rincian)') : '']
+			p && p.defcon ? snDefconTeks(p).judul + (isEn ? ' (click for details)' : ' (klik untuk rincian)') : '', 'snDefconCard'],
+		['PHP2Shell', (p && p.php_exposure ? (p.php_exposure.rentan > 0 ? p.php_exposure.rentan + (isEn ? ' vulnerable' : ' rentan') : (isEn ? 'Patched' : 'Aman')) : '...'),
+			(p && p.php_exposure ? (p.php_exposure.rentan > 0 ? '#f97316' : '#10b981') : b), '&#128737;', 'snPhpDetail()',
+			isEn ? 'PHP versions vs CVE-2026-109618/109619 (click for details)' : 'Versi PHP terhadap CVE-2026-109618/109619 (klik untuk rincian)', 'snPhpCard']
 	];
 	var h = '';
 	for(var i = 0; i < kartu.length; i++){
 		var val = kartu[i][1];
 		var valStr = String(val);
 		var fsize = (valStr.length > 12) ? 'font-size:13px;' : (valStr.length > 8 ? 'font-size:14.5px;' : 'font-size:16px;');
-		var klik = kartu[i][4] ? ' id="snDefconCard" role="button" tabindex="0" style="cursor:pointer" onclick="' + kartu[i][4] + '" title="' + snEsc(kartu[i][5] || '') + '"' : '';
+		var klik = kartu[i][4] ? ' id="' + (kartu[i][6] || '') + '" role="button" tabindex="0" style="cursor:pointer" onclick="' + kartu[i][4] + '" title="' + snEsc(kartu[i][5] || '') + '"' : '';
 		h += '<div class="sn-stat"' + klik + '><div class="ic" style="background:' + kartu[i][2] + '1a;border:1px solid ' + kartu[i][2] + '55;color:' + kartu[i][2] + '">' + kartu[i][3] + '</div>'
 			+ '<div class="tx"><div class="k" title="' + kartu[i][0] + '">' + kartu[i][0] + '</div>'
 			+ '<div class="v" style="' + fsize + (kartu[i][4] ? 'color:' + kartu[i][2] + ';' : '') + '" title="' + valStr + '">' + val + '</div></div></div>';
@@ -9044,7 +9180,7 @@ function snDoFreshInstall(){
 			layer.close(idx);
 			var loadIdx = layer.msg(isEn ? 'Running ZySentinel Fresh Install, please wait...' : 'Menjalankan Fresh Install ZySentinel, mohon tunggu...', {time:0, shade:[0.4,'#000']});
 			if(typeof gtag === 'function'){
-				gtag('event', 'install_fresh', {'event_category': 'lifecycle', 'app_version': '1.6.2'});
+				gtag('event', 'install_fresh', {'event_category': 'lifecycle', 'app_version': SN_VERSI});
 			}
 			snAjax('run_lifecycle_action', {action: 'fresh'}, function(res){
 				layer.close(loadIdx);
@@ -9095,7 +9231,7 @@ function snCheckUpdate(){
 	snAjax('check_github_update', {}, function(data){
 		layer.close(loadIdx);
 		if(!data) return;
-		var vCur = snEsc(snFmtVer(data.current_version || 'v1.6.2'));
+		var vCur = snEsc(snFmtVer(data.current_version || ('v' + SN_VERSI)));
 		var vLat = snEsc(snFmtVer(data.latest_version || vCur));
 		var hasUpd = data.has_update;
 		var notes = snEsc(data.release_notes || (isEn ? 'No release notes.' : 'Tidak ada catatan rilis.'));
@@ -9133,7 +9269,7 @@ function snDoUpdate(){
 	var isEn = (SN_LANG !== 'id');
 	var loadIdx = layer.msg(isEn ? 'Downloading and applying ZySentinel update...' : 'Mengunduh dan menerapkan pembaruan ZySentinel...', {time:0, shade:[0.4,'#000']});
 	if(typeof gtag === 'function'){
-		gtag('event', 'install_update', {'event_category': 'lifecycle', 'app_version': '1.6.2'});
+		gtag('event', 'install_update', {'event_category': 'lifecycle', 'app_version': SN_VERSI});
 	}
 	snAjax('run_lifecycle_action', {action: 'update'}, function(res){
 		layer.close(loadIdx);
@@ -9153,7 +9289,7 @@ function snDoSelfHeal(){
 			layer.close(idx);
 			var pIdx = snProgress(isEn ? 'Running diagnostics and self-heal...' : 'Menjalankan diagnostik dan perbaikan mandiri...');
 			if(typeof gtag === 'function'){
-				gtag('event', 'install_repair', {'event_category': 'lifecycle', 'app_version': '1.6.2'});
+				gtag('event', 'install_repair', {'event_category': 'lifecycle', 'app_version': SN_VERSI});
 			}
 			snAjax('run_lifecycle_action', {action: 'repair'}, function(res){
 				if(res){
@@ -9192,7 +9328,7 @@ function snDoUninstall(){
 			layer.close(idx);
 			var pIdx = snProgress(isEn ? 'Uninstalling ZySentinel and cleaning files completely...' : 'Mencabut dan meng-uninstall ZySentinel secara total...');
 			if(typeof gtag === 'function'){
-				gtag('event', 'uninstall_clean', {'event_category': 'lifecycle', 'app_version': '1.6.2'});
+				gtag('event', 'uninstall_clean', {'event_category': 'lifecycle', 'app_version': SN_VERSI});
 			}
 			snAjax('run_lifecycle_action', {action: 'uninstall', confirm: txt}, function(res){
 				if(res){

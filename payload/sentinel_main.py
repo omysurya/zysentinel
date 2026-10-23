@@ -26,6 +26,11 @@ import shlex
 import uuid
 import fcntl
 
+_PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
+if _PLUGIN_DIR not in sys.path:
+    sys.path.insert(0, _PLUGIN_DIR)
+import sentinel_license as _lic
+
 if sys.version_info[0] == 2:
     reload(sys)
     sys.setdefaultencoding('utf-8')
@@ -41,6 +46,86 @@ try:
         from panelAuth import panelAuth
 except Exception:
     panelAuth = None
+
+
+# ====================================================================== #
+# GERBANG LISENSI                                                        #
+# ====================================================================== #
+# Satu tabel menentukan metode API mana yang butuh fitur paket apa. Penegakan terpusat di
+# __getattribute__ (bukan 164 dekorator yang bisa terlewat). Melihat data (get_*) tetap bebas;
+# yang dikunci adalah mengaktifkan/menjalankan/mengubah fitur berbayar. Mematikan (off) tidak pernah
+# dikunci agar pengguna yang turun ke Free bisa merapikan sendiri. Keputusan paket diambil biner
+# biner pemverifikasi lisensi (Ed25519), bukan kode di sini; pohon sumber berjalan mode terbuka (lihat sentinel_license.ENFORCE).
+_AV_ENGINE_PREMIUM = ('judol', 'ransomware', 'mining', 'sage', 'ai', 'scan-ai', 'all')
+_THRESHOLD_KEYS = ('watch_score', 'throttle_score', 'ban_score', 'weight_scan', 'weight_brute', 'weight_badua',
+                   'weight_distinct', 'cap_scan', 'cap_brute', 'cap_badua', 'cap_distinct', 'ban_seconds',
+                   'ban_seconds_max', 'max_ips')
+
+
+def _g(get, k, d=''):
+    try:
+        v = get.get(k, d)
+    except Exception:
+        v = d
+    return str(v if v is not None else d).strip()
+
+
+def _gate_set_conf(get):
+    k, v = _g(get, 'key'), _g(get, 'value')
+    if k == 'enforce':
+        return 'enforce' if v == '1' else None
+    if k in _THRESHOLD_KEYS:
+        return 'thresholds'
+    if k in ('throttle_rps', 'throttle_rpm', 'throttle_burst'):
+        return 'fw_advanced'
+    return None
+
+
+def _gate_av_engine(get):
+    return 'av_engines' if _g(get, 'engine', 'both').lower() in _AV_ENGINE_PREMIUM else None
+
+
+def _gate_sweeper_config(get):
+    try:
+        cfg = json.loads(_g(get, 'config', '{}') or '{}')
+    except Exception:
+        return None
+    return 'sweeper_auto' if isinstance(cfg, dict) and cfg.get('auto_quarantine') else None
+
+
+def _gate_elite(get):
+    t, m = _g(get, 'type'), _g(get, 'mode')
+    if t == 'proc' and m == 'enforce':
+        return 'proc_enforce'
+    if t == 'egress' and m == 'on':
+        return 'egress'
+    return None
+
+
+LICENSE_GATES = {
+    'set_conf': _gate_set_conf,
+    'learned_add': 'learn', 'learned_update': 'learn',
+    'learned_toggle': lambda g: 'learn' if _g(g, 'enabled', '1') in ('1', 'true', 'on') else None,
+    'set_geo_ban': 'geo_ban',
+    'update_threat_intel': 'threat_sync',
+    'set_zy_module': 'waf_full', 'set_zy_setting': 'waf_full', 'waf_list_add': 'waf_full', 'set_waf_rule': 'waf_full',
+    'toggle_vhost_upload_scan': 'upload_scan', 'toggle_upload_scan_service': 'upload_scan',
+    'set_vhost_upload_scan': lambda g: 'upload_scan' if _g(g, 'state').lower() in ('1', 'true', 'on', 'yes') else None,
+    'av_scan': _gate_av_engine, 'av_scan_start': lambda g: 'av_engines' if _gate_av_engine(g) else 'av_scheduled',
+    'av_scan_ai': 'av_engines', 'av_sage_test': 'av_engines',
+    'sweeper_start': 'sweeper', 'sweeper_calibrate': 'sweeper', 'sweeper_build': 'sweeper',
+    'sweeper_schedule': lambda g: 'sweeper_auto' if _g(g, 'mode') == 'on' else None,
+    'set_sweeper_config': _gate_sweeper_config,
+    'set_proc_guard': lambda g: 'proc_enforce' if _g(g, 'mode', 'enforce') == 'enforce' else None,
+    'add_proc_whitelist': 'proc_enforce', 'del_proc_whitelist': 'proc_enforce', 'toggle_proc_whitelist': 'proc_enforce',
+    'set_egress_guard': lambda g: 'egress' if _g(g, 'status', 'on') == 'on' else None,
+    'set_elite_defense': _gate_elite,
+    'av_baseline': 'integ_web', 'av_check': 'integ_web',
+    'set_memscan': lambda g: 'memscan' if _g(g, 'value') in ('on', 'tinggi') else None,
+    'set_notif_conf': 'notify', 'test_notif': 'notify',
+}
+
+_PLAN_NAME = {'pro': 'Pro', 'max': 'Max'}
 
 
 def _angka_json(teks, kunci):
@@ -356,10 +441,7 @@ class sentinel_main(object):
             # Helper scripts yang wajib ada di /www/server/sentinel/bin
             core_scripts = [
                 'sentinel-ports.py', 'sentinel-waf.sh', 'sentinel-fw.sh',
-                'sentinel-av.sh', 'sentinel-proc.py', 'sentinel-intel.sh',
-                'sentinel-notify.sh', 'sentinel-upload-scan.py', 'sentinel-selfheal.py',
-                'sentinel-sweeper.py', 'sentinel-sweeplib.py',
-                'sentinel-sage.py', 'sentinel-zyrules.py', 'guardctl', 'guardd'
+                'sentinel-av.sh', 'sentinel-proc.py', 'sentinel-intel.sh', 'sentinel-zyrules.py', 'guardctl', 'guardd'
             ]
             for s in core_scripts:
                 target = os.path.join(bin_dir, s)
@@ -375,8 +457,7 @@ class sentinel_main(object):
             unit_dir = os.path.join(payload_dir, 'systemd')
             if os.path.isdir(unit_dir) and os.path.isdir('/etc/systemd/system'):
                 unit_installed = False
-                for u in ['sentinel.service', 'sentinel-fw.service', 'sentinel-fw.timer',
-                          'sentinel-proc.service', 'sentinel-intel.service', 'sentinel-intel.timer']:
+                for u in ['sentinel.service', 'sentinel-fw.service', 'sentinel-fw.timer', 'sentinel-proc.service']:
                     u_src = os.path.join(unit_dir, u)
                     u_dst = os.path.join('/etc/systemd/system', u)
                     if not os.path.exists(u_dst) and os.path.isfile(u_src):
@@ -617,7 +698,6 @@ class sentinel_main(object):
             (r'^Threat Intel berhasil diperbarui: (.*)$', r'Threat Intel updated successfully: \1'),
             (r'^Gagal memperbarui Threat Intel: (.*)$', r'Failed to update Threat Intel: \1'),
             (r'^Upload Protection untuk vhost \'(.*)\' berhasil (.*)$', r"Upload Protection for vhost '\1' \2 successfully"),
-            (r'^Layanan sentinel-upload-scan berhasil di-(start|stop|restart)$', r'sentinel-upload-scan service successfully \1ed'),
             (r'^Gagal (start|stop|restart) layanan: (.*)$', r'Failed to \1 service: \2'),
             (r'^Gagal membaca konfigurasi: (.*)$', r'Failed to read configuration: \1'),
             (r'^Gagal menulis: (.*)$', r'Failed to write: \1'),
@@ -668,6 +748,15 @@ class sentinel_main(object):
             # Sesudah pemeriksaan sesi: menyalin berkas inti dan daemon-reload
             # tidak boleh dipicu oleh permintaan yang belum terotentikasi.
             self._ensure_core_files()
+            # Gerbang lisensi (sesudah otentikasi sesi, sebelum metode berjalan)
+            gate = LICENSE_GATES.get(name)
+            if gate is not None:
+                try:
+                    gate = gate(get) if callable(gate) else gate
+                except Exception:
+                    gate = None
+                if gate and not _lic.allowed(gate):
+                    return self._lisensi_ditolak(gate, active_lang)
             res = attr(get, *args, **kwargs)
             if isinstance(res, dict) and 'msg' in res and isinstance(res['msg'], str):
                 res['msg'] = self._localize_msg(res['msg'], active_lang)
@@ -1142,7 +1231,8 @@ class sentinel_main(object):
             up = json.load(open(self._p('etc', 'vhost_upload_scan.json')))
         except Exception:
             up = {}
-        rc, o, _ = self._sh('systemctl is-active sentinel-proc.service sentinel-upload-scan.service 2>/dev/null', 5)
+        rc, o, _ = self._sh('systemctl is-active sentinel-proc.service 2>/dev/null', 5)
+        o = (o.split() + ['unknown'])[0] + ' inactive'      # Upload Protection tidak ada di edisi Free
         akt = (o.split() + ['unknown', 'unknown'])[:2]
         jalan = int(st.get('enforce', 0) or 0)
         try:
@@ -1298,11 +1388,13 @@ class sentinel_main(object):
             info['mem_pakai'] = 0
             info['mem_persen'] = 0.0
 
+        # versi daemon (guardd) hanya ditampilkan bila LEBIH BARU dari plugin; versi bawaan lama/kosong = versi plugin
         st_ver = st.get('version')
-        if not st_ver or str(st_ver).strip() in ('1.0.0', '1.6', '1.6.0', '1.6.1', '1.6.2', '-'):
-            info['versi'] = 'v1.6.2'
+        v_plugin = self._versi_plugin()
+        if not st_ver or str(st_ver).strip() == '-' or self._parse_version(st_ver) <= self._parse_version(v_plugin):
+            info['versi'] = self._normalize_version(v_plugin)
         else:
-            info['versi'] = str(st_ver) if str(st_ver).lower().startswith('v') else ('v' + str(st_ver))
+            info['versi'] = self._normalize_version(st_ver)
         info['pid'] = st.get('pid', 0)
         info['host'] = st.get('hosts', 0)
         info['ip'] = self._self_ip()
@@ -2042,6 +2134,9 @@ class sentinel_main(object):
         """Pelajari satu keputusan. Mengembalikan kalimat ringkas untuk
         operator, atau '' bila tidak ada yang perlu disampaikan."""
         isEn = (lang == 'en')
+        if not _lic.allowed('learn'):
+            return (' | Learning is a Pro feature (upgrade to teach the plugin from your decisions)' if isEn
+                    else ' | Belajar dari keputusan adalah fitur Pro (upgrade untuk mengajari plugin)')
         # Keputusan berlawanan atas IP yang sama membatalkan pelajaran lama
         # dari IP itu (operator berubah pikiran).
         lawan = 'A' if aksi == 'B' else 'B'
@@ -2166,56 +2261,13 @@ class sentinel_main(object):
 
     def learned_add(self, get):
         """Tambah pelajaran secara manual (tanpa IP sumber; hanya dicabut manual)."""
-        isEn = (self._get_active_lang(get) == 'en')
-        L, err = self._learn_masukan(get)
-        if err:
-            return public.returnMsg(False, err)
-
-        def kerja(st):
-            if any(x['id'] == L['id'] for x in st['lessons']):
-                return 'ada'
-            if len(st['lessons']) >= self.LEARN_MAX:
-                return 'penuh'
-            now = int(time.time())
-            st['lessons'] = [x for x in st['lessons'] if not (x['aksi'] != L['aksi'] and x.get('path', '') == L['path'] and x.get('ua', '') == L['ua'])]
-            L2 = dict(L); L2.update({'sources': [], 'manual': True, 'created': now, 'updated': now, 'host': '-'})
-            st['lessons'].append(L2)
-            st['_ubah'] = True
-            return 'ok'
-        hasil = self._learn_edit(kerja)
-        if hasil == 'ada':
-            return public.returnMsg(False, 'Lesson already exists' if isEn else 'pelajaran yang sama sudah ada')
-        if hasil == 'penuh':
-            return public.returnMsg(False, 'Lesson limit reached' if isEn else 'batas jumlah pelajaran tercapai')
-        return public.returnMsg(True, ('Lesson %s added' if isEn else 'Pelajaran %s ditambahkan') % L['id'])
+        # Edisi Free: fitur berbayar (learn) tidak ada; respons sama dengan build Pro berlisensi Free.
+        return self._lisensi_ditolak('learn', self._get_active_lang(get))
 
     def learned_update(self, get):
         """Ubah pola/kategori/aturan satu pelajaran. Sumber IP dipertahankan."""
-        isEn = (self._get_active_lang(get) == 'en')
-        lid = str(get.get('id') or '').strip().lower()
-        if not re.fullmatch(r'[0-9a-f]{4,11}', lid):
-            return public.returnMsg(False, 'Invalid lesson id' if isEn else 'id pelajaran tidak valid')
-        L, err = self._learn_masukan(get)
-        if err:
-            return public.returnMsg(False, err)
-
-        def kerja(st):
-            lama = [x for x in st['lessons'] if x['id'] == lid]
-            if not lama:
-                return 'tidak'
-            if L['id'] != lid and any(x['id'] == L['id'] for x in st['lessons']):
-                return 'ada'
-            x = lama[0]
-            x.update({'id': L['id'], 'aksi': L['aksi'], 'kind': L['kind'], 'path': L['path'],
-                      'ua': L['ua'], 'updated': int(time.time())})
-            st['_ubah'] = True
-            return 'ok'
-        hasil = self._learn_edit(kerja)
-        if hasil == 'tidak':
-            return public.returnMsg(False, 'Lesson not found' if isEn else 'pelajaran tidak ditemukan')
-        if hasil == 'ada':
-            return public.returnMsg(False, 'Another lesson already has this pattern' if isEn else 'pelajaran lain sudah memakai pola ini')
-        return public.returnMsg(True, ('Lesson updated (%s)' if isEn else 'Pelajaran diperbarui (%s)') % L['id'])
+        # Edisi Free: fitur berbayar (learn) tidak ada; respons sama dengan build Pro berlisensi Free.
+        return self._lisensi_ditolak('learn', self._get_active_lang(get))
 
     def learned_revoke(self, get):
         lid = str(get.get('id') or '').strip().lower()
@@ -2671,6 +2723,12 @@ class sentinel_main(object):
     # ------------------------------------------------------------------ #
     PORTS_CONF = '/www/server/sentinel/etc/ports.json'
     PROC_WHITELIST_CONF = '/www/server/sentinel/etc/proc_whitelist.json'
+    PROC_RULE_LONGGAR = ('WORKER_ANAK_ASING', 'COMM_PALSU', 'PTRACE_WEB')
+    PHP_ROOT = '/www/server/php'
+    PHP_INIT = '/etc/init.d/php-fpm-%s'
+    # Rilis perbaikan PHP2Shell (CVE-2026-109618 / CVE-2026-109619, 21 Okt 2026). Cabang di bawah 8.2 tanpa rilis resmi.
+    PHP_PERBAIKAN = {(8, 2): 35, (8, 3): 36, (8, 4): 27, (8, 5): 12}
+    _php_cache = {'t': 0, 'v': None}
 
     def _ports_script(self, action):
         """Panggil helper biner sentinel-ports.py."""
@@ -2805,6 +2863,15 @@ class sentinel_main(object):
         baru, err = self._port_rule_masukan(get, direction)
         if err:
             return public.returnMsg(False, err)
+        try:
+            with open(self.PORTS_CONF, 'r') as fp:
+                _cfg0 = json.load(fp)
+            _n = sum(1 for d in ('inbound', 'outbound') for r in _cfg0.get(d, []) if not r.get('system'))
+        except Exception:
+            _n = 0
+        ditolak = self._batas_ditolak(get, 'port_rules', _n)
+        if ditolak:
+            return ditolak
         kolom = 'source' if direction == 'inbound' else 'dest'
         clean_port, protocol, action = baru['port'], baru['protocol'], baru['action']
         alamat_str, remark = baru[kolom], baru['remark']
@@ -3058,37 +3125,14 @@ class sentinel_main(object):
 
     def set_zy_module(self, get):
         """Hidupkan atau matikan satu modul ZySentinel."""
-        nama = str(get.get('name') or '').strip()
-        aksi = str(get.get('state') or '').strip()
-        if nama not in self.ZY_MODUL:
-            return public.returnMsg(False, 'modul tidak dikenal: %s' % _aman(nama))
-        if aksi not in ('on', 'off'):
-            return public.returnMsg(False, 'state harus on atau off')
-        ok, pesan = self._zy_siap()
-        if not ok:
-            return public.returnMsg(False, 'ruleset ZySentinel belum siap: %s' % pesan)
-        rc, o, e = self._waf('modul-set', nama, aksi)
-        if rc != 0:
-            return public.returnMsg(False, 'gagal: %s' % (e.strip() or o.strip()))
-        return self._zy_terapkan(get, 'Modul %s %s.' % (nama, aksi))
+        # Edisi Free: fitur berbayar (waf_full) tidak ada; respons sama dengan build Pro berlisensi Free.
+        return self._lisensi_ditolak('waf_full', self._get_active_lang(get))
 
     def set_zy_setting(self, get):
         """Ubah pengaturan: bot_level 0-3, strict 0-1, fallback 0-1,
         paranoia 1-4, threshold 1-100."""
-        k = str(get.get('key') or '').strip()
-        if k not in self.ZY_SETTING:
-            return public.returnMsg(False, 'pengaturan tidak dikenal: %s' % _aman(k))
-        mentah = str(get.get('value') if get.get('value') is not None else '').strip()
-        lo, hi = self.ZY_SETTING[k]
-        if not re.fullmatch(r'[0-9]{1,4}', mentah) or not (lo <= int(mentah) <= hi):
-            return public.returnMsg(False, 'nilai %s harus bilangan bulat %d sampai %d' % (k, lo, hi))
-        ok, pesan = self._zy_siap()
-        if not ok:
-            return public.returnMsg(False, 'ruleset ZySentinel belum siap: %s' % pesan)
-        rc, o, e = self._waf('setting-set', k, str(int(mentah)))
-        if rc != 0:
-            return public.returnMsg(False, 'gagal: %s' % (e.strip() or o.strip()))
-        return self._zy_terapkan(get, 'Pengaturan %s = %d.' % (k, int(mentah)))
+        # Edisi Free: fitur berbayar (waf_full) tidak ada; respons sama dengan build Pro berlisensi Free.
+        return self._lisensi_ditolak('waf_full', self._get_active_lang(get))
 
     # ---- daftar IP/URL WAF (disimpan sebagai teks, satu entri per baris) ----
     def _waf_list_baca(self, nama):
@@ -3153,39 +3197,8 @@ class sentinel_main(object):
         ip_black / ip_white : IPv4, CIDR (/8 sampai /32), atau rentang a-b
         url_black / url_white : regex yang valid dan tidak cocok dengan semua URL
         """
-        nama = str(get.get('list') or '').strip()
-        nilai = get.get('value')
-        if nama not in self.WAF_LISTS:
-            return public.returnMsg(False, 'daftar tidak dikenal')
-        if not isinstance(nilai, str):
-            return public.returnMsg(False, 'nilai tidak valid: harus berupa teks')
-        nilai = nilai.strip()
-        if nama.startswith('ip_'):
-            simpan, rentang, err = self._waf_ip_normal(nilai, nama)
-        else:
-            simpan, err = regex_waras(nilai)
-            rentang = None
-        if err:
-            return public.returnMsg(False, 'nilai tidak valid: %s' % err)
-        ada = self._waf_list_baca(nama)
-        if len(ada) >= self.WAF_LIST_MAKS:
-            return public.returnMsg(False, 'daftar penuh (maksimal %d entri)' % self.WAF_LIST_MAKS)
-        for e in ada:
-            if e == simpan:
-                return public.returnMsg(False, 'nilai sudah ada di daftar')
-            if rentang is not None:
-                b2, r2, er2 = self._waf_ip_normal(e, nama, aman_diri=False)
-                if r2 == rentang:
-                    return public.returnMsg(False, 'nilai sudah ada di daftar')
-        ok, pesan = self._zy_siap()
-        if not ok:
-            return public.returnMsg(False, 'ruleset ZySentinel belum siap: %s' % pesan)
-        ada.append(simpan)
-        try:
-            self._waf_list_tulis(nama, ada)
-        except Exception as ex:
-            return public.returnMsg(False, 'gagal menulis daftar: %s' % ex)
-        return self._zy_terapkan(get, '%s masuk %s.' % (simpan, nama))
+        # Edisi Free: fitur berbayar (waf_full) tidak ada; respons sama dengan build Pro berlisensi Free.
+        return self._lisensi_ditolak('waf_full', self._get_active_lang(get))
 
     def waf_list_del(self, get):
         """Hapus satu entri dari daftar."""
@@ -3382,6 +3395,21 @@ class sentinel_main(object):
             return public.returnMsg(False, 'nama situs tidak valid')
         if aksi not in ('on', 'off'):
             return public.returnMsg(False, 'state harus on atau off')
+        if aksi == 'on':
+            aktif, ada = 0, False
+            try:
+                with open(self._p('etc', 'waf.conf')) as fh:
+                    for ln in fh:
+                        m = re.match(r'^vhost\.([a-z]+)\.(\S+)\s*=\s*on\s*$', ln.strip())
+                        if m:
+                            aktif += 1
+                            ada = ada or (m.group(1) == ws and m.group(2) == site)
+            except OSError:
+                pass
+            if not ada:
+                ditolak = self._batas_ditolak(get, 'waf_vhosts', aktif)
+                if ditolak:
+                    return ditolak
         rc, o, e = self._waf('vhost-%s' % ('on' if aksi == 'on' else 'off'),
                              ws, site)
         # kode 2 = keinginan disimpan karena engine belum ada. Itu BUKAN
@@ -3417,27 +3445,8 @@ class sentinel_main(object):
 
     def set_waf_rule(self, get):
         """Aktifkan atau nonaktifkan satu rule group OWASP."""
-        nama = (get.get('rule') or '').strip()
-        aksi = (get.get('state') or '').strip()
-        if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9._-]{0,79}', nama):
-            return public.returnMsg(False, 'nama rule tidak valid')
-        if aksi not in ('on', 'off'):
-            return public.returnMsg(False, 'state harus on atau off')
-        rc, o, e = self._waf('rule-%s' % aksi, nama)
-        if rc != 0:
-            return public.returnMsg(False, 'gagal: %s'
-                                    % (e.strip() or o.strip()))
-        if str(get.get('reload') or '1') == '0':
-            return public.returnMsg(True, o.strip() or 'selesai')
-        # Reload hanya perlu bila ada vhost yang WAF-nya aktif.
-        rc1, o1, e1 = self._waf('vhosts')
-        aktif = any(b.endswith('|on') for b in o1.splitlines())
-        if aktif:
-            rc2, o2, e2 = self._waf('reload', 'all')
-            if rc2 != 0:
-                return public.returnMsg(False, '%s. Reload GAGAL: %s' % (o.strip(), (e2.strip() or o2.strip())[-300:]))
-            return public.returnMsg(True, '%s. Web server di-reload agar rule berlaku' % (o.strip() or 'selesai'))
-        return public.returnMsg(True, o.strip() or 'selesai')
+        # Edisi Free: fitur berbayar (waf_full) tidak ada; respons sama dengan build Pro berlisensi Free.
+        return self._lisensi_ditolak('waf_full', self._get_active_lang(get))
 
     # ------------------------------------------------------------------ #
     # status engine WAF dan switch mode                                   #
@@ -3999,65 +4008,8 @@ class sentinel_main(object):
         memutus seluruh pengunjung satu negara, jadi tidak boleh terjadi
         dari satu klik yang tidak sengaja.
         """
-        aksi = (get.get('aksi') or get.get('act') or get.get('sub_action') or (get.get('action') if get.get('action') != 'a' else None) or '').strip()
-        if aksi not in ('on', 'off'):
-            return public.returnMsg(False, 'action harus on atau off')
-
-        if aksi == 'off':
-            self._sh("'%s/bin/guardctl' set geo_mode off" % self.__PATH, 20)
-            self._sh("'%s/bin/guardctl' set geo_negara ''" % self.__PATH, 20)
-            rc, o, e = self._sh(
-                "'%s/bin/sentinel-fw.sh' geo-clear" % self.__PATH, 60)
-            if rc != 0:
-                return public.returnMsg(False, 'gagal mematikan geo-ban: %s'
-                                        % (e.strip() or o.strip()))
-            return public.returnMsg(True, 'geo-ban dimatikan')
-
-        # --- menyalakan ---
-        konfirmasi = (get.get('confirm') or '').strip()
-        if konfirmasi != 'GEO':
-            return public.returnMsg(
-                False, 'konfirmasi tidak cocok. Ketik GEO dengan huruf '
-                       'besar semua untuk menyalakan geo-ban')
-
-        mode = (get.get('mode') or 'block').strip().lower()
-        if mode not in ('block', 'allow'):
-            return public.returnMsg(False, 'mode harus block atau allow')
-        negara = str(get.get('negara') or '').upper().replace(' ', '')
-        kode_valid = self._geo_kode_valid()
-        daftar = [x for x in negara.split(',') if x]
-        if not daftar:
-            return public.returnMsg(False, 'pilih minimal satu negara')
-        for k in daftar:
-            if not re.fullmatch(r'[A-Z]{2}', k) or (kode_valid and k not in kode_valid):
-                return public.returnMsg(
-                    False, 'kode negara tidak dikenal: %s (contoh sah: '
-                           'CN, RU, US)' % k)
-
-        # Tulis ke config lewat guardctl supaya backup dan formatnya
-        # konsisten dengan kunci lain.
-        self._sh("'%s/bin/guardctl' set geo_mode %s" % (self.__PATH, mode), 20)
-        self._sh("'%s/bin/guardctl' set geo_negara %s"
-                 % (self.__PATH, ','.join(daftar)), 20)
-
-        rc, o, e = self._sh(
-            "SENTINEL_GEO_MODE=%s SENTINEL_GEO_NEGARA=%s "
-            "'%s/bin/sentinel-fw.sh' geo-apply"
-            % (mode, ','.join(daftar), self.__PATH), 180)
-        if rc != 0:
-            return public.returnMsg(
-                False, 'geo-ban gagal diterapkan, sudah dibatalkan: %s'
-                       % (e.strip() or o.strip()))
-        # Tampilkan apa yang benar-benar terjadi, bukan yang diminta.
-        rc2, o2, e2 = self._sh(
-            "'%s/bin/sentinel-fw.sh' geo-status" % self.__PATH, 30)
-        blok = 0
-        for baris in o2.strip().splitlines():
-            if baris.startswith('blok='):
-                blok = int((baris.split('=', 1)[1] or '0').strip() or 0)
-        return public.returnMsg(
-            True, 'geo-ban aktif: mode %s, %d blok CIDR diblokir '
-                  'pada port web' % (mode, blok))
+        # Edisi Free: fitur berbayar (geo_ban) tidak ada; respons sama dengan build Pro berlisensi Free.
+        return self._lisensi_ditolak('geo_ban', self._get_active_lang(get))
 
     def geo_ban_off(self, get):
         """Mematikan fitur Geo-Ban dan membersihkan aturan di kernel."""
@@ -4283,7 +4235,7 @@ class sentinel_main(object):
             ' SUM(terkirim=0 AND coba>0) gagal FROM notif')
         hasil['antrean'] = t or {'total': 0, 'nunggu': 0, 'gagal': 0}
 
-        timer = self._sh('systemctl is-active sentinel-notify.timer', 15) if self._is_systemd() else (0, 'tidak aktif', '')
+        timer = (0, 'tidak aktif', '')      # notifikasi webhook adalah fitur Pro
         hasil['timer'] = timer[1].strip() or 'tidak aktif'
         return public.returnMsg(True, hasil)
 
@@ -4304,77 +4256,8 @@ class sentinel_main(object):
 
     def set_notif_conf(self, get):
         """Ubah tujuan notifikasi dan me-restart timer."""
-        url = (get.get('url') or '').strip()
-        token_lama = bool((self._notif_ada('NOTIFY_TOKEN')))
-        token = get.get('token')
-
-        if url and not url.startswith(('http://', 'https://')):
-            return public.returnMsg(
-                False, 'URL harus diawali http:// atau https://')
-        if len(url) > 500:
-            return public.returnMsg(False, 'URL terlalu panjang')
-        # Berkas notify.conf di-source oleh shell root dan nilainya masuk ke
-        # sed di guardctl: hanya karakter URL biasa yang boleh lewat.
-        if url and not re.fullmatch(r"[A-Za-z0-9._~:/?#@&=%+,;!*-]+", url):
-            return public.returnMsg(
-                False, 'URL memuat karakter yang tidak diizinkan (hanya huruf, angka, dan . _ ~ : / ? # @ & = % + , ; ! * -)')
-        if token is not None and str(token) != '' \
-                and not re.fullmatch(r"[A-Za-z0-9._~:/+=@,-]{1,300}", str(token)):
-            return public.returnMsg(
-                False, 'token memuat karakter yang tidak diizinkan atau terlalu panjang')
-
-        maks = self._int(get, 'maks', 5, 1, 20)
-        batch = self._int(get, 'batch', 20, 1, 200)
-        timeout = self._int(get, 'timeout', 8, 1, 120)
-        if maks is None:
-            return public.returnMsg(
-                False, 'percobaan maksimal harus angka antara 1 dan 20')
-        if batch is None:
-            return public.returnMsg(
-                False, 'jumlah per siklus harus angka antara 1 dan 200')
-        if timeout is None:
-            return public.returnMsg(
-                False, 'timeout harus angka antara 1 dan 120 detik')
-
-        isi = [
-            '# Notifikasi ZySentinel',
-            '# Ditulis ulang dari panel. Nilai token TIDAK ditampilkan',
-            '# di layar, tapi tetap ada di berkas ini.',
-            '',
-            'NOTIFY_URL=%s' % shlex.quote(url),
-        ]
-        # Token hanya ditulis kalau operator mengirimnya. Kalau tidak,
-        # token yang sudah ada dibiarkan supaya tidak terhapus tidak
-        # sengaja setiap kali URL diubah.
-        if token is not None and str(token) != '':
-            isi.append('NOTIFY_TOKEN=%s' % shlex.quote(str(token)))
-        elif token_lama:
-            # nilai lama dipertahankan (berkas ditulis ulang utuh)
-            isi.append('NOTIFY_TOKEN=%s' % shlex.quote(self._notif_nilai('NOTIFY_TOKEN')))
-
-        isi += [
-            'NOTIFY_KIND=%s' % shlex.quote(re.sub(r'[^A-Za-z0-9_,-]', '', self._only(get, 'kind', 'semua', 20)) or 'semua'),
-            'SENTINEL_NOTIF_MAX="%d"' % maks,
-            'SENTINEL_NOTIF_BATCH="%d"' % batch,
-            'SENTINEL_NOTIF_TIMEOUT="%d"' % timeout,
-            '',
-        ]
-        jalan = self._notify_conf_path()
-        try:
-            with open(jalan, 'w') as f:
-                f.write('\n'.join(isi))
-            os.chmod(jalan, 0o600)
-        except Exception as ex:
-            return public.returnMsg(False, 'gagal menulis: %s' % ex)
-
-        # Daemon harus tahu URL barunya supaya dia menulis antrean.
-        if url:
-            self._sh('%s set notify_url %s' % (
-                shlex.quote(os.path.join(self.__PATH, 'bin', 'guardctl')), shlex.quote(url)), 20)
-        self.service_action({'action': 'restart'})
-        if self._is_systemd():
-            self._sh('systemctl restart sentinel-notify.timer', 30)
-        return public.returnMsg(True, 'tujuan notifikasi disimpan')
+        # Edisi Free: fitur berbayar (notify) tidak ada; respons sama dengan build Pro berlisensi Free.
+        return self._lisensi_ditolak('notify', self._get_active_lang(get))
 
     def _notif_nilai(self, kunci):
         """Nilai tersimpan satu kunci di notify.conf."""
@@ -4385,34 +4268,8 @@ class sentinel_main(object):
 
     def test_notif(self, get):
         """Kirim satu notifikasi uji dan laporkan hasilnya apa adanya."""
-        jalan = self._notify_conf_path()
-        if not self._notif_ada('NOTIFY_URL'):
-            return public.returnMsg(
-                False, 'belum ada tujuan notifikasi. Isi dulu di sini.')
-        # Sisipkan lewat tabel yang sama supaya persis melewati jalur
-        # yang dipakai kejadian sebenarnya, bukan jalur terpisah.
-        m = self._sql1("SELECT ip FROM aksi LIMIT 1")
-        self._notif('uji',
-                    'Ini notifikasi uji dari ZySentinel. Kalau sampai '
-                    'diterima, pengaturan sudah benar.')
-        if self._is_systemd():
-            self._sh('systemctl start sentinel-notify.service', 90)
-        else:
-            self._sh("'%s/bin/sentinel-notify.sh' 2>/dev/null" % self.__PATH, 90)
-        # Beri waktu skrip menyelesaikan pengiriman.
-        import time as _t
-        _t.sleep(3)
-        d = self._sql1(
-            "SELECT terkirim, coba, galat FROM notif WHERE jenis='uji' "
-            'ORDER BY id DESC LIMIT 1')
-        if not d:
-            return public.returnMsg(
-                False, 'notifikasi uji tidak masuk antrean')
-        if d['terkirim']:
-            return public.returnMsg(True, 'notifikasi uji terkirim')
-        return public.returnMsg(
-            False, 'notifikasi uji gagal terkirim: %s'
-                   % (d.get('galat') or 'tidak diketahui'))
+        # Edisi Free: fitur berbayar (notify) tidak ada; respons sama dengan build Pro berlisensi Free.
+        return self._lisensi_ditolak('notify', self._get_active_lang(get))
 
     def get_notif_log(self, get):
         """Riwayat notifikasi terakhir."""
@@ -4886,20 +4743,13 @@ class sentinel_main(object):
 
     def av_scan_ai(self, get):
         """Mulai pemindaian AI Safety (SAGE Prompt Injection & Toxic Skills)."""
-        get['engine'] = 'sage'
-        return self.av_scan_start(get)
+        # Edisi Free: fitur berbayar (av_engines) tidak ada; respons sama dengan build Pro berlisensi Free.
+        return self._lisensi_ditolak('av_engines', self._get_active_lang(get))
 
     def av_sage_test(self, get):
         """Jalankan unit test mandiri heuristik SAGE AI Safety."""
-        skrip = self._p('bin', 'sentinel-sage.py')
-        if not os.path.isfile(skrip):
-            skrip = '/www/server/panel/plugin/sentinel/payload/sentinel-sage.py'
-        if not os.path.isfile(skrip):
-            return public.returnMsg(False, 'sentinel-sage.py tidak ditemukan')
-        py = '/www/server/panel/pyenv/bin/python3'
-        cmd = "%s '%s' test" % (py, skrip)
-        rc, o, e = self._sh(cmd, 30)
-        return public.returnMsg(rc == 0, o.strip() if rc == 0 else (e.strip() or o.strip()))
+        # Edisi Free: fitur berbayar (av_engines) tidak ada; respons sama dengan build Pro berlisensi Free.
+        return self._lisensi_ditolak('av_engines', self._get_active_lang(get))
 
     def av_scan_start(self, get):
         """Mulai pemindaian realtime streaming (ClamAV, Rkhunter, Ransomware, Judol, Mining, SAGE AI Safety, atau All-in-One)."""
@@ -5016,7 +4866,7 @@ class sentinel_main(object):
                         cmd = cf.read().replace(b'\x00', b' ').decode('utf-8', 'replace')
                 except Exception:
                     cmd = ''
-                if p > 1 and not re.search(r'clamscan|clamdscan|sentinel-av|sentinel-upload-scan', cmd):
+                if p > 1 and not re.search(r'clamscan|clamdscan|sentinel-av', cmd):
                     p = 0
                 if p > 0:
                     try:
@@ -5165,13 +5015,8 @@ class sentinel_main(object):
     # Sweeper: pemindai webshell (logika ShellSweep) selain ClamAV         #
     # ------------------------------------------------------------------ #
     def _sweeper(self, *args, timeout=60):
-        """Jalankan sentinel-sweeper.py dan baca baris JSON terakhirnya. Return dict {status, msg}."""
-        self._ensure_core_files()
-        skrip = self._p('bin', 'sentinel-sweeper.py')
-        if not os.path.isfile(skrip):
-            skrip = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'payload', 'sentinel-sweeper.py')
-        if not os.path.isfile(skrip):
-            return {'status': False, 'msg': 'sentinel-sweeper.py tidak ditemukan'}
+        """Jalankan mesin Sweeper (skrip Python) dan baca baris JSON terakhirnya. Return dict {status, msg}."""
+        return {'status': False, 'msg': 'Sweeper adalah fitur paket Pro. Klik Upgrade untuk membukanya.', 'upgrade': {'feature': 'sweeper', 'plan': 'pro', 'current': 'free'}}
         py = '/www/server/panel/pyenv/bin/python3'
         if not os.path.exists(py):
             py = 'python3'
@@ -5202,53 +5047,8 @@ class sentinel_main(object):
 
     def sweeper_start(self, get):
         """Mulai pemindaian Sweeper di latar: scope=vhosts (semua vhost + folder kustom) atau scope=path&path=..."""
-        scope = str(get.get('scope', 'vhosts')).strip().lower()
-        mode = str(get.get('mode', 'auto')).strip().lower()
-        if scope not in ('vhosts', 'path') or mode not in ('auto', 'report'):
-            return public.returnMsg(False, 'parameter tidak valid')
-        args = ['scan']
-        if scope == 'path':
-            p, err = self._sweeper_path(get.get('path', ''))
-            if err:
-                return public.returnMsg(False, err)
-            v = self._sweeper('validate-path', p)
-            if not v.get('status'):
-                return public.returnMsg(False, 'path ditolak: %s' % str(v.get('msg'))[:200])
-            args += ['--path', p]
-        else:
-            args.append('--all-vhosts')
-        if mode == 'report':
-            args.append('--report-only')
-        if str(get.get('full', '1')) != '0':
-            args.append('--full')
-        st = self._sweeper('status')
-        if st.get('status') and st['msg'].get('running'):
-            return public.returnMsg(True, {'started': False, 'running': True})
-        skrip = self._p('bin', 'sentinel-sweeper.py')
-        if not os.path.isfile(skrip):
-            return public.returnMsg(False, 'sentinel-sweeper.py tidak ditemukan')
-        py = '/www/server/panel/pyenv/bin/python3'
-        if not os.path.exists(py):
-            py = 'python3'
-        os.makedirs(self._p('log'), exist_ok=True)
-        log_f = self._p('log', 'sweeper.out')
-        cmd = ' '.join([shlex.quote(py), shlex.quote(skrip)] + [shlex.quote(a) for a in args]) + ' > %s 2>&1' % shlex.quote(log_f)
-        subprocess.Popen(['setsid', '-f', 'bash', '-c', cmd], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                         stderr=subprocess.DEVNULL, close_fds=True).wait()
-        for _ in range(30):
-            time.sleep(0.2)
-            s2 = self._sweeper('status')
-            if s2.get('status') and s2['msg'].get('running'):
-                return public.returnMsg(True, {'started': True, 'running': True})
-            if os.path.isfile(log_f):
-                try:
-                    with open(log_f) as fp:
-                        t = fp.read().strip()
-                    if t.startswith('{') and '"status": false' in t:
-                        return public.returnMsg(False, json.loads(t.splitlines()[-1]).get('msg', 'gagal'))
-                except Exception:
-                    pass
-        return public.returnMsg(True, {'started': True, 'running': False})
+        # Edisi Free: fitur berbayar (sweeper) tidak ada; respons sama dengan build Pro berlisensi Free.
+        return self._lisensi_ditolak('sweeper', self._get_active_lang(get))
 
     def get_sweeper_job(self, get):
         """Kemajuan pemindaian: running, progress (berkas/dipindai/ditandai), ringkasan akhir."""
@@ -5296,11 +5096,8 @@ class sentinel_main(object):
         return public.returnMsg(bool(r.get('status')), r.get('msg'))
 
     def sweeper_calibrate(self, get):
-        p, err = self._sweeper_path(get.get('path', ''))
-        if err:
-            return public.returnMsg(False, err)
-        r = self._sweeper('calibrate', p, timeout=110)
-        return public.returnMsg(bool(r.get('status')), r.get('msg'))
+        # Edisi Free: fitur berbayar (sweeper) tidak ada; respons sama dengan build Pro berlisensi Free.
+        return self._lisensi_ditolak('sweeper', self._get_active_lang(get))
 
     def get_sweeper_allow(self, get):
         r = self._sweeper('allow-list')
@@ -5322,8 +5119,8 @@ class sentinel_main(object):
 
     def sweeper_build(self, get):
         """Susun biner C dari sumber (butuh gcc); aman dijalankan berulang."""
-        r = self._sweeper('build', timeout=120)
-        return public.returnMsg(bool(r.get('status')), r.get('msg'))
+        # Edisi Free: fitur berbayar (sweeper) tidak ada; respons sama dengan build Pro berlisensi Free.
+        return self._lisensi_ditolak('sweeper', self._get_active_lang(get))
 
     def av_scan_all(self, get):
         """Jalankan pemindaian seluruh vhost di latar belakang."""
@@ -5425,25 +5222,13 @@ class sentinel_main(object):
 
     def av_baseline(self, get):
         """Rekam baseline integritas SHA-256 untuk berkas web pada vhost."""
-        path, err = self._av_path(get.get('path', ''))
-        if err:
-            return public.returnMsg(False, err)
-        label = self._av_label(self._only(get, 'label', ''), path)
-        rc, o, e = self._av('baseline', path, label)
-        if rc == 0:
-            return public.returnMsg(True, o.strip() or 'Baseline integritas berhasil direkam')
-        return public.returnMsg(False, e.strip() or o.strip() or 'Gagal merekam baseline integritas')
+        # Edisi Free: fitur berbayar (integ_web) tidak ada; respons sama dengan build Pro berlisensi Free.
+        return self._lisensi_ditolak('integ_web', self._get_active_lang(get))
 
     def av_check(self, get):
         """Periksa integritas berkas terhadap baseline yang tersimpan."""
-        path, err = self._av_path(get.get('path', ''))
-        if err:
-            return public.returnMsg(False, err)
-        label = self._av_label(self._only(get, 'label', ''), path)
-        rc, o, e = self._av('check', path, label)
-        if rc == 0:
-            return public.returnMsg(True, o.strip() or 'Pemeriksaan integritas selesai')
-        return public.returnMsg(False, e.strip() or o.strip() or 'Gagal memeriksa integritas berkas')
+        # Edisi Free: fitur berbayar (integ_web) tidak ada; respons sama dengan build Pro berlisensi Free.
+        return self._lisensi_ditolak('integ_web', self._get_active_lang(get))
 
     def get_av_integrity(self, get):
         """Daftar perubahan integritas berkas web (ditambah, diubah, dihapus)."""
@@ -5578,6 +5363,12 @@ class sentinel_main(object):
         except Exception:
             pass
             
+        try:
+            php_inv = self._php_inventaris()
+        except Exception:
+            php_inv = []
+        php_rentan = sum(1 for x in php_inv if x['status'] != 'diperbaiki')
+
         defcon = 3
         defcon_title = "DEFCON 3 -- PERTAHANAN PENUH AKTIF"
         defcon_desc = "Seluruh layer pertahanan (Firewall kernel, WAF, Egress Guard, Process Guard, Threat Intel) berjalan optimal tanpa insiden."
@@ -5586,7 +5377,9 @@ class sentinel_main(object):
         # Dihitung dari proc_alerts 15 menit terakhir. Dulu dipakai penghitung kumulatif
         # "kills" sejak Process Guard terakhir start, sehingga satu kejadian menahan
         # DEFCON 2 berjam-jam padahal deskripsinya "dalam 15 menit terakhir".
-        baru = [a for a in (proc_alerts or []) if now_ts - int(a.get('ts', 0) or 0) < 900]
+        # Aturan berkeyakinan rendah (audit saja, mis. pengunduh biasa atau nama proses) tidak menaikkan DEFCON.
+        baru = [a for a in (proc_alerts or []) if now_ts - int(a.get('ts', 0) or 0) < 900
+                and str(a.get('rule', '')).split('(', 1)[0].split(' ', 1)[0] not in self.PROC_RULE_LONGGAR]
         recent_kills = sum(1 for a in baru if str(a.get('action', '')).startswith('KILLED'))
         recent_alert = any(not str(a.get('action', '')).startswith('WHITELISTED') for a in baru)
 
@@ -5627,7 +5420,7 @@ class sentinel_main(object):
                 'active': intel_count > 0,
                 'count': intel_count,
                 'source': 'Spamhaus DROP & EDROP',
-                'timer': 'sentinel-intel.timer (2x sehari)'
+                'timer': '-'
             },
             'sys_persistence': {
                 'status': 'clean' if sys_changes == 0 else 'tampered',
@@ -5645,11 +5438,241 @@ class sentinel_main(object):
                 {'kode': 'egress', 'nilai': 1 if egress_on else 0, 'baik': egress_on, 'level': 4},
                 {'kode': 'proc_guard', 'nilai': 1 if proc_pid_active else 0, 'baik': proc_pid_active, 'level': 4},
                 {'kode': 'intel', 'nilai': intel_count, 'baik': intel_count > 0, 'level': 4},
+                # Informasi, tidak menggeser level: versi PHP yang belum menerima perbaikan PHP2Shell
+                {'kode': 'php_rentan', 'nilai': php_rentan, 'baik': php_rentan == 0, 'level': 0},
             ],
+            'php_exposure': {'rentan': php_rentan, 'total': len(php_inv), 'upload_progress_aktif': sum(1 for x in php_inv if x['upload_progress'])},
             'diukur': now_ts,
             'recent_alerts': proc_alerts,
             'proc_whitelist_count': proc_wl_count
         })
+
+    # ------------------------------------------------------------------ #
+    # PHP2Shell (CVE-2026-109618 / 109619): paparan PHP dan mitigasi terkontrol #
+    # ------------------------------------------------------------------ #
+    @staticmethod
+    def _php_ini_nilai(path, kunci):
+        """Nilai terakhir kunci php.ini yang TIDAK dikomentari (None bila tidak diatur)."""
+        nilai = None
+        try:
+            with open(path, 'r', errors='ignore') as f:
+                for ln in f:
+                    m = re.match(r'^\s*' + re.escape(kunci) + r'\s*=\s*"?([^";\s]*)', ln)
+                    if m:
+                        nilai = m.group(1)
+        except OSError:
+            return None
+        return nilai
+
+    def _php_versi(self, d):
+        """Versi PHP lengkap dari bin/php (dicache 10 menit; satu eksekusi ~20 ms per versi)."""
+        c = self._php_cache
+        if c['v'] is None or time.time() - c['t'] > 600:
+            c['v'] = {}
+            c['t'] = time.time()
+        if d not in c['v']:
+            try:
+                out = subprocess.check_output([os.path.join(self.PHP_ROOT, d, 'bin', 'php'), '-n', '-r', 'echo PHP_VERSION;'],
+                                              stderr=subprocess.DEVNULL, timeout=5).decode('utf-8', 'ignore').strip()
+            except Exception:
+                out = ''
+            c['v'][d] = out
+        return c['v'][d]
+
+    def _php_inventaris(self):
+        """Tiap versi PHP terpasang: versi, status terhadap PHP2Shell, setelan upload_progress, pearcmd."""
+        hasil = []
+        try:
+            nama = sorted(e for e in os.listdir(self.PHP_ROOT) if re.fullmatch(r'\d{2,3}', e))
+        except OSError:
+            return hasil
+        for d in nama:
+            ver = self._php_versi(d)
+            m = re.match(r'^(\d+)\.(\d+)\.(\d+)', ver)
+            if not m:
+                continue
+            mayor, minor, tambal = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            fix = self.PHP_PERBAIKAN.get((mayor, minor))
+            if fix is not None:
+                status = 'diperbaiki' if tambal >= fix else 'rentan'
+            elif (mayor, minor) < (8, 2):
+                status = 'tanpa_perbaikan'          # 7.4-8.1: tanpa rilis resmi; 5.x-7.3 EOL
+            else:
+                status = 'diperbaiki'               # cabang lebih baru dari yang dikenal
+            ini = os.path.join(self.PHP_ROOT, d, 'etc', 'php.ini')
+            up = self._php_ini_nilai(ini, 'session.upload_progress.enabled')
+            aktif = not (up is not None and up.lower() in ('0', 'off', 'false', 'no', ''))
+            mr = None
+            try:
+                mr = self._php_ini_nilai(os.path.join(self.PHP_ROOT, d, 'etc', 'php-fpm.conf'), 'pm.max_requests')
+            except Exception:
+                pass
+            hasil.append({
+                'dir': d, 'versi': ver, 'status': status,
+                'perbaikan': ('%d.%d.%d' % (mayor, minor, fix)) if fix else '-',
+                'upload_progress': aktif,
+                'pearcmd': os.path.isfile(os.path.join(self.PHP_ROOT, d, 'lib', 'php', 'pearcmd.php')),
+                'max_requests': mr or '-',
+            })
+        return hasil
+
+    def get_php_exposure(self, get):
+        """Paparan PHP2Shell per versi PHP terpasang, dan status pemindai memori."""
+        inv = self._php_inventaris()
+        conf = {}
+        try:
+            with open(self._p('etc', 'guardd.conf'), 'r', errors='ignore') as f:
+                for ln in f:
+                    if '=' in ln and not ln.lstrip().startswith('#'):
+                        k, v = ln.split('=', 1)
+                        conf[k.strip()] = v.split('#', 1)[0].strip()
+        except OSError:
+            pass
+        ms = ''      # pemindai memori adalah fitur Pro
+        return public.returnMsg(True, {
+            'versi': inv,
+            'memscan': {'terpasang': os.access(ms, os.X_OK), 'aktif': conf.get('memscan', 'on').lower() not in ('off', '0', 'false', 'no'),
+                        'kill_mode': self._memscan_kill_mode(conf.get('memscan_kill', 'tinggi')),
+                        'kill': self._memscan_kill_mode(conf.get('memscan_kill', 'tinggi')) != 'off',
+                        'interval': conf.get('memscan_interval', '30')},
+            'rekomendasi': ['upgrade', 'upload_progress', 'pearcmd', 'fpm_jaringan'],
+        })
+
+    def _php_master_workers(self, d):
+        """(PID master, set PID worker) php-fpm versi d dari berkas pid; (0, set()) bila tidak jalan."""
+        try:
+            with open(os.path.join(self.PHP_ROOT, d, 'var', 'run', 'php-fpm.pid')) as f:
+                m = int(f.read().strip())
+            os.kill(m, 0)
+        except Exception:
+            return 0, set()
+        try:
+            out = subprocess.check_output(['pgrep', '-P', str(m)], stderr=subprocess.DEVNULL).decode().split()
+        except Exception:
+            out = []
+        return m, set(int(x) for x in out)
+
+    def set_php_mitigation(self, get):
+        """Mitigasi sementara PHP2Shell: session.upload_progress.enabled = Off pada satu versi PHP.
+        Urutan: cadangan php.ini.bak.<ts> -> ubah -> php-fpm -t -> reload -> verifikasi (PID worker berganti, nilai berlaku).
+        Gagal di langkah mana pun mengembalikan php.ini semula. Bukan pengganti upgrade PHP."""
+        d = self._only(get, 'version', '')
+        # Jangan baca parameter bernama 'action': router aaPanel selalu mengirim action=a (lihat snAjax).
+        aksi = self._only(get, 'mitigasi', 'upload_progress_off')
+        if aksi != 'upload_progress_off':
+            return public.returnMsg(False, 'Aksi tidak dikenal')
+        if not re.fullmatch(r'\d{2,3}', d) or d not in [x['dir'] for x in self._php_inventaris()]:
+            return public.returnMsg(False, 'Versi PHP tidak ditemukan')
+        ini = os.path.join(self.PHP_ROOT, d, 'etc', 'php.ini')
+        fpm = os.path.join(self.PHP_ROOT, d, 'sbin', 'php-fpm')
+        conf = os.path.join(self.PHP_ROOT, d, 'etc', 'php-fpm.conf')
+        if not os.path.isfile(ini):
+            return public.returnMsg(False, 'php.ini tidak ditemukan')
+        sekarang = self._php_ini_nilai(ini, 'session.upload_progress.enabled')
+        if sekarang is not None and sekarang.lower() in ('0', 'off', 'false', 'no'):
+            return public.returnMsg(True, 'upload_progress sudah Off pada PHP %s; tidak ada perubahan' % d)
+        with open(ini, 'r', errors='surrogateescape') as f:
+            teks = f.read()
+        baris = teks.split('\n')
+        diganti = False
+        for pola in (r'^\s*session\.upload_progress\.enabled\s*=', r'^\s*;\s*session\.upload_progress\.enabled\s*='):
+            for i, ln in enumerate(baris):
+                if re.match(pola, ln):
+                    baris[i] = 'session.upload_progress.enabled = Off'
+                    diganti = True
+                    break
+            if diganti:
+                break
+        if not diganti:
+            baris.append('session.upload_progress.enabled = Off')
+        baru = '\n'.join(baris)
+        ts = time.strftime('%Y%m%d%H%M%S')
+        cadangan = ini + '.bak.' + ts
+        shutil.copy2(ini, cadangan)
+        st = os.stat(ini)
+        tmp = ini + '.zys.tmp'
+
+        def pulihkan(alasan):
+            try:
+                shutil.copy2(cadangan, ini)
+            except OSError:
+                pass
+            return public.returnMsg(False, '%s. php.ini dikembalikan dari %s' % (alasan, os.path.basename(cadangan)))
+        try:
+            with open(tmp, 'w', errors='surrogateescape') as f:
+                f.write(baru)
+            os.chmod(tmp, st.st_mode & 0o7777)
+            try:
+                os.chown(tmp, st.st_uid, st.st_gid)
+            except OSError:
+                pass
+            os.replace(tmp, ini)
+        except OSError as e:
+            return pulihkan('Gagal menulis php.ini (%s)' % e)
+        # uji sintaksis konfigurasi sebelum reload
+        try:
+            t = subprocess.run([fpm, '-t', '-y', conf], capture_output=True, text=True, timeout=30)
+            uji = (t.stdout + t.stderr)
+        except Exception as e:
+            return pulihkan('php-fpm -t tidak bisa dijalankan (%s)' % e)
+        if t.returncode != 0 or 'successful' not in uji.lower():
+            return pulihkan('php-fpm -t menolak konfigurasi: ' + uji.strip()[-200:])
+        m0, w0 = self._php_master_workers(d)
+        init = self.PHP_INIT % d
+        if m0 and os.access(init, os.X_OK):
+            try:
+                subprocess.run([init, 'reload'], capture_output=True, text=True, timeout=60)
+            except Exception as e:
+                return public.returnMsg(False, 'php.ini sudah diubah tetapi reload gagal (%s). Cadangan: %s' % (e, os.path.basename(cadangan)))
+            tegak = False
+            for _ in range(15):
+                time.sleep(1)
+                m1, w1 = self._php_master_workers(d)
+                if m1 and w1 and not (w1 & w0):
+                    tegak = True
+                    break
+            if not tegak:
+                return public.returnMsg(False, 'php.ini sudah diubah dan lolos uji, tetapi PID worker tidak berganti setelah reload: perubahan belum berlaku. Reload manual: %s reload' % init)
+            diperiksa = ' Worker diganti, perubahan berlaku.'
+        else:
+            diperiksa = ' php-fpm tidak berjalan; berlaku saat start berikutnya.'
+        self._php_cache['v'] = None
+        return public.returnMsg(True, 'session.upload_progress.enabled = Off pada PHP %s.%s Cadangan: %s' % (d, diperiksa, os.path.basename(cadangan)))
+
+    @staticmethod
+    def _memscan_kill_mode(v):
+        v = str(v or '').strip().lower()
+        if v in ('on', '1', 'true', 'yes', 'semua'):
+            return 'on'
+        if v in ('off', '0', 'false', 'no', 'audit'):
+            return 'off'
+        return 'tinggi'
+
+    def set_memscan(self, get):
+        """Setel pemindai memori worker: memscan on/off; memscan_kill tinggi (bawaan: memfd, shm, ELF anonim),
+        on (ditambah pustaka terhapus), off (hanya audit). Membunuh hanya bila Process Guard = enforce."""
+        kunci = self._only(get, 'key', '')
+        nilai = self._only(get, 'value', '')
+        if kunci not in ('memscan', 'memscan_kill') or nilai not in ('on', 'off') + (('tinggi',) if kunci == 'memscan_kill' else ()):
+            return public.returnMsg(False, 'Parameter tidak valid')
+        conf_file = self._p('etc', 'guardd.conf')
+        lines, ada = [], False
+        if os.path.exists(conf_file):
+            with open(conf_file, 'r', encoding='utf-8') as f:
+                for ln in f:
+                    if re.match(r'^\s*' + kunci + r'\s*=', ln):
+                        lines.append('%s = %s\n' % (kunci, nilai)); ada = True
+                    else:
+                        lines.append(ln)
+        if not ada:
+            lines.append('%s = %s\n' % (kunci, nilai))
+        tmp = conf_file + '.tmp'
+        with open(tmp, 'w', encoding='utf-8') as f:
+            f.writelines(lines)
+        if os.path.exists(conf_file):
+            shutil.copymode(conf_file, tmp)
+        os.replace(tmp, conf_file)
+        return public.returnMsg(True, '%s = %s (berlaku pada putaran pemindaian berikutnya)' % (kunci, nilai))
 
     def set_egress_guard(self, get):
         """Aktifkan atau nonaktifkan pengaman lalu lintas keluar (Anti-Reverse Shell)."""
@@ -5716,12 +5739,8 @@ class sentinel_main(object):
 
     def update_threat_intel(self, get):
         """Perbarui feed Threat Intel Spamhaus DROP/EDROP sekarang."""
-        cmd = [self._p('bin', 'sentinel-intel.sh'), 'update']
-        try:
-            res = subprocess.check_output(cmd, stderr=subprocess.STDOUT).decode('utf-8', errors='ignore')
-            return public.returnMsg(True, 'Threat Intel berhasil diperbarui: ' + res.strip())
-        except subprocess.CalledProcessError as e:
-            return public.returnMsg(False, 'Gagal memperbarui Threat Intel: ' + e.output.decode('utf-8', errors='ignore'))
+        # Edisi Free: fitur berbayar (threat_sync) tidak ada; respons sama dengan build Pro berlisensi Free.
+        return self._lisensi_ditolak('threat_sync', self._get_active_lang(get))
 
     def av_check_persistence(self, get):
         """Jalankan verifikasi integritas persistensi sistem sekarang."""
@@ -5757,140 +5776,25 @@ class sentinel_main(object):
 
     def add_proc_whitelist(self, get):
         """Tambah aturan whitelist proses baru. Masukan divalidasi ketat."""
-        name, err = teks_aman(str(get.get('name', '')), 80, 'Nama', boleh_kosong=True)
-        if err:
-            return public.returnMsg(False, err)
-        w_type = str(get.get('type', 'cmdline_match')).strip().lower()
-        if w_type not in ('cmdline_match', 'exe_exact', 'basename', 'cwd_match'):
-            return public.returnMsg(
-                False, 'Tipe harus cmdline_match, exe_exact, basename, atau cwd_match')
-        pattern, err = teks_aman(str(get.get('pattern', '')), 300, 'Pola pencocokan (pattern)')
-        if err:
-            return public.returnMsg(False, err)
-        remark, err = teks_aman(str(get.get('remark', '')), 200, 'Catatan', boleh_kosong=True)
-        if err:
-            return public.returnMsg(False, err)
-
-        # Pola yang terlalu longgar mematikan EDR: cmdline_match adalah
-        # substring, jadi pola 1-2 huruf meloloskan hampir semua proses.
-        if w_type in ('cmdline_match', 'basename') and len(pattern) < 3:
-            return public.returnMsg(False, 'Pola terlalu pendek (minimal 3 karakter)')
-        if w_type == 'basename' and ('/' in pattern or re.search(r'\s', pattern)):
-            return public.returnMsg(False, 'basename tidak boleh memuat "/" atau spasi')
-        if w_type in ('exe_exact', 'cwd_match'):
-            if '..' in pattern.split('/'):
-                return public.returnMsg(False, 'Path tidak boleh memuat ".."')
-            if re.search(r'\s', pattern):
-                return public.returnMsg(False, 'Path tidak boleh memuat spasi')
-        if w_type == 'cwd_match':
-            if not pattern.startswith('/') or len([x for x in pattern.split('/') if x]) < 2:
-                return public.returnMsg(
-                    False, 'cwd_match harus path absolut minimal dua tingkat '
-                           '(contoh /www/wwwroot/situs); "/" meloloskan semua proses')
-        if w_type == 'exe_exact' and not pattern.startswith('/') and '/' in pattern:
-            return public.returnMsg(False, 'exe_exact: pakai path absolut atau nama biner saja')
-        if not name:
-            name = 'Whitelist ' + pattern[:30]
-
-        try:
-            rules = []
-            if os.path.isfile(self.PROC_WHITELIST_CONF):
-                with open(self.PROC_WHITELIST_CONF, 'r', encoding='utf-8', errors='ignore') as f:
-                    rules = json.load(f)
-            for r in rules:
-                if r.get('type') == w_type and r.get('pattern') == pattern:
-                    return public.returnMsg(False, 'Aturan yang sama sudah ada (%s)' % r.get('id'))
-
-            rule_id = 'wl-%d-%s' % (int(time.time()), uuid.uuid4().hex[:4])
-            new_rule = {
-                'id': rule_id,
-                'name': name,
-                'type': w_type,
-                'pattern': pattern,
-                'remark': remark,
-                'created_at': int(time.time()),
-                'enabled': True
-            }
-            rules.append(new_rule)
-
-            with open(self.PROC_WHITELIST_CONF, 'w', encoding='utf-8') as f:
-                json.dump(rules, f, indent=2)
-
-            return public.returnMsg(True, "Aturan whitelist '%s' berhasil ditambahkan dan langsung aktif" % name)
-        except Exception as ex:
-            return public.returnMsg(False, 'Gagal menyimpan aturan whitelist: %s' % str(ex))
+        # Edisi Free: fitur berbayar (proc_enforce) tidak ada; respons sama dengan build Pro berlisensi Free.
+        return self._lisensi_ditolak('proc_enforce', self._get_active_lang(get))
 
     def del_proc_whitelist(self, get):
         """Hapus aturan whitelist berdasarkan ID."""
-        rule_id = str(get.get('id', '')).strip()
-        if not rule_id:
-            return public.returnMsg(False, 'ID aturan wajib diisi')
-        if not id_valid(rule_id):
-            return public.returnMsg(False, 'Format ID aturan tidak valid')
-
-        try:
-            if not os.path.isfile(self.PROC_WHITELIST_CONF):
-                return public.returnMsg(False, 'Berkas whitelist tidak ditemukan')
-            with open(self.PROC_WHITELIST_CONF, 'r', encoding='utf-8', errors='ignore') as f:
-                rules = json.load(f)
-
-            filtered = [r for r in rules if r.get('id') != rule_id]
-            if len(filtered) == len(rules):
-                return public.returnMsg(False, 'Aturan dengan ID tersebut tidak ditemukan')
-
-            with open(self.PROC_WHITELIST_CONF, 'w', encoding='utf-8') as f:
-                json.dump(filtered, f, indent=2)
-
-            return public.returnMsg(True, 'Aturan whitelist berhasil dihapus')
-        except Exception as ex:
-            return public.returnMsg(False, 'Gagal menghapus aturan whitelist: %s' % str(ex))
+        # Edisi Free: fitur berbayar (proc_enforce) tidak ada; respons sama dengan build Pro berlisensi Free.
+        return self._lisensi_ditolak('proc_enforce', self._get_active_lang(get))
 
     def toggle_proc_whitelist(self, get):
         """Aktifkan atau nonaktifkan aturan whitelist."""
-        rule_id = str(get.get('id', '')).strip()
-        if not rule_id:
-            return public.returnMsg(False, 'ID aturan wajib diisi')
-        if not id_valid(rule_id):
-            return public.returnMsg(False, 'Format ID aturan tidak valid')
-
-        try:
-            if not os.path.isfile(self.PROC_WHITELIST_CONF):
-                return public.returnMsg(False, 'Berkas whitelist tidak ditemukan')
-            with open(self.PROC_WHITELIST_CONF, 'r', encoding='utf-8', errors='ignore') as f:
-                rules = json.load(f)
-
-            found = False
-            new_status = False
-            for r in rules:
-                if r.get('id') == rule_id:
-                    r['enabled'] = not r.get('enabled', True)
-                    new_status = r['enabled']
-                    found = True
-                    break
-
-            if not found:
-                return public.returnMsg(False, 'Aturan tidak ditemukan')
-
-            with open(self.PROC_WHITELIST_CONF, 'w', encoding='utf-8') as f:
-                json.dump(rules, f, indent=2)
-
-            st_text = 'diaktifkan' if new_status else 'dinonaktifkan'
-            return public.returnMsg(True, "Aturan whitelist berhasil %s" % st_text)
-        except Exception as ex:
-            return public.returnMsg(False, 'Gagal mengubah status whitelist: %s' % str(ex))
+        # Edisi Free: fitur berbayar (proc_enforce) tidak ada; respons sama dengan build Pro berlisensi Free.
+        return self._lisensi_ditolak('proc_enforce', self._get_active_lang(get))
 
     # ------------------------------------------------------------------ #
     # Real-Time Upload Scanner & Per-Host Quarantine (Imunify360 Style)  #
     # ------------------------------------------------------------------ #
     def _upload_scan_cli(self, *args):
-        """Panggil biner sentinel-upload-scan.py dengan pyenv python3."""
-        script = self._p('bin', 'sentinel-upload-scan.py')
-        py_bin = '/www/server/panel/pyenv/bin/python3'
-        if not os.path.exists(py_bin):
-            py_bin = 'python3'
-        cmd = [py_bin, script] + list(args)
-        cmd_str = ' '.join(shlex.quote(str(c)) for c in cmd)
-        return self._sh(cmd_str, 30)
+        """Panggil pemindai Upload Protection dengan pyenv python3."""
+        return 1, '', 'Upload Protection adalah fitur paket Pro. Klik Upgrade untuk membukanya.'
 
     def get_vhost_upload_scan(self, get):
         """Ambil status upload scanner, clamd socket, RAM, dan status per vhost."""
@@ -5899,11 +5803,7 @@ class sentinel_main(object):
             return public.returnMsg(False, 'Gagal mengambil status upload scanner: %s' % (e or o))
         try:
             data = json.loads(o)
-            if self._is_systemd():
-                rc_svc, o_svc, _ = self._sh('systemctl is-active sentinel-upload-scan.service', 5)
-                data['systemd_active'] = (o_svc.strip() == 'active')
-            else:
-                data['systemd_active'] = (self._svc('sentinel-upload-scan') == 'active')
+            data['systemd_active'] = False
             return public.returnMsg(True, data)
         except Exception as ex:
             return public.returnMsg(False, 'Galat parsing respons status: %s' % str(ex))
@@ -5912,20 +5812,18 @@ class sentinel_main(object):
         """Ambil status upload protection (alias untuk get_vhost_upload_scan)."""
         return self.get_vhost_upload_scan(get)
 
+    def _upload_aktif(self):
+        try:
+            with open(self._p('etc', 'vhost_upload_scan.json')) as f:
+                d = json.load(f)
+            return {k for k, v in (d.get('vhosts') or {}).items() if v}
+        except Exception:
+            return set()
+
     def toggle_vhost_upload_scan(self, get):
         """Aktifkan atau nonaktifkan pemindaian upload realtime untuk satu vhost."""
-        vhost = str(get.get('vhost', '')).strip()
-        if not self._vhost_valid(vhost):
-            return public.returnMsg(False, 'Nama vhost tidak valid')
-        rc, o, e = self._upload_scan_cli('toggle-vhost', vhost)
-        if rc != 0:
-            return public.returnMsg(False, 'Gagal mengubah status vhost: %s' % (e or o))
-        try:
-            res = json.loads(o)
-            st_str = 'diaktifkan' if res.get('enabled') else 'dinonaktifkan'
-            return public.returnMsg(True, "Upload Protection untuk vhost '%s' berhasil %s" % (vhost, st_str))
-        except Exception as ex:
-            return public.returnMsg(False, 'Galat respons toggle: %s' % str(ex))
+        # Edisi Free: fitur berbayar (upload_scan) tidak ada; respons sama dengan build Pro berlisensi Free.
+        return self._lisensi_ditolak('upload_scan', self._get_active_lang(get))
 
     def set_vhost_upload_scan(self, get):
         """Setel status upload scan untuk satu vhost (on / off)."""
@@ -5934,6 +5832,12 @@ class sentinel_main(object):
         if not self._vhost_valid(vhost):
             return public.returnMsg(False, 'Nama vhost tidak valid')
         val = 'on' if state in ['1', 'true', 'on', 'yes'] else 'off'
+        if val == 'on':
+            aktif = self._upload_aktif()
+            if vhost not in aktif:
+                ditolak = self._batas_ditolak(get, 'upload_vhosts', len(aktif))
+                if ditolak:
+                    return ditolak
         rc, o, e = self._upload_scan_cli('set-vhost', vhost, val)
         if rc != 0:
             return public.returnMsg(False, 'Gagal menyimpan status vhost: %s' % (e or o))
@@ -5995,21 +5899,9 @@ class sentinel_main(object):
             return public.returnMsg(False, str(ex))
 
     def toggle_upload_scan_service(self, get):
-        """Nyalakan atau hentikan layanan daemon sentinel-upload-scan.service."""
-        action = str(get.get('sub_action') or get.get('act') or get.get('aksi') or (get.get('action') if get.get('action') != 'a' else '') or '').strip().lower()
-        if action not in ['start', 'stop', 'restart']:
-            return public.returnMsg(False, 'Aksi tidak valid (start|stop|restart)')
-        if self._is_systemd():
-            rc, o, e = self._sh("systemctl %s sentinel-upload-scan.service" % action, 15)
-        else:
-            if action == 'stop':
-                rc, o, e = self._sh("pkill -f '%s/bin/sentinel-upload-scan.py' 2>/dev/null" % self.__PATH, 15)
-            else:
-                self._sh("pkill -f '%s/bin/sentinel-upload-scan.py' 2>/dev/null" % self.__PATH, 10)
-                rc, o, e = self._sh("nohup /www/server/panel/pyenv/bin/python3 '%s/bin/sentinel-upload-scan.py' daemon >/dev/null 2>&1 &" % self.__PATH, 15)
-        if rc != 0:
-            return public.returnMsg(False, "Gagal %s layanan: %s" % (action, e or o))
-        return public.returnMsg(True, "Layanan sentinel-upload-scan berhasil di-%s" % action)
+        """Nyalakan atau hentikan layanan daemon Upload Protection."""
+        # Edisi Free: fitur berbayar (upload_scan) tidak ada; respons sama dengan build Pro berlisensi Free.
+        return self._lisensi_ditolak('upload_scan', self._get_active_lang(get))
 
     # -------------------------------------------------------------------------
     # MANAJEMEN SIKLUS HIDUP (LIFECYCLE): FRESH | UPDATE | REPAIR | UNINSTALL
@@ -6101,6 +5993,122 @@ class sentinel_main(object):
         """Alias untuk set_telemetry_setting."""
         return self.set_telemetry_setting(get)
 
+    # ------------------------------------------------------------------ #
+    # lisensi langganan (Free / Pro / Max)                               #
+    # ------------------------------------------------------------------ #
+    def _lisensi_ditolak(self, fitur, lang):
+        butuh = _PLAN_NAME.get(_lic.needed_plan(fitur), 'Pro')
+        if lang == 'en':
+            msg = 'This feature requires the %s plan or higher. Click Upgrade to unlock it.' % butuh
+        else:
+            msg = 'Fitur ini membutuhkan paket %s atau lebih tinggi. Klik Upgrade untuk membukanya.' % butuh
+        res = public.returnMsg(False, msg)
+        res['upgrade'] = {'feature': fitur, 'plan': _lic.needed_plan(fitur), 'current': _lic.plan()}
+        return res
+
+    def _batas_ditolak(self, get, nama, saat_ini):
+        """None bila masih di bawah batas paket; selain itu pesan penolakan (batas jumlah per paket)."""
+        batas = _lic.limit(nama)
+        if batas is None or saat_ini < batas:
+            return None
+        lang = self._get_active_lang(get)
+        label = {'port_rules': ('aturan port', 'port rules'), 'waf_vhosts': ('vhost WAF', 'WAF vhosts'),
+                 'upload_vhosts': ('vhost Upload Protection', 'Upload Protection vhosts')}.get(nama, (nama, nama))
+        if lang == 'en':
+            msg = 'Your plan allows up to %d %s. Upgrade to add more.' % (batas, label[1])
+        else:
+            msg = 'Paket Anda mengizinkan hingga %d %s. Upgrade untuk menambah.' % (batas, label[0])
+        res = public.returnMsg(False, msg)
+        res['upgrade'] = {'feature': nama, 'plan': 'pro' if _lic.plan() == 'free' else 'max', 'current': _lic.plan()}
+        return res
+
+    def _lic_terapkan_bila_berubah(self, fitur_lama):
+        """Paket berubah (aktivasi, cek pembayaran, lepas lisensi): selaraskan firewall dan layanan berpaket di latar belakang.
+        Agen hanya memasang ulang aturan sentinel dan memulai/menghentikan layanan milik plugin."""
+        try:
+            baru = _lic.status(True).get('features', [])
+            if sorted(fitur_lama or []) != sorted(baru):
+                pass
+        except Exception:
+            pass
+
+    def get_license(self, get):
+        """Status paket untuk UI: paket, fitur, batas, tagihan, kode tersamar, hasil heartbeat terakhir."""
+        st = _lic.status()
+        info = _lic.state_info()
+        code = _lic.get_code()
+        return public.returnMsg(True, {
+            'mode': st.get('mode'), 'valid': bool(st.get('valid')), 'reason': st.get('reason', ''), 'plan': st.get('plan', 'free'),
+            'state': st.get('state') or info.get('state', 'free'), 'paid_until': st.get('paid') or info.get('paid_until', 0),
+            'exp': st.get('exp', 0), 'features': st.get('features', []), 'all_features': _lic.FEATURES,
+            'code': _lic.mask_code(code), 'has_code': bool(code), 'ip': st.get('ip') or info.get('ip', ''),
+            'last': {k: info.get(k) for k in ('ts', 'state', 'message', 'http')},
+            'limits': {k: _lic.limit(k) for k in ('waf_vhosts', 'port_rules', 'upload_vhosts')},
+            'needed': dict(_lic.PLAN_NEEDED), 'edition': getattr(_lic, 'EDITION', 'pro')})
+
+    def get_plans(self, get):
+        cur = 'IDR' if _g(get, 'currency', 'USD').upper() == 'IDR' else 'USD'
+        d = _lic.fetch_plans(cur)
+        if d is None:
+            return public.returnMsg(False, 'Server lisensi tidak terjangkau. Coba lagi nanti.' if self._get_active_lang(get) != 'en' else 'License server is unreachable. Try again later.')
+        return public.returnMsg(True, d)
+
+    def license_checkout(self, get):
+        """Buat pesanan di server zysens dan kembalikan tautan pembayaran (PayPal atau Midtrans)."""
+        email = _g(get, 'email').lower()
+        plan, period = _g(get, 'plan'), _g(get, 'period')
+        gw = _g(get, 'gateway')
+        cur = 'IDR' if gw == 'midtrans' else 'USD'
+        lang = self._get_active_lang(get)
+        if not re.fullmatch(r'[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,190}\.[A-Za-z]{2,24}', email):
+            return public.returnMsg(False, 'Email tidak valid' if lang != 'en' else 'Invalid email address')
+        if plan not in ('pro', 'max') or period not in ('m', 'y') or gw not in ('paypal', 'midtrans'):
+            return public.returnMsg(False, 'Paket, periode, atau metode pembayaran tidak valid' if lang != 'en' else 'Invalid plan, period or payment method')
+        st, js = _lic.checkout(email, plan, period, gw, cur)
+        if st == 200 and js.get('pay_url'):
+            return public.returnMsg(True, {'pay_url': js['pay_url'], 'order_id': js.get('order_id'), 'code': _lic.mask_code(js.get('code', '')),
+                                           'amount': js.get('amount'), 'currency': js.get('currency')})
+        if st == 0:
+            return public.returnMsg(False, 'Server lisensi tidak terjangkau. Coba lagi nanti.' if lang != 'en' else 'License server is unreachable. Try again later.')
+        return public.returnMsg(False, js.get('message') or ('Checkout gagal (%s)' % st))
+
+    def license_refresh(self, get):
+        """Tombol 'Cek pembayaran': heartbeat segera. Bila ada order_id, sertakan status pesanan."""
+        lama = list(_lic.status().get('features', []))
+        info = _lic.refresh()
+        self._lic_terapkan_bila_berubah(lama)
+        out = {'state': info.get('state'), 'plan': _lic.plan(), 'ok': bool(info.get('ok')), 'message': info.get('message', '')}
+        oid = _g(get, 'order_id')
+        if oid and re.fullmatch(r'ZYS-[0-9A-Z-]{6,40}', oid):
+            st, js = _lic.checkout_status(oid)
+            out['order'] = (js or {}).get('order')
+        return public.returnMsg(bool(info.get('ok')) or info.get('state') in ('pending', 'free', 'expired', 'no_code'), out)
+
+    def license_activate(self, get):
+        """Masukkan kode lisensi yang sudah ada (mis. dari developer). Kode hanya disimpan bila server menerimanya."""
+        code = _g(get, 'code').upper()
+        lang = self._get_active_lang(get)
+        if not re.fullmatch(r'ZYS(-[A-HJ-NP-Z2-9]{5}){4}', code):
+            return public.returnMsg(False, 'Format kode lisensi tidak valid' if lang != 'en' else 'Invalid license code format')
+        lama = list(_lic.status().get('features', []))
+        info = _lic.refresh(code)
+        self._lic_terapkan_bila_berubah(lama)
+        if info.get('ok'):
+            return public.returnMsg(True, {'plan': info.get('plan'), 'state': info.get('state')})
+        return public.returnMsg(False, info.get('message') or info.get('state') or 'Aktivasi gagal')
+
+    def license_deactivate(self, get):
+        """Lepas lisensi dari server ini (kembali ke Free). Kode lisensi tidak dihapus dari server."""
+        lama = list(_lic.status().get('features', []))
+        for f in ('license.code', 'license.state.json'):
+            try:
+                os.remove(self._p('etc', f))
+            except OSError:
+                pass
+        _lic.remove_token()
+        self._lic_terapkan_bila_berubah(lama)
+        return public.returnMsg(True, 'Lisensi dilepas, paket kembali ke Free' if self._get_active_lang(get) != 'en' else 'License removed, plan is now Free')
+
     def get_lang_setting(self, get):
         """Ambil konfigurasi bahasa antarmuka (default: 'en')."""
         lang = 'en'
@@ -6181,14 +6189,7 @@ class sentinel_main(object):
                 except Exception:
                     pass
 
-            v_info = '1.6.2'
-            try:
-                info_p = os.path.join(os.path.dirname(__file__), 'info.json')
-                if os.path.exists(info_p):
-                    with open(info_p, 'r', encoding='utf-8') as f:
-                        v_info = json.load(f).get('versions', '1.6.2')
-            except Exception:
-                pass
+            v_info = self._versi_plugin()
 
             params = {
                 'v': '2',
@@ -6210,8 +6211,20 @@ class sentinel_main(object):
         except Exception:
             pass
 
+    def _versi_plugin(self):
+        """Versi plugin 'X.Y.Z': sumber tunggal info.json (ditanam versi.py dari nama cabang rilis);
+        cadangan VERSION modul lisensi. Jangan menulis literal versi di berkas ini."""
+        try:
+            with open(os.path.join(_PLUGIN_DIR, 'info.json'), 'r', encoding='utf-8') as f:
+                v = str(json.load(f).get('versions', '')).strip().lstrip('vV')
+            if re.match(r'^\d+\.\d+\.\d+$', v):
+                return v
+        except Exception:
+            pass
+        return str(getattr(_lic, 'VERSION', '0.0.0'))
+
     def _parse_version(self, v_str):
-        """Parse semver string menjadi tuple integer (mis. 'v1.6.2' -> (1, 6, 2))."""
+        """Parse semver string menjadi tuple integer (mis. 'v1.2.3' -> (1, 2, 3))."""
         if not v_str:
             return (0, 0, 0)
         v_clean = str(v_str).strip().lstrip('vV')
@@ -6226,29 +6239,20 @@ class sentinel_main(object):
         return tuple(parts[:3])
 
     def _normalize_version(self, v_str):
-        """Pastikan format versi selalu berawalan 'v' (mis. 'v1.6.2')."""
+        """Pastikan format versi selalu berawalan 'v' (mis. 'v1.2.3'); kosong = versi plugin."""
         if not v_str or str(v_str).strip() in ('-', ''):
-            return 'v1.6.2'
+            return 'v' + self._versi_plugin()
         s = str(v_str).strip()
         return s if s.lower().startswith('v') else ('v' + s)
 
     def get_lifecycle_status(self, get):
         """Ambil status detail siklus hidup, versi, dan diagnostik komponen."""
-        v_info = 'v1.6.2'
-        try:
-            info_p = os.path.join(os.path.dirname(__file__), 'info.json')
-            if os.path.exists(info_p):
-                with open(info_p, 'r', encoding='utf-8') as f:
-                    v_raw = json.load(f).get('versions', '1.6.2')
-                    v_info = self._normalize_version(v_raw)
-        except Exception:
-            pass
+        v_info = self._normalize_version(self._versi_plugin())
 
         installed = os.path.exists(os.path.join(self.__PATH, 'bin', 'guardd'))
         lock_active = os.path.exists(os.path.join(self.__PATH, 'etc', 'uninstall.lock'))
 
-        units = ['sentinel.service', 'sentinel-fw.service', 'sentinel-proc.service',
-                 'sentinel-upload-scan.service', 'sentinel-intel.timer', 'sentinel-av.timer']
+        units = ['sentinel.service', 'sentinel-fw.service', 'sentinel-proc.service', 'sentinel-av.timer']
         services_status = {}
         if self._is_systemd():
             rc, o, _ = self._sh("systemctl is-active " + " ".join(units), 5)
@@ -6371,20 +6375,54 @@ class sentinel_main(object):
             self._send_telemetry('install_' + (action or 'unknown'), {'status': 'success' if rc == 0 else 'failed'})
         return public.returnMsg(True, {'running': running, 'rc': rc, 'action': action, 'log': tail})
 
+    RELEASE_REPO = 'omysurya/zysentinel'
+    PRO_URL_AWAL = 'https://github.com/omysurya/zysentinel/releases/download/pro-v'
+
+    def _kanal_rilis(self):
+        """'pro' bila artefak ini dibangun ENFORCE (rilis berlisensi), selain itu 'free'. Menentukan SUMBER pembaruan:
+        kanal Free memakai rilis vX.Y.Z (releases/latest); kanal Pro hanya rilis bertag pro-vX.Y.Z (pre-release, jadi tidak
+        pernah muncul di releases/latest milik garis Free) dengan aset zysentinel-pro-vX.Y.Z.zip."""
+        return 'pro' if getattr(_lic, 'CHANNEL', 'free') == 'pro' else 'free'
+
+    def _cek_update_pro(self, v_current, headers):
+        """Kanal Pro: pilih versi tertinggi dari daftar rilis (bukan draft) yang bertag pro-vX.Y.Z dan punya aset zip resmi."""
+        info = {'current_version': v_current, 'latest_version': v_current, 'has_update': False,
+                'release_notes': 'Belum ada rilis Pro yang lebih baru.', 'download_url': ''}
+        try:
+            req = urllib.request.Request('https://api.github.com/repos/%s/releases?per_page=30' % self.RELEASE_REPO, headers=headers)
+            with urllib.request.urlopen(req, timeout=8) as resp:
+                daftar = json.loads(resp.read().decode('utf-8'))
+        except Exception:
+            return public.returnMsg(True, info)
+        terbaik, tuple_terbaik = None, (-1, -1, -1)
+        for r in daftar if isinstance(daftar, list) else []:
+            if not isinstance(r, dict) or r.get('draft'):
+                continue
+            tag = str(r.get('tag_name', '')).strip()
+            if not re.fullmatch(r'pro-v\d+\.\d+\.\d+', tag):
+                continue
+            aset = None
+            for a in r.get('assets', []) or []:
+                if re.fullmatch(r'zysentinel-pro-v\d+\.\d+\.\d+\.zip', str(a.get('name', ''))) \
+                        and str(a.get('browser_download_url', '')).startswith(self.PRO_URL_AWAL + tag[5:] + '/'):
+                    aset = a
+                    break
+            t = self._parse_version(tag[4:])
+            if aset and t > tuple_terbaik:
+                terbaik, tuple_terbaik = (r, aset, tag), t
+        if terbaik:
+            r, aset, tag = terbaik
+            info.update({'latest_version': 'v' + tag[5:], 'release_notes': r.get('body') or info['release_notes'],
+                         'download_url': aset['browser_download_url'],
+                         'has_update': tuple_terbaik > self._parse_version(v_current)})
+        return public.returnMsg(True, info)
+
     def check_github_update(self, get):
         """Periksa versi rilis terbaru di repository GitHub omysurya/zysentinel.
         
         Mendukung inspeksi melalui Releases API, Tags API, dan Branches API
-        (untuk branch rilis seperti v1.6.2), dengan parsing semver akurat."""
-        v_current = 'v1.6.2'
-        try:
-            info_p = os.path.join(os.path.dirname(__file__), 'info.json')
-            if os.path.exists(info_p):
-                with open(info_p, 'r', encoding='utf-8') as f:
-                    v_raw = json.load(f).get('versions', '1.6.2')
-                    v_current = self._normalize_version(v_raw)
-        except Exception:
-            pass
+        (untuk branch rilis seperti vX.Y.Z), dengan parsing semver akurat."""
+        v_current = self._normalize_version(self._versi_plugin())
 
         url_release = 'https://api.github.com/repos/omysurya/zysentinel/releases/latest'
         url_tags = 'https://api.github.com/repos/omysurya/zysentinel/tags'
@@ -6393,6 +6431,9 @@ class sentinel_main(object):
             'User-Agent': 'ZySentinel-Updater/' + v_current,
             'Accept': 'application/vnd.github.v3+json'
         }
+
+        if self._kanal_rilis() == 'pro':
+            return self._cek_update_pro(v_current, headers)
 
         latest_version = v_current
         release_notes = 'Versi stabil ZySentinel sinkron dengan branch/tag GitHub resmi.'
@@ -6440,7 +6481,7 @@ class sentinel_main(object):
             except Exception:
                 pass
 
-        # 3. Cek GitHub Branches (sinkronisasi dengan branch rilis seperti v1.6.2)
+        # 3. Cek GitHub Branches (sinkronisasi dengan branch rilis seperti vX.Y.Z)
         if not found_target:
             try:
                 req = urllib.request.Request(url_branches, headers=headers)
@@ -6478,8 +6519,11 @@ class sentinel_main(object):
         """SHA-256 resmi untuk berkas rilis: dari `digest` aset GitHub atau dari
         aset SHA256SUMS.txt pada rilis yang sama. Mengembalikan '' bila tak ada."""
         try:
+            mt = re.match(r'https://github\.com/omysurya/zysentinel/releases/download/([A-Za-z0-9._-]+)/', download_url)
+            api_rilis = ('https://api.github.com/repos/omysurya/zysentinel/releases/tags/' + mt.group(1)) if mt \
+                else 'https://api.github.com/repos/omysurya/zysentinel/releases/latest'      # checksum dari rilis YANG SAMA dengan paket (pro-v* bukan latest)
             req = urllib.request.Request(
-                'https://api.github.com/repos/omysurya/zysentinel/releases/latest',
+                api_rilis,
                 headers={'User-Agent': 'ZySentinel-Updater', 'Accept': 'application/vnd.github.v3+json'})
             with urllib.request.urlopen(req, timeout=10) as resp:
                 rel = json.loads(resp.read().decode('utf-8'))
@@ -6506,6 +6550,7 @@ class sentinel_main(object):
                 return ''
         return ''
 
+
     def perform_github_update(self, get):
         """Unduh paket rilis dari GitHub, VERIFIKASI SHA-256, lalu jalankan update mandiri.
 
@@ -6522,6 +6567,12 @@ class sentinel_main(object):
             staging_zip = os.path.join(work, 'paket.zip')
             staging_dir = os.path.join(work, 'isi')
             dari_lokal = False
+
+            kanal = self._kanal_rilis()
+            if kanal == 'pro' and not download_url.startswith(self.PRO_URL_AWAL):
+                return public.returnMsg(False, 'Pembaruan dibatalkan: kanal Pro hanya menerima rilis resmi bertag pro-v*.')
+            if kanal != 'pro' and '/releases/download/pro-v' in download_url:
+                return public.returnMsg(False, 'Pembaruan dibatalkan: paket Pro tidak boleh dipasang pada kanal Free.')
 
             if download_url.startswith('https://github.com/omysurya/zysentinel/'):
                 try:
@@ -6688,13 +6739,13 @@ class sentinel_main(object):
                 'subject': subject,
                 'message': full_body,
                 'email': user_email,
-                'version': '1.6.2'
+                'version': self._versi_plugin()
             }).encode('utf-8')
             dev_url = 'https://api.zysens.com/api/v1/sentinel/feedback'
             req = urllib.request.Request(
                 dev_url,
                 data=payload_data,
-                headers={'Content-Type': 'application/json', 'User-Agent': 'ZySentinel-Feedback/1.6.2'}
+                headers={'Content-Type': 'application/json', 'User-Agent': 'ZySentinel-Feedback/' + self._versi_plugin()}
             )
             urllib.request.urlopen(req, timeout=4.0)
         except Exception:
