@@ -50,7 +50,7 @@ for _r in ("README.md", "payload/README.md"):
     DAFTAR.append((_r, r"(?<![\d.])(?P<v>%s)(?![\d])" % SEMVER, 0))  # README: SEMUA X.Y.Z = versi plugin
 BACKEND = ("../_backend/zyslic/__init__.py", r'^__version__ = "(?P<v>%s)"' % SEMVER)
 # Pemindaian literal liar: berkas teks di _client selain ini tidak boleh memuat versi saat ini secara harfiah.
-LEWATI_DIR = {".git", "tests", "edition", "__pycache__", "coraza-cache"}
+LEWATI_DIR = {".git", "tests", "edition", "__pycache__", "coraza-cache", "release-notes"}   # release notes per versi memang menyebut versinya
 LEWATI_AKHIRAN = (".orig", ".rej", ".png", ".jpg", ".ico", ".gz", ".zip", ".srchash", ".hex")
 
 
