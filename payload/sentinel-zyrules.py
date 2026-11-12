@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 PT. StudioNet Indonesia Jaya (ZySens).
 # ==================================================================
 # sentinel-zyrules.py -- penyusun konfigurasi WAF ZySentinel (Coraza + OWASP CRS)
 #
@@ -16,8 +18,10 @@
 import sys
 import os
 import re
+import hashlib
 import json
 import shutil
+import stat
 import ipaddress
 
 BASE = os.environ.get('SENTINEL_BASE', '/www/server/sentinel')
@@ -63,6 +67,13 @@ MODULES = {
     'probe_archive':   ('8000430-8000439', 'Tebakan nama arsip cadangan di root situs'),
     'probe_secrets':   ('8000440-8000449', 'Berkas berawalan titik, kredensial, internal Laravel, skrip di .well-known'),
     'php2shell':       ('8000450-8000459', 'Medan upload-progress PHP (jalur PHP2Shell CVE-2026-109618/109619), bawaan hanya dicatat'),
+    'app_laravel':     ('8000500-8000509', 'Proteksi Laravel: kunci Passport, storage logs, cache bootstrap, SQLite, Livewire upload'),
+    'app_wordpress':   ('8000510-8000519', 'Proteksi WordPress: debug.log, cadangan plugin migrasi, TimThumb, user enumeration'),
+    'app_codeigniter': ('8000520-8000529', 'Proteksi CodeIgniter: CI2/3 logs & database config, CI4 writable logs & spark'),
+    'app_cms':         ('8000530-8000539', 'Proteksi CMS umum: konfigurasi Joomla/Drupal/Magento/PrestaShop, Drupalgeddon RCE'),
+    'app_nodejs':      ('8000540-8000549', 'Proteksi Node.js: fast-drop Prototype Pollution, Next.js manifests, log package manager'),
+    'app_golang':      ('8000550-8000559', 'Proteksi Golang: runtime profiling pprof, expvar debug vars, Go SSTI'),
+    'app_python':      ('8000560-8000569', 'Proteksi Python: Werkzeug/Flask debug console, Python bytecode pyc, Jinja2/Mako SSTI'),
 }
 MODE_ENGINE = {'block': 'On', 'monitor': 'DetectionOnly', 'disable': 'Off'}
 LISTS = ('ip_white', 'ip_black', 'url_white', 'url_black')
@@ -117,9 +128,14 @@ def _v4(s):
         return None
 
 
+# Prefix terluas yang diterima di daftar IP WAF, sama dengan panel (parse_v4 min_prefix=8). Ditegakkan lagi di sini karena
+# berkas daftar bisa diubah di luar panel: entri /0../7 di ip_white mematikan WAF untuk hampir semua alamat.
+MIN_PREFIX = 8
+
+
 def ip_ke_cidr(entri):
-    """IPv4 tunggal, CIDR, atau rentang a-b -> daftar string CIDR (tanpa /32 untuk host).
-    Mengembalikan None bila tidak valid."""
+    """IPv4 tunggal, CIDR (/8../32), atau rentang a-b -> daftar string CIDR (tanpa /32 untuk host).
+    Mengembalikan None bila tidak valid atau lebih luas dari /MIN_PREFIX."""
     entri = (entri or '').strip()
     try:
         if '-' in entri:
@@ -127,13 +143,15 @@ def ip_ke_cidr(entri):
             ia, ib = _v4(a), _v4(b)
             if ia is None or ib is None or int(ia) > int(ib):
                 return None
-            return [str(n) if n.prefixlen != 32 else str(n.network_address)
-                    for n in ipaddress.summarize_address_range(ia, ib)]
+            nets = list(ipaddress.summarize_address_range(ia, ib))
+            if any(n.prefixlen < MIN_PREFIX for n in nets):
+                return None
+            return [str(n) if n.prefixlen != 32 else str(n.network_address) for n in nets]
         ip_s, sep, pre = entri.partition('/')
         if _v4(ip_s) is None:
             return None
         if sep:
-            if not re.fullmatch(r'(?:0|[1-9][0-9]?)', pre) or int(pre) > 32:
+            if not re.fullmatch(r'(?:0|[1-9][0-9]?)', pre) or not MIN_PREFIX <= int(pre) <= 32:
                 return None
             n = ipaddress.IPv4Network(entri, strict=True)
             return [str(n) if n.prefixlen != 32 else str(n.network_address)]
@@ -148,12 +166,31 @@ def ler_lista(nama):
     try:
         with open(p, 'r', encoding='utf-8') as f:
             for line in f:
-                t = line.rstrip('\n')
-                if t.strip() and not t.lstrip().startswith('#'):
-                    out.append(t.strip())
+                t = line.split('#')[0].strip()
+                if t:
+                    out.append(t)
     except FileNotFoundError:
         pass
     return out
+
+
+# Entri daftar URL (url_white/url_black), satu baris: [crs+](lit:|rx:)?pola
+#   lit:/api/v1        mode Normal: awalan path per segmen (tanpa regex): ^<path di-escape> lalu /, ?, ; atau akhir path
+#   rx:^/api/.*\.json$  mode Regex (RE2)
+#   tanpa awalan       bentuk lama = Regex
+#   crs+               (url_white saja) cakupan "hanya OWASP CRS": aturan ZySentinel tetap berjalan, CRS dilewati untuk URL itu
+# Sama dengan sentinel_main.url_entri (uji audit_20261030 membandingkan keduanya).
+_URL_ENTRI = re.compile(r'^(?:(crs)\+)?(?:(lit|rx):)?(.*)$', re.S)
+
+
+def url_entri(e):
+    """baris daftar URL -> (cakupan 'semua'|'crs', mode 'normal'|'regex', pola seperti ditulis admin, regex untuk WAF)."""
+    crs, mode, isi = _URL_ENTRI.match(e or '').groups()
+    cakupan = 'crs' if crs else 'semua'
+    if mode == 'lit':
+        # batas segmen: /api cocok dengan /api, /api/..., /api?..., tetapi tidak /api-internal (evaluasi 30 Okt 2026)
+        return cakupan, 'normal', isi, '^' + re.escape(isi) + ('' if isi.endswith('/') else '(?:[/?;]|$)')
+    return cakupan, 'regex', isi, isi
 
 
 def allowlist_cidr():
@@ -242,7 +279,8 @@ def rx_valid(pola):
     if not pola or len(pola) > 300 or re.search(r'[\x00-\x1f\x7f]', pola):
         return False
     # Sintaks yang tidak didukung RE2 (Coraza) menggagalkan seluruh ruleset.
-    if re.search(r'\(\?<?[=!]|\(\?>|\(\?P=|\\[1-9]|[*+?}]\+', pola):
+    # \Z dan flag x (verbose) ada di Python tetapi tidak di RE2/Go regexp (dulu lolos validasi lalu ruleset gagal dimuat)
+    if re.search(r'\(\?<?[=!]|\(\?>|\(\?P=|\\[1-9]|[*+?}]\+|\\Z|\(\?[a-zA-Z-]*x', pola):
         warn('pola dibuang karena tidak didukung WAF (RE2): %r' % pola[:40])
         return False
     if pola not in _RX_CACHE:
@@ -255,7 +293,7 @@ def rx_valid(pola):
 
 # ----------------------------------------------------------------- penulis --
 def tulis(nama, isi, mode=0o644):
-    os.makedirs(GEN, exist_ok=True)
+    os.makedirs(os.path.dirname('%s/%s' % (GEN, nama)), exist_ok=True)
     p = '%s/%s' % (GEN, nama)
     tmp = p + '.tmp'
     with open(tmp, 'w') as f:
@@ -366,8 +404,19 @@ def _ipmatch_rules(cidrs, id_awal, aksi, msg, tag, tag2=''):
     return s
 
 
+ACME_RULE = (
+    '# Validasi sertifikat: HTTP-01 Let\'s Encrypt/ACME (/.well-known/acme-challenge/<token>) dan validasi berkas CA\n'
+    '# (/.well-known/pki-validation/<berkas>). Ditaruh PALING AWAL (sebelum daftar hitam IP, aturan bot, dan CRS) dan seluruh engine\n'
+    '# dimatikan untuk permintaan itu: dulu hanya aturan fase-1 ZySentinel yang dilewati, sehingga CRS/bot/daftar hitam masih bisa\n'
+    '# menolak server validasi CA. Hanya GET/HEAD, token diawali huruf/angka, tanpa query, tanpa ".." atau "/". Aksi ada di aturan\n'
+    '# TERAKHIR rantai (aksi kepala rantai dijalankan walau rantai gagal).\n'
+    'SecRule REQUEST_URI "@rx ^/\\.well-known/(?:acme-challenge|pki-validation)/[A-Za-z0-9_-][A-Za-z0-9_.-]{0,254}$" '
+    '"id:8000010,phase:1,pass,nolog,t:none,chain"\n'
+    '    SecRule REQUEST_METHOD "@rx ^(?:GET|HEAD)$" "t:none,setvar:tx.zy_skip=1,ctl:ruleEngine=Off"\n')
+
+
 def gen_lists(conf):
-    s = '# Dibuat oleh sentinel-zyrules.py dari daftar WAF dan allowlist.txt. Jangan edit.\n'
+    s = '# Dibuat oleh sentinel-zyrules.py dari daftar WAF dan allowlist.txt. Jangan edit.\n' + ACME_RULE
     putih = []
     for e in ler_lista('ip_white'):
         c = ip_ke_cidr(e)
@@ -389,26 +438,32 @@ def gen_lists(conf):
         hitam += [x for x in c if x not in hitam]
     s += '# Daftar hitam IP: ditolak.\n'
     s += _ipmatch_rules(hitam, 8000060, 'deny,status:403,log,auditlog', 'ZySentinel: IP daftar hitam', 'attack-ip-blacklist')
-    rx_siapkan(list(ler_lista('url_white')) + list(ler_lista('url_black')))
+    rx_siapkan([url_entri(e)[3] for e in ler_lista('url_white') + ler_lista('url_black')])
     n = 0
-    for e in ler_lista('url_white'):
+    for baris in ler_lista('url_white'):
+        cakupan, _mode, _isi, e = url_entri(baris)
         if not rx_valid(e):
-            warn('url_white: pola tak valid dilewati: %r' % e[:40])
+            warn('url_white: pola tak valid dilewati: %r' % baris[:40])
             continue
+        # cakupan "semua" = WAF dimatikan untuk URL ini; "crs" = hanya aturan bertag OWASP_CRS yang dilewati (aturan ZySentinel tetap
+        # memeriksa berkas sensitif, webshell, pemindai). Pilihan "crs" untuk endpoint API JSON tepercaya: biaya CRS per argumen JSON
+        # adalah sumber utama overhead (T-172).
+        aksi = 'ctl:ruleEngine=Off' if cakupan == 'semua' else 'ctl:ruleRemoveByTag=OWASP_CRS'
         # Dicocokkan ke PATH yang sudah didekode dan dinormalkan (bukan query), supaya
         # "//x", "/./x", "/%78" dan "?a=/x" tidak menyamar. ctl ditaruh di aturan
         # TERAKHIR rantai: Coraza dan ModSecurity v2 menjalankan aksi kepala rantai
         # walau rantai gagal, sehingga pemeriksaan traversal tidak berguna di kepala.
         s += ('SecRule REQUEST_FILENAME "@rx %s" "id:%d,phase:1,pass,nolog,t:none,t:removeNulls,t:urlDecodeUni,t:normalizePath,chain"\n'
-              '    SecRule REQUEST_URI "!@rx (?:^|[/\\x5c])\\.\\.(?:[/\\x5c;?]|$)" "t:none,t:removeNulls,t:urlDecodeUni,t:urlDecodeUni,ctl:ruleEngine=Off"\n') % (seclang_rx(e), 8001000 + n)
+              '    SecRule REQUEST_URI "!@rx (?:^|[/\\x5c])\\.\\.(?:[/\\x5c;?]|$)" "t:none,t:removeNulls,t:urlDecodeUni,t:urlDecodeUni,%s"\n') % (seclang_rx(e), 8001000 + n, aksi)
         n += 1
         if n >= 400:
             warn('url_white: maksimal 400 pola, sisanya dilewati')
             break
     n = 0
-    for e in ler_lista('url_black'):
+    for baris in ler_lista('url_black'):
+        e = url_entri(baris)[3]
         if not rx_valid(e):
-            warn('url_black: pola tak valid dilewati: %r' % e[:40])
+            warn('url_black: pola tak valid dilewati: %r' % baris[:40])
             continue
         # Path dinormalkan (//, /./, %xx, \\) dan URI mentah diperiksa; huruf besar/kecil
         # tidak membedakan. Dulu hanya REQUEST_URI mentah: "//private/x" lolos.
@@ -468,10 +523,122 @@ def premium_include():
     return None      # edisi Free: modul aturan premium (waf_premium) adalah fitur Max
 
 
-def gen_main(conf):
+def gen_vpatch():
+    """Virtual patch CVE Advisor (waf/zyrules/vpatch/*.conf, ditulis sentinel-cve.py dari feed bertanda tangan) digabung ke
+    gen/vpatch.conf. Hanya dengan fitur cve_vpatch; setiap berkas diperiksa ulang kebijakan data-saja (rentang id
+    8200000-8299999); berkas yang tidak lolos dilewati. Mengembalikan jalur gen/vpatch.conf atau None."""
+    return None      # edisi Free: virtual patch CVE Advisor (cve_vpatch) adalah fitur Max
+
+
+# ------------------------------------------------- aturan bawaan web server --
+# Lapisan kedua untuk berkas dan folder sensitif, ditulis dalam format ASLI tiap web server (nginx location, Apache LocationMatch,
+# OpenLiteSpeed RewriteRule) dari SATU daftar di bawah, yang mengikuti aturan WAF dengan modul yang sama (8000101-8000108, 8000121,
+# 8000441, 8000443). Berlaku hanya pada mode Block dan bila modulnya menyala; tidak bergantung pada engine WAF (Coraza/ModSecurity
+# yang gagal dimuat, mode Monitor, atau permintaan yang dikecualikan CRS). /.well-known/ (ACME acme-challenge, pki-validation,
+# security.txt, assetlinks, passkey) TIDAK pernah ditolak lapisan ini; skrip di /.well-known tetap ditolak WAF (8000443).
+# Regex PCRE (nginx, Apache, dan OLS semuanya PCRE), dicocokkan tanpa membedakan huruf besar/kecil ke path URL yang sudah didekode.
+NATIVE = (
+    ('sensitive_files', 'repositori kode (.git/.svn/.hg)', r'(^|/)\.(git|svn|hg|bzr|cvs)(ignore|attributes|config|modules|keep)?(/|$)'),
+    ('sensitive_files', 'berkas lingkungan (.env)', r'(^|/)\.env([._-][a-z0-9._-]*)?(/|$)'),
+    ('sensitive_files', 'kendali akses (.htaccess/.htpasswd/.user.ini)', r'(^|/)(\.ht(access|passwd|digest|group|users)([._~-][a-z0-9._~-]*)?|\.(user|php)\.ini)$'),
+    ('sensitive_files', 'dotfile kredensial dan folder konfigurasi',
+     r'(^|/)(\.(bash_history|bashrc|zsh_history|zshrc|sh_history|mysql_history|psql_history|rediscli_history|python_history|node_repl_history|lesshst|viminfo|netrc|npmrc|yarnrc|pypirc|pgpass|my\.cnf|s3cfg|boto|git-credentials|gitconfig|msmtprc|dockercfg|ds_store)|\.(ssh|aws|azure|kube|docker|gnupg|gcloud|idea|vscode|terraform|ansible|bundle|cargo|gem|npm)(/|$))'),
+    ('sensitive_files', 'kunci privat dan sertifikat', r'((^|/)(id_(rsa|dsa|ecdsa|ed25519)(\.pub)?|authorized_keys|known_hosts)$|\.(pem|key|p12|pfx|jks|keystore|ppk|kdbx|gpg)$)'),
+    ('sensitive_files', 'cadangan, dump database, berkas sementara',
+     r'(\.(bak|backup|old|orig|save|swp|swo|sql|sqlite3?|dump)$|~$|\.(php|inc|ini|conf|config|cfg|ya?ml|json|xml|env)\.(bak|backup|old|orig|save|swp|swo|txt|dist|tmp|zip)$)'),
+    ('sensitive_files', 'konfigurasi aplikasi dan infrastruktur',
+     r'((^|/)(wp-config\.php[._~-][a-z0-9._~-]*|web\.config|docker-compose(\.[a-z0-9-]+)?\.ya?ml|dockerfile(\.[a-z0-9-]+)?|vagrantfile|terraform\.tfstate(\.backup)?|\.circleci/|\.github/workflows/)|\.(tfstate|tfvars)$)'),
+    ('webshell', 'skrip di folder unggahan',
+     r'^/(uploads?|uploadfiles|attachments?|forumdata|avatars?|wp-content/uploads|public/uploads?|storage/app/public)/.*\.(php[0-9]?|phtml|phar|jsp|jspx|asp|aspx|cgi|pl)$'),
+    ('probe_secrets', 'berkas/folder berawalan titik kecuali /.well-known', r'^(?!/\.well-known(/|$)).*(^|/)\.[^/.][^/]*'),
+    ('app_laravel', 'internal Laravel & kredensial',
+     r'(^|/)(storage/(oauth-(private|public)\.key|logs/laravel(-[0-9-]+)?\.log)|bootstrap/cache/(config|routes-v[0-9]+|services)\.php|database/database\.sqlite|artisan)$'),
+    ('app_codeigniter', 'internal CodeIgniter',
+     r'(^|/)(application/(config/(database|config)\.php|logs/log-[0-9-]+\.php)|writable/(logs/log-[0-9-]+\.log|session/|cache/)|app/Config/(Database|App)\.php|spark)$'),
+    ('app_cms', 'kredensial CMS umum',
+     r'(^|/)(configuration\.php([._~-][a-z0-9._-]*)?|sites/default/(settings|settings\.local)\.php|app/etc/(local\.xml|env\.php)|app/config/parameters\.php)$'),
+    ('app_nodejs', 'log build & manifest Node.js',
+     r'(^|/)(npm-debug\.log|yarn-error\.log|pnpm-debug\.log|\.strapi-updater\.json|build-manifest\.json|prerender-manifest\.json)$'),
+    ('app_python', 'bytecode & SQLite Python',
+     r'(^|/)(__pycache__/|\.pytest_cache/|\.coverage$|manage\.py$|wsgi\.py$|asgi\.py$|db\.sqlite3$|\.(pyc|pyo)$)'),
+)
+NATIVE_MAKS_PUTIH = 8000     # panjang gabungan pola url_white yang masih ditanam sebagai pengecualian
+
+
+def native_aturan(conf):
+    """(daftar (nama, regex), pesan). Kosong bila mode bukan Block. Pola url_white (dicocokkan ke path seperti di WAF) menjadi
+    pengecualian di depan setiap regex, supaya URL yang sengaja diizinkan admin juga tidak ditolak lapisan bawaan."""
+    mode = conf.get('mode', 'block')
+    if mode != 'block':
+        return [], 'mode %s: aturan bawaan tidak aktif (hanya mode Block)' % mode
+    # hanya entri cakupan "semua": cakupan "crs" tetap diperiksa aturan bawaan berkas sensitif (bukan aturan CRS)
+    putih = [x[3] for x in map(url_entri, ler_lista('url_white')) if x[0] == 'semua' and rx_valid(x[3])][:400]
+    pre = ''
+    if putih:
+        gab = '|'.join('(?:%s)' % e for e in putih)
+        if len(gab) > NATIVE_MAKS_PUTIH:
+            return [], 'url_white terlalu panjang untuk lapisan bawaan (%d karakter): hanya WAF yang aktif' % len(gab)
+        pre = '^(?!.*?(?:%s))' % gab
+    out = []
+    for modul, nama, rx in NATIVE:
+        if conf.get('zy.mod.%s' % modul, 'on') == 'off':
+            continue
+        if pre:
+            r = pre + (rx[1:] if rx.startswith('^') else '.*?' + ('(?:%s)' % rx))
+        else:
+            r = rx
+        try:
+            re.compile(r, re.I)
+        except re.error as ex:
+            warn('aturan bawaan %s tidak valid: %s' % (nama, ex))
+            continue
+        out.append((nama, r))
+    return out, '%d aturan aktif' % len(out)
+
+
+def gen_native(conf):
+    """Isi berkas aturan bawaan per web server: {'nginx': ..., 'apache': ..., 'ols': ...}."""
+    aturan, pesan = native_aturan(conf)
+    kepala = '# Dibuat oleh sentinel-zyrules.py (aturan bawaan berkas/folder sensitif, %s). Jangan edit.\n' % pesan
+    ng, ap, ol = kepala, kepala, kepala
+    if aturan:
+        ap += '<IfModule authz_core_module>\n'
+        ol += '<IfModule mod_rewrite.c>\n    RewriteEngine on\n'
+    for nama, r in aturan:
+        q = r.replace('"', '\\x22')
+        ng += '# %s\nlocation ~* "%s" {\n    return 403;\n}\n' % (nama, q)
+        ap += '    # %s\n    <LocationMatch "(?i)%s">\n        Require all denied\n    </LocationMatch>\n' % (nama, q)
+        ol += '    # %s\n    RewriteRule %s - [F,NC,L]\n' % (nama, r.replace(' ', '\\x20'))
+    if aturan:
+        ap += '</IfModule>\n'
+        ol += '</IfModule>\n'
+    return {'nginx': ng, 'apache': ap, 'ols': ol}
+
+
+# Direktif yang dikenal Coraza/ModSecurity v3 tetapi TIDAK oleh ModSecurity v2 (Apache, OpenLiteSpeed): ModSecurity v2 menolak seluruh
+# konfigurasi bila menemuinya ("Invalid command"). Varian main-v2.conf memakai base-v2.conf tanpa direktif ini; main.conf (Coraza) tetap utuh.
+V2_TIDAK_DIDUKUNG = ('SecArgumentsLimit',)
+
+
+def v2_lewati():
+    """Berkas CRS yang dilewati di varian ModSecurity v2 karena ModSecurity v2 terpasang terlalu lama untuk sintaksnya
+    (mis. 2.9.5 Ubuntu 22.04 tidak mengenal MULTIPART_PART_HEADERS). Daftar ditulis sentinel-waf.sh saat uji konfigurasi gagal."""
+    try:
+        with open(GEN + '/modsec2-skip.list') as f:
+            return set(x.strip() for x in f if x.strip() and '/' not in x)
+    except OSError:
+        return set()
+
+
+def gen_base_v2(base_txt):
+    baris = [ln for ln in base_txt.split('\n') if not (ln.split() and ln.split()[0] in V2_TIDAK_DIDUKUNG)]
+    return '\n'.join(baris)
+
+
+def gen_main(conf, v2=False):
     ada = crs_ada()
     inc = ['# Dibuat oleh sentinel-zyrules.py. Dimuat oleh semua vhost (nginx/Coraza, Apache/OpenLiteSpeed ModSecurity).',
-           'Include %s/base.conf' % GEN,
+           'Include %s/%s' % (GEN, 'base-v2.conf' if v2 else 'base.conf'),
            'Include %s/zysentinel-config.conf' % ZY_DIR,
            'Include %s/zysentinel-config.local.conf' % ZY_DIR,
            'Include %s/settings.conf' % GEN,
@@ -482,15 +649,37 @@ def gen_main(conf):
     if ada:
         for nama, path in crs_grup():
             if conf.get('rule.%s' % nama, 'on') != 'off':
+                if v2 and os.path.basename(path) in v2_lewati():
+                    inc.append('# dilewati (ModSecurity v2 terlalu lama untuk berkas ini): %s' % os.path.basename(path))
+                    continue
                 inc.append('Include %s' % path)
     inc.append('Include %s/zysentinel-after.conf' % ZY_DIR)
     prem = premium_include()
     if prem:
         inc.append('# modul premium (paket Max), dilewati bila lisensi tidak mengizinkan')
         inc.append('Include %s' % prem)
+    vp = gen_vpatch()
+    if vp:
+        inc.append('# virtual patch CVE Advisor (paket Max, feed bertanda tangan)')
+        inc.append('Include %s' % vp)
     inc.append('Include %s/disable.conf' % GEN)
     inc.append('Include %s/zysentinel-exclusions.local.conf' % ZY_DIR)
     return '\n'.join(inc) + '\n'
+
+
+def lic_ref():
+    """Sidik lisensi publik untuk halaman blokir (prioritas 6, 30 Okt 2026): sha256("zysref|" + kode)[:12], sama dengan
+    integrity.ref_lisensi di server. Satu arah (bukan kode lisensi); dashboard developer bisa mencari lisensi dari ref yang terlihat di
+    tangkapan layar halaman blokir build yang beredar tanpa izin. Tanpa kode lisensi (Free/pengembangan): "free"."""
+    try:
+        aku = os.path.dirname(os.path.abspath(__file__))
+        if aku not in sys.path:
+            sys.path.insert(0, aku)
+        import sentinel_license as sl
+        kode = sl.get_code() if hasattr(sl, 'get_code') else ''
+    except Exception:
+        kode = ''
+    return hashlib.sha256(('zysref|' + kode).encode()).hexdigest()[:12] if kode else 'free'
 
 
 def gen_pages():
@@ -498,7 +687,7 @@ def gen_pages():
     if not os.path.isfile(src):
         warn('halaman blocker tidak ditemukan: %s' % src)
         return
-    html = open(src, encoding='utf-8').read()
+    html = open(src, encoding='utf-8').read().replace('{{LIC_REF}}', lic_ref())
     for ws, ip, rid in (
             ('nginx', '{{CLIENT_IP}}', '{{REQ_ID}}'),
             ('apache', '<!--#echo var="REMOTE_ADDR" -->', '<!--#echo var="UNIQUE_ID" -->'),
@@ -514,22 +703,36 @@ def gen_pages():
 
 
 def pastikan_log():
-    """Berkas log audit harus bisa ditulis user web server."""
+    """Berkas log audit harus bisa ditulis user web server.
+
+    /www/wwwlogs dimiliki user web server (www), jadi isinya dikendalikan penyerang yang menguasai situs.
+    chown/chmod berbasis path (mengikuti symlink) membuat root mengubah pemilik berkas sistem mana pun yang
+    ditunjuk symlink bernama zysentinel_waf_audit.jsonl. Di sini berkas dibuka O_NOFOLLOW, harus berkas biasa
+    dengan satu hard link, dan pemilik/mode diubah lewat fd yang sama."""
     d = os.path.dirname(AUDIT_LOG)
     try:
         os.makedirs(d, exist_ok=True)
-        if not os.path.exists(AUDIT_LOG):
-            open(AUDIT_LOG, 'a').close()
+        fd = os.open(AUDIT_LOG, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC, 0o640)
+    except OSError as ex:
+        warn('log audit %s tidak bisa disiapkan: %s' % (AUDIT_LOG, ex))
+        return
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_nlink != 1:
+            warn('log audit %s bukan berkas biasa bertaut tunggal (symlink/hard link?); pemilik dan mode tidak diubah' % AUDIT_LOG)
+            return
         try:
             import pwd
             u = pwd.getpwnam(WEB_USER)
-            os.chown(AUDIT_LOG, u.pw_uid, u.pw_gid)
-            os.chmod(AUDIT_LOG, 0o640)
+            os.fchown(fd, u.pw_uid, u.pw_gid)
+            os.fchmod(fd, 0o640)
         except Exception:
             # user web server tidak dikenal: jangan kunci log dari mereka
-            os.chmod(AUDIT_LOG, 0o666)
-    except Exception as ex:
+            os.fchmod(fd, 0o666)
+    except OSError as ex:
         warn('log audit %s tidak bisa disiapkan: %s' % (AUDIT_LOG, ex))
+    finally:
+        os.close(fd)
 
 
 def build():
@@ -545,12 +748,16 @@ def build():
                 fh.write('# Pengaturan lokal; tidak ditimpa pembaruan plugin.\n')
             os.chmod(p, 0o644)
     tulis('base.conf', gen_base(conf))
+    tulis('base-v2.conf', gen_base_v2(gen_base(conf)))
     tulis('settings.conf', gen_settings(conf))
     tulis('disable.conf', gen_disable(conf))
     tulis('lists.conf', gen_lists(conf))
     if crs_ada():
         tulis('crs-setup.conf', gen_crs_setup(conf))
     tulis('main.conf', gen_main(conf))
+    tulis('main-v2.conf', gen_main(conf, v2=True))       # ModSecurity v2 (Apache/OpenLiteSpeed)
+    for ws, isi in gen_native(conf).items():
+        tulis('native/%s.conf' % ws, isi)
     gen_pages()
     pastikan_log()
     # izin baca untuk user web server pada seluruh pohon ruleset

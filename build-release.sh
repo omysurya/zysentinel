@@ -1,4 +1,6 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 PT. StudioNet Indonesia Jaya (ZySens).
 # ==============================================================================
 # build-release.sh — Skrip Pembangun Paket Rilis Bersih ZySentinel
 #
@@ -34,7 +36,7 @@ echo "[*] Edisi Free (https://github.com/omysurya/zysentinel)"
 SRC_C="$SCRIPT_DIR/payload/guardd.c"
 if command -v gcc >/dev/null 2>&1 && [ -f /usr/include/sqlite3.h ]; then
     echo "[*] Mengompilasi payload/guardd dari guardd.c (canary, PIE, RELRO)..."
-    gcc -O2 -Wall -Wextra -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -pie -Wl,-z,relro,-z,now \
+    gcc -std=gnu11 -O2 -Wall -Wextra -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -pie -Wl,-z,relro,-z,now \
         -o "$SCRIPT_DIR/payload/guardd" "$SRC_C" -lsqlite3 -lm
     chmod 755 "$SCRIPT_DIR/payload/guardd"
     sha256sum "$SRC_C" | awk '{print $1}' > "$SCRIPT_DIR/payload/guardd.srchash"
@@ -73,10 +75,24 @@ rsync -rltD --exclude='.git' \
             --exclude='release_notes.py' \
             --exclude='release-notes' \
             --exclude='release-all.sh' \
+            --exclude='.env-release*' \
+            --exclude='AGENTS.md' \
+            --exclude='CLAUDE.md' \
+            --exclude='GEMINI.md' \
+            --exclude='.cursorrules' \
+            --exclude='.windsurfrules' \
+            --exclude='copilot-instructions.md' \
             --exclude='CONTRIBUTING.md' \
             --exclude='edition' \
+            --exclude='/build' \
             --exclude='tests' \
             "$SCRIPT_DIR/" "$STAGE_DIR/sentinel/"
+
+# 3-lisensi. Repository Pro menyimpan Apache-2.0 edisi Free sebagai LICENSE.free (akar repository Pro = LICENSE proprietary). Build terbuka
+#     memakai Apache-2.0 sebagai LICENSE; build ENFORCE menimpanya dengan EULA (langkah 3b). Di repository Free berkasnya sudah bernama LICENSE.
+if [ -f "$STAGE_DIR/sentinel/LICENSE.free" ]; then
+    mv -f "$STAGE_DIR/sentinel/LICENSE.free" "$STAGE_DIR/sentinel/LICENSE"
+fi
 
 
 # 4. Pastikan izin eksekusi berkas skrip & library

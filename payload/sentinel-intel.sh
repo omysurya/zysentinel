@@ -1,4 +1,6 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 PT. StudioNet Indonesia Jaya (ZySens).
 # ============================================================
 # sentinel-intel.sh -- Pengelola Global Threat Intelligence Feed
 #
@@ -77,10 +79,10 @@ do_update() {
   local unduh_ok=0
 
   # Unduh Spamhaus DROP & EDROP
-  if curl -s -f -m 15 https://www.spamhaus.org/drop/drop.txt >> "$tmp_raw" 2>/dev/null; then
+  if curl -s -f -m 15 --proto =https https://www.spamhaus.org/drop/drop.txt >> "$tmp_raw" 2>/dev/null; then
     unduh_ok=1
   fi
-  if curl -s -f -m 15 https://www.spamhaus.org/drop/edrop.txt >> "$tmp_raw" 2>/dev/null; then
+  if curl -s -f -m 15 --proto =https https://www.spamhaus.org/drop/edrop.txt >> "$tmp_raw" 2>/dev/null; then
     unduh_ok=1
   fi
 
@@ -90,8 +92,28 @@ do_update() {
     cat "$SEED_FILE" > "$tmp_raw"
   fi
 
-  # Ekstrak format CIDR IPv4 valid
-  grep -o -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?' "$tmp_raw" | sort -u > "$tmp_clean" || true
+  # Jika ada feed reputasi ZySens (tersinkronisasi oleh sentinel-license untuk paket Max), gabungkan
+  if [ -s "$DATA_DIR/threat_feed_cached.txt" ]; then
+    cat "$DATA_DIR/threat_feed_cached.txt" >> "$tmp_raw"
+    say "menggabungkan feed reputasi ZySens dari cache lokal"
+  fi
+
+  # Ekstrak format CIDR IPv4 valid dan filter rentang berbahaya/tidak valid
+  grep -o -E '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(/[0-9]+)?' "$tmp_raw" | sort -u | awk -F'[/.]' '
+    {
+      a=$1+0; b=$2+0; c=$3+0; d=$4+0;
+      m = (NF == 5) ? ($5+0) : 32;
+      if (a < 0 || a > 255 || b < 0 || b > 255 || c < 0 || c > 255 || d < 0 || d > 255) next;
+      if (m < 8 || m > 32) next;
+      if (a == 0 || a == 127) next;
+      if (a == 169 && b == 254) next;
+      if (a >= 224) next;
+      if (a == 10) next;
+      if (a == 172 && b >= 16 && b <= 31) next;
+      if (a == 192 && b == 168) next;
+      print $0;
+    }
+  ' > "$tmp_clean" || true
   local total; total="$(wc -l < "$tmp_clean" | tr -d ' ')"
 
   if [ "${total:-0}" -eq 0 ]; then
@@ -117,8 +139,14 @@ do_update() {
     cp -f "$tmp_clean" "$CACHE_FILE" 2>/dev/null || true
 
     local now; now="$(date +%s)"
-    printf '{"updated":%s,"total":%s,"status":"active","source":"Spamhaus DROP/EDROP"}\n' \
-      "$now" "$total" > "$META_FILE"
+    local src="Spamhaus DROP/EDROP"
+    local tf_cnt=0
+    if [ -s "$DATA_DIR/threat_feed_cached.txt" ]; then
+      tf_cnt="$(wc -l < "$DATA_DIR/threat_feed_cached.txt" | tr -d ' ')"
+      src="Spamhaus DROP/EDROP + ZySens Reputation Feed"
+    fi
+    printf '{"updated":%s,"total":%s,"threat_feed":%s,"status":"active","source":"%s"}\n' \
+      "$now" "$total" "${tf_cnt:-0}" "$src" > "$META_FILE"
     say "pembaruan berhasil: $total blok CIDR penyerang global dimuat ke kernel"
   else
     "$IPSET" destroy "$SET_TMP" 2>/dev/null || true
@@ -152,8 +180,13 @@ do_status() {
     hit="$(printf '%s' "$rule_line" | awk '{print $1}')"
   fi
 
-  printf 'ada=%s\ntotal=%s\nterakhir=%s\nhit_count=%s\n' \
-    "$ada" "$total" "$tgl" "${hit:-0}"
+  local tf_count=0
+  if [ -s "$DATA_DIR/threat_feed_cached.txt" ]; then
+    tf_count="$(wc -l < "$DATA_DIR/threat_feed_cached.txt" | tr -d ' ')"
+  fi
+
+  printf 'ada=%s\ntotal=%s\nterakhir=%s\nhit_count=%s\nthreat_feed_count=%s\n' \
+    "$ada" "$total" "$tgl" "${hit:-0}" "${tf_count:-0}"
 }
 
 do_flush() {

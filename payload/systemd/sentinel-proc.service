@@ -21,6 +21,10 @@ RestartMaxDelaySec=60
 LogRateLimitIntervalSec=30s
 LogRateLimitBurst=100
 KillMode=process
+# prioritas di bawah situs pelanggan dan batas memori (daemon Python + pindaian memscan anak)
+Nice=5
+MemoryHigh=192M
+MemoryMax=256M
 StandardOutput=journal
 StandardError=journal
 

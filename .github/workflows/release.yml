@@ -9,7 +9,7 @@ on:
       version:
         description: 'Release version (e.g. v1.2.3)'
         required: false
-        default: 'v1.6.4'
+        default: 'v2.0.1'
 
 permissions:
   contents: write
@@ -91,7 +91,9 @@ jobs:
           tag_name: ${{ steps.vars.outputs.tag }}
           name: "ZySentinel ${{ steps.vars.outputs.tag }}"
           body_path: ${{ runner.temp }}/release-notes.md
-          draft: false
+          # draft: SHA256SUMS.txt harus signed release key (offline, laptop pemilik) lewat release-all.sh sebelum diterbitkan;
+          # client Free menolak release tanpa SHA256SUMS.txt.sig yang sah
+          draft: true
           prerelease: false
           files: |
             sentinel.zip

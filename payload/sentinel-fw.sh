@@ -1,4 +1,9 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 PT. StudioNet Indonesia Jaya (ZySens).
+# Interpreter ZySentinel (dipilih installer, lihat etc/python): bin/py hanya berisi symlink python3, mis. ke python3.9 di EL8.
+# Tanpa bin/py (instalasi lama) perilaku tidak berubah: python3 dari PATH sistem.
+PATH="/www/server/sentinel/bin/py:$PATH"
 # ============================================================
 # sentinel-fw.sh
 #
@@ -137,6 +142,8 @@ hook_chain() {
 }
 SET_BAN="sentinel_ban"
 SET_THR="sentinel_throttle"
+SET_BAN6="sentinel_ban6"
+SET_THR6="sentinel_throttle6"
 # Set ANTRIAN REVIEW. Berbeda dengan dua set di atas, paket dari
 # IP di sini TIDAK diblokir. Set ini hanya penanda supaya operator
 # bisa melihat siapa yang menunggu keputusan.
@@ -149,12 +156,28 @@ SET_GEO="sentinel_geo"
 # Set THREAT INTEL: daftar CIDR reputasi buruk global (Spamhaus DROP/EDROP).
 # Dikelola oleh sentinel-intel.sh, diperbarui otomatis via sentinel-intel.timer.
 SET_INTEL="sentinel_intel"
+# Set PROXY/CDN SAH: rentang IP resmi Cloudflare, Fastly, Sucuri, QUIC.cloud (+ tambahan admin).
+# Dikelola sentinel-proxy.py (etc/proxy-ranges.txt). Ribuan pengunjung berbagi satu IP edge
+# proxy, jadi IP ini TIDAK boleh kena ban/throttle/geo/intel; port firewall tetap berlaku.
+SET_PROXY="sentinel_proxy"
+PROXY_RANGES="/www/server/sentinel/etc/proxy-ranges.txt"
 
 # Pengaman lalu lintas keluar (Egress Guard) untuk proses web (UID 1002 / www).
 # Mencegah reverse shell dan unduhan payload backdoor ke port arbitrer.
 EGRESS_CHAIN="SENTINEL_OUT"
 EGRESS_FLAG_FILE="/www/server/sentinel/run/egress.state"
-WEB_UID="${SENTINEL_WEB_UID:-1002}"
+# UID akun pekerja web diambil dari sistem (www aaPanel, www-data, apache, nginx); 1002 hanya cadangan. Dulu 1002 mutlak:
+# di server yang UID www-nya lain, Egress Guard menjaga akun yang salah (pekerja web sebenarnya bebas membuka reverse shell)
+# dan membatasi pengguna sah ber-UID 1002.
+web_uid_deteksi() {
+  local u i
+  for u in www www-data apache nginx; do
+    i="$(id -u "$u" 2>/dev/null)" && [ -n "$i" ] && { printf '%s' "$i"; return 0; }
+  done
+  printf '1002'
+}
+WEB_UID="${SENTINEL_WEB_UID:-$(web_uid_deteksi)}"
+case "$WEB_UID" in ''|*[!0-9]*) WEB_UID=1002 ;; esac
 
 ALLOW_FILE=/www/server/sentinel/etc/allowlist.txt
 
@@ -189,6 +212,12 @@ conf_get() {
 # ZYS_LICENSE_BIN hanya untuk uji. Yang dikunci hanya otomatisasi dan kedalaman; firewall dasar, ban manual, panic tetap Free.
 FW_ADV=0      # edisi Free: anti-DDoS lanjutan (fw_advanced) adalah fitur Pro
 EGRESS_MODE="${SENTINEL_EGRESS_MODE:-$(conf_get egress_guard off)}"
+# Egress Guard (23 Okt 2026): SSH/Git keluar (22, 2222, 9418) hanya bila diizinkan eksplisit; port tambahan dari konfigurasi
+# (daftar angka dipisah koma). DNS hanya ke resolver di resolv.conf (SENTINEL_RESOLV_CONF menggantikan jalur untuk uji).
+EGRESS_ALLOW_GIT="${SENTINEL_EGRESS_GIT:-$(conf_get egress_allow_git 0)}"
+EGRESS_EXTRA_PORTS="${SENTINEL_EGRESS_PORTS:-$(conf_get egress_extra_ports '')}"
+RESOLV_CONF="${SENTINEL_RESOLV_CONF:-/etc/resolv.conf}"
+IP6T="$(command -v ip6tables 2>/dev/null || true)"
 THROTTLE_RPS="${SENTINEL_THROTTLE_RPS:-$(conf_get throttle_rps 5)}"
 THROTTLE_BURST="${SENTINEL_THROTTLE_BURST:-$(conf_get throttle_burst 15)}"
 # rpm = permintaan per menit. Kosongkan untuk mematikan aturan per menit.
@@ -215,6 +244,8 @@ GEO_NEGARA="$(printf '%s' "$GEO_NEGARA" | tr 'a-z' 'A-Z' | tr -d ' \t')"
 # normal server ini, jadi praktis tidak akan tersentuh.
 GLOBAL_RATE="${SENTINEL_GLOBAL_RATE-3000/second}"
 GLOBAL_BURST="${SENTINEL_GLOBAL_BURST-6000}"
+# Nilai pengaman global KUSTOM adalah fitur Max (fw_global); tanpa lisensi nilai bawaan dipakai. Mematikan (kosong) tidak dikunci.
+[ -n "$GLOBAL_RATE" ] && { GLOBAL_RATE="3000/second"; GLOBAL_BURST="6000"; }
 # Port web yang dilindungi.
 WEB_PORTS="${SENTINEL_WEB_PORTS:-80,443}"
 # Port untuk geo-ban. Bawaan 443 (HTTPS) agar tantangan HTTP-01 Let's Encrypt (port 80)
@@ -235,15 +266,58 @@ have_mod() {
   "$IPT" -m "$1" -h >/dev/null 2>&1
 }
 
+# Jumlah anggota set tanpa men-dump isinya (set intel/geo bisa ratusan ribu CIDR; dulu "ipset list | grep -c" tiap 5 menit).
+# ipset lama tanpa baris "Number of entries": kembali ke cara lama.
+jumlah_set() {
+  local n
+  n="$("$IPSET" list -t "$1" 2>/dev/null | sed -n 's/^Number of entries: *//p')"
+  [ -n "$n" ] || n="$("$IPSET" list "$1" 2>/dev/null | grep -c '^[0-9]')"
+  printf '%s' "${n:-0}"
+}
+
+# Isi ulang set proxy secara atomik (swap) dari proxy-ranges.txt. Daftar diperbarui
+# mingguan (--if-stale) oleh sentinel-proxy.py; gagal unduh = daftar lama/bawaan dipakai.
+proxy_isi_set() {
+  local py=/www/server/panel/pyenv/bin/python3 bin=/www/server/sentinel/bin/sentinel-proxy.py tmp n
+  [ -x "$py" ] || py="$(command -v python3 2>/dev/null)"
+  if [ -n "$py" ] && [ -f "$bin" ]; then
+    timeout 60 "$py" "$bin" sync --if-stale >/dev/null 2>&1 || true
+    [ -s "$PROXY_RANGES" ] || timeout 20 "$py" "$bin" write >/dev/null 2>&1 || true
+  fi
+  [ -s "$PROXY_RANGES" ] || return 0
+  # Real IP per vhost (nginx/Apache) paling sering sejam sekali, di latar: membaca ekor log tiap vhost dan bisa reload web server.
+  local st=/www/server/sentinel/run/realip.ts waf=/www/server/sentinel/bin/sentinel-waf.sh
+  if [ -x "$waf" ] && [ -z "$(find "$st" -mmin -60 2>/dev/null)" ]; then
+    touch "$st" 2>/dev/null
+    # 9>&-: jangan wariskan kunci .fw-install.lock ke proses latar (pemasangan berikutnya akan dilewati)
+    ( timeout 300 nice -n 10 "$waf" realip >/dev/null 2>&1 9>&- & ) 2>/dev/null
+  fi
+  tmp="$(mktemp 2>/dev/null)" || return 0
+  {
+    printf 'create %s_new hash:net family inet hashsize 1024 maxelem 65536\n' "$SET_PROXY"
+    awk '$1 ~ /^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(\/[0-9]+)?$/ {print "add '"$SET_PROXY"'_new " $1}' "$PROXY_RANGES" | sort -u
+  } > "$tmp"
+  n="$(grep -c '^add ' "$tmp")"
+  "$IPSET" destroy "${SET_PROXY}_new" 2>/dev/null
+  if [ "${n:-0}" -gt 0 ] && "$IPSET" restore -exist < "$tmp" 2>/dev/null; then
+    "$IPSET" list -n "$SET_PROXY" >/dev/null 2>&1 \
+      || printf 'create %s hash:net family inet hashsize 1024 maxelem 65536\n' "$SET_PROXY" | "$IPSET" restore 2>/dev/null
+    "$IPSET" swap "${SET_PROXY}_new" "$SET_PROXY" 2>/dev/null || err "gagal menukar ipset $SET_PROXY"
+    "$IPSET" destroy "${SET_PROXY}_new" 2>/dev/null
+  fi
+  rm -f "$tmp"
+  return 0
+}
+
 ensure_set() {
-  # ensure_set <nama> <timeout_bawaan>
-  local name="$1" tmo="$2"
-  if "$IPSET" list "$name" >/dev/null 2>&1; then
+  # ensure_set <nama> <timeout_bawaan> [family]
+  local name="$1" tmo="$2" fam="${3:-inet}"
+  if "$IPSET" list -n "$name" >/dev/null 2>&1; then
     return 0
   fi
-  if printf 'create %s hash:net family inet timeout %s hashsize 4096 maxelem 262144\n' \
-      "$name" "$tmo" | "$IPSET" restore 2>/dev/null; then
-    say "ipset $name dibuat (timeout ${tmo}s)"
+  if printf 'create %s hash:net family %s timeout %s hashsize 4096 maxelem 262144\n' \
+      "$name" "$fam" "$tmo" | "$IPSET" restore 2>/dev/null; then
+    say "ipset $name dibuat (family $fam, timeout ${tmo}s)"
   else
     err "gagal membuat ipset $name"
   fi
@@ -466,20 +540,33 @@ fw_rules() {
       -m comment --comment "sentinel:invalid-drop" -j DROP
   fi
 
+  # 2a'') PROXY/CDN SAH (Cloudflare dkk.): satu IP edge mewakili ribuan pengunjung,
+  #       jadi lompati geo/intel/ban/throttle/global (pelaku sebenarnya ditangani WAF
+  #       lewat real-IP). Port firewall TETAP berlaku: goto ke SENTINEL_IN_PORTS.
+  if "$IPSET" list -n "$SET_PROXY" >/dev/null 2>&1 && [ "$(jumlah_set "$SET_PROXY")" -gt 0 ]; then
+    if "$IPT_BIN" -w 10 -S SENTINEL_IN_PORTS >/dev/null 2>&1; then
+      "$IPT" -A "$CHAIN" -m set --match-set "$SET_PROXY" src \
+        -m comment --comment "sentinel:proxy-cdn" -g SENTINEL_IN_PORTS
+    else
+      "$IPT" -A "$CHAIN" -m set --match-set "$SET_PROXY" src \
+        -m comment --comment "sentinel:proxy-cdn" -j RETURN
+    fi
+  fi
+
   # 2b) GEO-BAN: setelah whitelist (pilihan operator selalu menang), sebelum
   #     ban. Hanya port web, termasuk UDP 443 (HTTP/3 / QUIC): tanpa itu
   #     klien dari negara terblokir cukup beralih ke QUIC.
-  if "$IPSET" list "$SET_GEO" >/dev/null 2>&1; then
+  if "$IPSET" list -n "$SET_GEO" >/dev/null 2>&1; then
     "$IPSET" flush "$SET_GEO" 2>/dev/null || true
   fi
   if [ "${GEO_DIKUNCI:-0}" = 1 ]; then say "geo-ban tidak aktif (butuh paket Pro; pengaturan tetap tersimpan)"; else say "geo-ban tidak aktif (set kosong atau mode off)"; fi
 
   # 2c) GLOBAL THREAT INTEL: blokir seluruh CIDR botnet & C2 reputasi buruk (Spamhaus DROP/EDROP).
-  if [ "$SET_INTEL" ] && "$IPSET" list "$SET_INTEL" >/dev/null 2>&1 \
-     && [ "$("$IPSET" list "$SET_INTEL" 2>/dev/null | grep -c '^[0-9]')" -gt 0 ]; then
+  if [ "$SET_INTEL" ] && "$IPSET" list -n "$SET_INTEL" >/dev/null 2>&1 \
+     && [ "$(jumlah_set "$SET_INTEL")" -gt 0 ]; then
     "$IPT" -A "$CHAIN" -m set --match-set "$SET_INTEL" src \
       -m comment --comment "sentinel:intel-drop" -j DROP
-    say "threat intel aktif: $("$IPSET" list "$SET_INTEL" 2>/dev/null | grep -c '^[0-9]') CIDR reputasi buruk diblokir"
+    say "threat intel aktif: $(jumlah_set "$SET_INTEL") CIDR reputasi buruk diblokir"
   else
     say "threat intel tidak aktif (set kosong atau belum diunduh)"
   fi
@@ -552,6 +639,55 @@ fw_rules() {
   "$IPT" -A "$CHAIN" -j RETURN
 }
 
+install_v6() {
+  [ -n "$IP6T" ] || return 0
+  "$IP6T" -w 10 -N "$CHAIN" 2>/dev/null || true
+  "$IP6T" -w 10 -F "$CHAIN" 2>/dev/null || true
+
+  if "$IP6T" -S IN_BT >/dev/null 2>&1; then
+    "$IP6T" -w 10 -C IN_BT -j "$CHAIN" 2>/dev/null || "$IP6T" -w 10 -I IN_BT 1 -j "$CHAIN" 2>/dev/null || true
+  else
+    "$IP6T" -w 10 -C INPUT -j "$CHAIN" 2>/dev/null || "$IP6T" -w 10 -I INPUT 1 -j "$CHAIN" 2>/dev/null || true
+  fi
+
+  "$IP6T" -w 10 -A "$CHAIN" -i lo -j RETURN 2>/dev/null || true
+  "$IP6T" -w 10 -A "$CHAIN" -m conntrack --ctstate RELATED,ESTABLISHED -j RETURN 2>/dev/null || true
+
+  "$IPSET" list -n "$SET_BAN6" >/dev/null 2>&1 && \
+    "$IP6T" -w 10 -A "$CHAIN" -m set --match-set "$SET_BAN6" src \
+      -m comment --comment "sentinel:ban6-drop" -j DROP 2>/dev/null || true
+
+  if have_mod hashlimit && have_mod conntrack; then
+    "$IPSET" list -n "$SET_THR6" >/dev/null 2>&1 && \
+      "$IP6T" -w 10 -A "$CHAIN" -p tcp -m multiport --dports "$WEB_PORTS" \
+        -m set --match-set "$SET_THR6" src --syn -m conntrack --ctstate NEW \
+        -m hashlimit --hashlimit-above "$THROTTLE_RPS/second" \
+        --hashlimit-burst "$THROTTLE_BURST" --hashlimit-mode srcip \
+        --hashlimit-name sentinel_thr6_s --hashlimit-htable-expire 600000 \
+        -m comment --comment "sentinel:throttle6-rate" -j DROP 2>/dev/null || true
+  fi
+
+  if have_mod connlimit && have_mod conntrack; then
+    "$IP6T" -w 10 -A "$CHAIN" -p tcp -m multiport --dports "$WEB_PORTS" --syn -m conntrack --ctstate NEW \
+      -m connlimit --connlimit-above "$SYN_MAX" --connlimit-mask 128 \
+      -m comment --comment "sentinel:syn6-guard" -j DROP 2>/dev/null || true
+    "$IP6T" -w 10 -A "$CHAIN" -p tcp -m multiport --dports "$WEB_PORTS" -m conntrack \
+      --ctstate NEW -m connlimit --connlimit-above "$CONN_MAX" \
+      --connlimit-mask 128 \
+      -m comment --comment "sentinel:conn6-guard" -j DROP 2>/dev/null || true
+  fi
+
+  if [ "$FW_ADV" = 1 ] && have_mod hashlimit; then
+    "$IP6T" -w 10 -A "$CHAIN" -p udp --dport 443 \
+      -m hashlimit --hashlimit-above "$QUIC_PPS/second" --hashlimit-burst "$((QUIC_PPS * 2))" \
+      --hashlimit-mode srcip --hashlimit-name sentinel_quic6 --hashlimit-htable-expire 60000 \
+      -m comment --comment "sentinel:quic6-flood" -j DROP 2>/dev/null || true
+  fi
+
+  "$IP6T" -w 10 -A "$CHAIN" -j RETURN 2>/dev/null || true
+  say "aturan IPv6 (ip6tables) terpasang di chain $CHAIN"
+}
+
 do_install() {
   need_root
   # Satu pemasangan pada satu waktu (timer 5 menit dan UI bisa bersamaan):
@@ -584,12 +720,18 @@ do_install() {
   ensure_set "$SET_BAN" 3600
   ensure_set "$SET_THR" 1800
   ensure_set "$SET_REV" 43200
+  ensure_set "$SET_BAN6" 3600 inet6
+  ensure_set "$SET_THR6" 1800 inet6
   # Geo: TANPA timeout (0 = permanen). maxelem besar karena satu negara
   # bisa 115.345 blok; bawaan ensure_set hanya 262144, jadi cukup, tapi
   # tetap dipastikan ada di sini supaya aturan di atasnya bisa dipasang.
   ensure_set "$SET_GEO" 0
   # Threat Intel global: Spamhaus DROP/EDROP (diperbarui via sentinel-intel.timer)
   ensure_set "$SET_INTEL" 0
+  proxy_isi_set
+  # Aturan proxy memakai goto ke SENTINEL_IN_PORTS; pastikan chain ada sebelum rencana
+  # disusun (sentinel-ports.py apply di akhir yang mengisinya).
+  [ -f /www/server/sentinel/etc/ports.json ] && "$IPT" -N SENTINEL_IN_PORTS 2>/dev/null
 
   # PEMULIHAN SETELAH REBOOT. ipset tidak persisten: setelah mesin
   # menyala ulang, sentinel_geo kosong meskipun guardd.conf masih
@@ -597,7 +739,7 @@ do_install() {
   # -diam setiap reboot -- persis jenis kegagalan senyap yang ingin
   # dihindari. Kalau mode terisi tetapi set kosong, isi ulang sekarang.
   # sentinel-fw.service berjalan saat boot, jadi ini yang memulihkannya.
-  if "$IPSET" list "$SET_GEO" >/dev/null 2>&1; then
+  if "$IPSET" list -n "$SET_GEO" >/dev/null 2>&1; then
     "$IPSET" flush "$SET_GEO" 2>/dev/null || true
   fi
 
@@ -667,6 +809,9 @@ do_install() {
     /www/server/panel/pyenv/bin/python3 /www/server/sentinel/bin/sentinel-ports.py apply >/dev/null 2>&1 || python3 /www/server/sentinel/bin/sentinel-ports.py apply >/dev/null 2>&1 || true
   fi
 
+  # 11) FIREWALL IPv6: pasang proteksi ip6tables bila tersedia
+  install_v6
+
   say "selesai. periksa dengan: $IPT_BIN -S $CHAIN"
 }
 
@@ -688,6 +833,16 @@ do_remove() {
   else
     say "chain $CHAIN tidak ada, sudah bersih"
   fi
+  if [ -n "$IP6T" ]; then
+    while "$IP6T" -S IN_BT 2>/dev/null | grep -qxF -- "-A IN_BT -j $CHAIN"; do
+      "$IP6T" -D IN_BT -j "$CHAIN" 2>/dev/null || break
+    done
+    while "$IP6T" -S INPUT 2>/dev/null | grep -qxF -- "-A INPUT -j $CHAIN"; do
+      "$IP6T" -D INPUT -j "$CHAIN" 2>/dev/null || break
+    done
+    "$IP6T" -F "$CHAIN" 2>/dev/null || true
+    "$IP6T" -X "$CHAIN" 2>/dev/null || true
+  fi
   say "set $SET_BAN dan $SET_THR sengaja tidak dihapus, ban lama tetap berlaku"
 }
 
@@ -697,6 +852,8 @@ do_flush() {
   "$IPSET" flush "$SET_REV" 2>/dev/null && say "$SET_REV dikosongkan"
   "$IPSET" flush "$SET_THR" 2>/dev/null && say "$SET_THR dikosongkan"
   "$IPSET" flush "$SET_REV" 2>/dev/null && say "$SET_REV dikosongkan"
+  "$IPSET" flush "$SET_BAN6" 2>/dev/null || true
+  "$IPSET" flush "$SET_THR6" 2>/dev/null || true
 }
 
 # ==================================================================
@@ -858,14 +1015,75 @@ do_panic_status() {
 #
 # Membatasi koneksi keluar dari akun pekerja web (UID 1002 / www).
 # PHP-FPM dan worker web normalnya hanya membutuhkan koneksi lokal
-# (loopback), DNS (udp/tcp 53), HTTP/HTTPS (tcp 80,443), dan pengiriman
-# email (587,465).
+# (loopback), DNS ke resolver sistem, HTTP/HTTPS (tcp 80,443), dan pengiriman
+# email (587,465). SSH/Git keluar (22, 2222, 9418) hanya bila egress_allow_git=1;
+# port lain lewat egress_extra_ports. Berlaku untuk IPv4 dan IPv6.
 #
 # Seluruh port keluar lainnya (seperti 4444, 1337, shell reverse, C2)
 # DITOLAK (REJECT/DROP). Dengan ini, eksploitasi RCE atau webshell
 # yang mencoba membuka reverse shell ke server penyerang akan gagal
 # di level kernel.
 # ==================================================================
+# resolver DNS dari resolv.conf untuk keluarga alamat 4 atau 6 (hanya alamat literal yang valid)
+egress_resolvers() {
+  [ -r "$RESOLV_CONF" ] || return 0
+  if [ "$1" = 6 ]; then
+    awk '$1=="nameserver" && $2 ~ /:/ {print $2}' "$RESOLV_CONF" | grep -E '^[0-9A-Fa-f:]+$' | head -6
+  else
+    awk '$1=="nameserver" {print $2}' "$RESOLV_CONF" | grep -E '^([0-9]{1,3}\.){3}[0-9]{1,3}$' | head -6
+  fi
+}
+
+# daftar port keluar yang diizinkan (dipakai aturan dan berkas status)
+egress_ports() {
+  local p="80,443,465,587"
+  [ "$EGRESS_ALLOW_GIT" = 1 ] && p="22,2222,9418,$p"
+  if printf '%s' "$EGRESS_EXTRA_PORTS" | grep -qE '^[0-9]{1,5}(,[0-9]{1,5}){0,13}$'; then p="$p,$EGRESS_EXTRA_PORTS"; fi
+  printf '%s' "$p"
+}
+
+# isi satu chain egress untuk iptables ($1 = biner, $2 = 4|6)
+egress_isi_chain() {
+  local T="$1" AF="$2" r dns n=0 rej="icmp-port-unreachable"
+  [ "$AF" = 6 ] && rej="icmp6-port-unreachable"
+  "$T" -N "$EGRESS_CHAIN" 2>/dev/null || true
+  "$T" -F "$EGRESS_CHAIN" 2>/dev/null || { err "gagal mengosongkan chain $EGRESS_CHAIN ($T)"; return 1; }
+  # 1) loopback (termasuk resolver lokal 127.0.0.53 systemd-resolved)
+  "$T" -A "$EGRESS_CHAIN" -o lo -j ACCEPT
+  # 2) balasan / established
+  if have_mod conntrack; then
+    "$T" -A "$EGRESS_CHAIN" -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+  fi
+  # 3) tujuan di daftar threat intel (C2, botnet) ditolak, apa pun portnya (hanya IPv4: set intel hash:net inet)
+  if [ "$AF" = 4 ] && have_mod set && "$IPSET" list -n "$SET_INTEL" >/dev/null 2>&1; then
+    "$T" -A "$EGRESS_CHAIN" -m set --match-set "$SET_INTEL" dst -m comment --comment "sentinel:egress-intel" -j REJECT --reject-with "$rej" 2>/dev/null \
+      || "$T" -A "$EGRESS_CHAIN" -m set --match-set "$SET_INTEL" dst -m comment --comment "sentinel:egress-intel" -j DROP
+  fi
+  # 4) DNS hanya ke resolver sistem: dulu port 53 ke tujuan mana pun = jalur tunneling/exfil DNS ke server penyerang
+  dns="$(egress_resolvers "$AF")"
+  for r in $dns; do
+    "$T" -A "$EGRESS_CHAIN" -d "$r" -p udp --dport 53 -j ACCEPT
+    "$T" -A "$EGRESS_CHAIN" -d "$r" -p tcp --dport 53 -j ACCEPT
+    n=$((n + 1))
+  done
+  if [ "$n" = 0 ] && [ "$AF" = 4 ]; then
+    # resolv.conf tanpa resolver IPv4 literal: jangan mematikan DNS situs; izinkan seperti dulu dan beri tahu operator
+    err "PERINGATAN: resolver DNS tidak terbaca dari $RESOLV_CONF; DNS keluar UID $WEB_UID diizinkan ke semua tujuan"
+    "$T" -A "$EGRESS_CHAIN" -p udp --dport 53 -j ACCEPT
+    "$T" -A "$EGRESS_CHAIN" -p tcp --dport 53 -j ACCEPT
+  fi
+  # 5) HTTP/HTTPS, submission email, (opsional) SSH/Git, port tambahan operator
+  "$T" -A "$EGRESS_CHAIN" -p tcp -m multiport --dports "$(egress_ports)" -j ACCEPT
+  # 6) sisanya ditolak (reverse shell, C2 port tinggi)
+  if ! "$T" -A "$EGRESS_CHAIN" -m comment --comment "sentinel:egress-block" -j REJECT --reject-with "$rej" 2>/dev/null; then
+    "$T" -A "$EGRESS_CHAIN" -m comment --comment "sentinel:egress-block" -j DROP
+  fi
+  while "$T" -S OUTPUT 2>/dev/null | grep -qxF -- "-A OUTPUT -m owner --uid-owner $WEB_UID -j $EGRESS_CHAIN"; do
+    "$T" -D OUTPUT -m owner --uid-owner "$WEB_UID" -j "$EGRESS_CHAIN" 2>/dev/null || break
+  done
+  "$T" -I OUTPUT 1 -m owner --uid-owner "$WEB_UID" -j "$EGRESS_CHAIN"
+}
+
 do_egress_on() {
   need_root
   err "Egress Guard membutuhkan paket Pro"
@@ -874,11 +1092,14 @@ do_egress_on() {
 
 do_egress_off() {
   need_root
-  while "$IPT" -S OUTPUT 2>/dev/null | grep -q -- "-j $EGRESS_CHAIN"; do
-    "$IPT" -D OUTPUT -m owner --uid-owner "$WEB_UID" -j "$EGRESS_CHAIN" 2>/dev/null || break
+  local T
+  for T in "$IPT" $IP6T; do
+    while "$T" -S OUTPUT 2>/dev/null | grep -q -- "-j $EGRESS_CHAIN"; do
+      "$T" -D OUTPUT -m owner --uid-owner "$WEB_UID" -j "$EGRESS_CHAIN" 2>/dev/null || break
+    done
+    "$T" -F "$EGRESS_CHAIN" 2>/dev/null || true
+    "$T" -X "$EGRESS_CHAIN" 2>/dev/null || true
   done
-  "$IPT" -F "$EGRESS_CHAIN" 2>/dev/null || true
-  "$IPT" -X "$EGRESS_CHAIN" 2>/dev/null || true
   rm -f "$EGRESS_FLAG_FILE"
   say "EGRESS GUARD NONAKTIF: batasan lalu lintas keluar UID $WEB_UID dilepas"
 }
@@ -945,6 +1166,10 @@ do_backend() {
 #   off   = tidak ada yang diblokir
 # ==================================================================
 GEO_JSON="${SENTINEL_GEO_JSON:-/www/server/panel/data/firewall/GeoLite2-Country.json}"
+# server tanpa aaPanel: berkas disiapkan sentinel-geo.py (hanya bila berkas panel tidak ada dan tidak ada override uji)
+if [ -z "${SENTINEL_GEO_JSON:-}" ] && [ ! -f "$GEO_JSON" ] && [ -f /www/server/sentinel/data/geo/GeoLite2-Country.json ]; then
+  GEO_JSON=/www/server/sentinel/data/geo/GeoLite2-Country.json
+fi
 
 # Mengisi ipset sentinel_geo dari config. TIDAK memanggil install, jadi
 # aman dipanggil dari dalam do_install tanpa rekursi.
@@ -962,7 +1187,7 @@ do_geo_apply() {
 
 do_geo_clear() {
   need_root
-  if "$IPSET" list "$SET_GEO" >/dev/null 2>&1; then
+  if "$IPSET" list -n "$SET_GEO" >/dev/null 2>&1; then
     "$IPSET" flush "$SET_GEO" 2>/dev/null && say "$SET_GEO dikosongkan"
   fi
   # Lepas aturan geo bila ada, lalu pasang ulang chain tanpa itu.
@@ -973,8 +1198,8 @@ do_geo_clear() {
 do_geo_status() {
   need_root
   local isi=0
-  "$IPSET" list "$SET_GEO" >/dev/null 2>&1 \
-    && isi="$("$IPSET" list "$SET_GEO" 2>/dev/null | grep -c '^[0-9]')"
+  "$IPSET" list -n "$SET_GEO" >/dev/null 2>&1 \
+    && isi="$(jumlah_set "$SET_GEO")"
   printf 'mode=%s\nnegara=%s\nblok=%s\naturan=%s\n' \
     "$GEO_MODE" "$GEO_NEGARA" "$isi" \
     "$("$IPT" -S "$CHAIN" 2>/dev/null | grep -c 'sentinel:geo-drop')"
@@ -992,8 +1217,8 @@ do_status() {
   echo
   echo "=== isi set ==="
   local s n
-  for s in "$SET_BAN" "$SET_THR" "$SET_REV" "$SET_INTEL"; do
-    n="$("$IPSET" list "$s" 2>/dev/null | grep -c '^[0-9]' || true)"
+  for s in "$SET_BAN" "$SET_THR" "$SET_REV" "$SET_INTEL" "$SET_PROXY"; do
+    n="$(jumlah_set "$s")"
     printf '%-18s %s entri\n' "$s" "${n:-0}"
   done
   echo
@@ -1037,13 +1262,33 @@ do_ports_reset() {
 # Tidak menyentuh apa pun yang bukan milik plugin.
 heal_services() {
   command -v systemctl >/dev/null 2>&1 || return 0
-  local sj=/www/server/sentinel/run/status.json now mt
-  if systemctl is-active --quiet sentinel.service 2>/dev/null && [ -f "$sj" ]; then
-    now=$(date +%s); mt=$(stat -c %Y "$sj" 2>/dev/null || echo "$now")
-    if [ $((now - mt)) -gt 300 ]; then
-      say "heal: status.json guardd basi $((now - mt))s, restart sentinel.service"
+  local sj=/www/server/sentinel/run/status.json now mt jejak=/www/server/sentinel/run/heal-guardd.ts lalu n boleh
+  now=$(date +%s)
+  # Jeda bertahap antar-pemulihan guardd oleh timer ini (15, 30, 60 menit; dicatat di run/heal-guardd.ts): dulu restart tiap
+  # 5 menit tanpa batas bila status.json basi karena sebab yang tidak hilang dengan restart (disk penuh, DB terkunci).
+  lalu=0; n=0
+  [ -f "$jejak" ] && read -r lalu n < "$jejak" 2>/dev/null
+  case "$lalu$n" in *[!0-9]*) lalu=0; n=0 ;; esac
+  boleh=$(( now - ${lalu:-0} >= 900 * (1 << (${n:-0} > 2 ? 2 : ${n:-0})) ))
+  pulihkan() {   # pulihkan <alasan>
+    if [ "$boleh" = 1 ]; then
+      say "heal: $1, memulihkan sentinel.service (percobaan $((n + 1)))"
+      systemctl reset-failed sentinel.service 2>/dev/null || true
       systemctl restart sentinel.service 2>/dev/null || true
+      printf '%s %s\n' "$now" "$((n + 1))" > "$jejak" 2>/dev/null || true
     fi
+  }
+  if systemctl is-active --quiet sentinel.service 2>/dev/null && [ -f "$sj" ]; then
+    mt=$(stat -c %Y "$sj" 2>/dev/null || echo "$now")
+    if [ $((now - mt)) -gt 300 ]; then
+      pulihkan "status.json guardd basi $((now - mt))s"
+    else
+      rm -f "$jejak" 2>/dev/null || true
+    fi
+  elif systemctl is-failed --quiet sentinel.service 2>/dev/null && systemctl is-enabled --quiet sentinel.service 2>/dev/null; then
+    # guardd berhenti permanen setelah batas start (StartLimitBurst) tercapai: di paket Free tidak ada sentinel-selfheal (Pro),
+    # sehingga dulu proteksi mati sampai reboot. Unit yang sengaja dimatikan (disabled) tidak disentuh.
+    pulihkan "sentinel.service berstatus failed"
   fi
   if [ -x /www/server/sentinel/bin/sentinel-waf.sh ]; then
     /www/server/sentinel/bin/sentinel-waf.sh guard 2>&1 | while IFS= read -r l; do say "heal: $l"; done

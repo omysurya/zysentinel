@@ -1,4 +1,6 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 PT. StudioNet Indonesia Jaya (ZySens).
 # chkconfig: 2345 55 25
 # description: ZySentinel guardd security monitoring daemon
 ### BEGIN INIT INFO

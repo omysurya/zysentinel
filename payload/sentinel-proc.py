@@ -1,4 +1,6 @@
 #!/www/server/panel/pyenv/bin/python3
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 PT. StudioNet Indonesia Jaya (ZySens).
 # ============================================================
 # sentinel-proc.py
 #
@@ -34,6 +36,7 @@ import signal
 import sqlite3
 import json
 import logging
+import pwd
 from datetime import datetime
 
 CONF_FILE = os.environ.get("SENTINEL_CONF", "/www/server/sentinel/etc/guardd.conf")
@@ -42,7 +45,92 @@ LOG_FILE = os.environ.get("SENTINEL_PROC_LOG", "/www/server/sentinel/log/proc_al
 STATE_FILE = "/www/server/sentinel/run/proc_guard.state"
 PID_FILE = "/www/server/sentinel/run/proc_guard.pid"
 
-DEFAULT_WEB_UID = int(os.environ.get("SENTINEL_WEB_UID", "1002"))
+def _uid_web():
+    """UID akun pekerja web: SENTINEL_WEB_UID bila diisi, selain itu UID akun www/www-data/apache/nginx yang ada di
+    host ini, terakhir 1002 (aaPanel). Dulu selalu 1002: di host yang akun web-nya bukan 1002, pekerja web sebenarnya
+    tidak dijaga sama sekali, sedangkan pengguna biasa ber-UID 1002 (mis. akun hosting atau admin) ikut di-SIGKILL
+    saat menjalankan chmod/systemctl/crontab."""
+    v = os.environ.get("SENTINEL_WEB_UID", "").strip()
+    if v.isdigit():
+        return int(v)
+    try:
+        import pwd
+        for nama in ("www", "www-data", "apache", "nginx"):
+            try:
+                return pwd.getpwnam(nama).pw_uid
+            except KeyError:
+                continue
+    except Exception:
+        pass
+    return 1002
+
+
+DEFAULT_WEB_UID = _uid_web()
+
+
+def _uid_web_semua():
+    """Semua UID akun web yang benar-benar ada (www, www-data, apache, nginx). Dulu uid 33 selalu dianggap akun web walau di
+    server itu 33 milik akun lain."""
+    hasil = {DEFAULT_WEB_UID}
+    for nama in ("www", "www-data", "apache", "nginx"):
+        try:
+            hasil.add(pwd.getpwnam(nama).pw_uid)
+        except KeyError:
+            continue
+    hasil.discard(0)
+    return frozenset(hasil)
+
+
+WEB_UIDS = _uid_web_semua()
+
+
+def _ns(pid, jenis):
+    try:
+        return os.readlink(f"/proc/{pid}/ns/{jenis}")
+    except OSError:
+        return None
+
+
+_NS_SENDIRI = {j: _ns("self", j) for j in ("pid", "mnt")}
+
+
+def ns_asing(pid):
+    """True bila proses berada di PID/mount namespace lain (container Docker/LXC/podman). Process Guard host TIDAK menilai atau
+    membunuh proses container: UID di dalam container (mis. www-data 33 di image wordpress, atau uid 1002) bukan akun web host,
+    induknya containerd-shim, dan healthcheck/entrypoint 'sh -c' di dalamnya dulu ikut di-SIGKILL."""
+    for j, sendiri in _NS_SENDIRI.items():
+        if sendiri and _ns(pid, j) not in (None, sendiri):
+            return True
+    return False
+
+
+def _starttime(pid):
+    try:
+        with open(f"/proc/{pid}/stat", "r") as f:
+            isi = f.read()
+        return int(isi[isi.rindex(")") + 2:].split()[19])
+    except Exception:
+        return None
+
+
+def _masih_sama(pid, snap):
+    """Proses yang akan dibunuh masih PROSES YANG SAMA dengan yang dinilai: UID, starttime, dan exe tidak berubah. Mencegah
+    salah bunuh karena PID dipakai ulang, atau karena 'sh -c' sudah exec ke aplikasi (mis. node server) setelah dinilai."""
+    if not os.path.exists(f"/proc/{pid}"):
+        return True
+    try:
+        cur_uid = os.stat(f"/proc/{pid}").st_uid
+    except OSError:
+        return True
+    if cur_uid == 0 or cur_uid != snap.get("uid"):
+        return False
+    if snap.get("start") is not None and _starttime(pid) != snap.get("start"):
+        return False
+    try:
+        exe = os.readlink(f"/proc/{pid}/exe")
+    except OSError:
+        exe = ""
+    return not snap.get("exe") or exe == snap.get("exe")
 
 # Kategori ancaman kritis yang wajib diblokir jika dijalankan oleh pekerja web
 BLOCKED_SHELLS = frozenset([
@@ -53,6 +141,7 @@ BLOCKED_TOOLS = frozenset([
     "nc", "netcat", "ncat", "socat", "telnet", "rsh",
     "nmap", "masscan", "sqlmap", "nikto", "gobuster", "hydra",
     "gdb", "strace", "ltrace",
+    "awk", "gawk",
     # Perkakas manipulasi/tamper sistem yang dilarang keras untuk pekerja web
     "systemctl", "service", "iptables", "ip6tables", "nft", "ipset",
     "chattr", "chmod", "chown", "pkill", "killall", "crontab", "pkexec", "sudo"
@@ -200,10 +289,12 @@ def init_db():
 
 def record_alert(pid, ppid, uid, exe, cmdline, cwd, rule, action):
     now_ts = int(time.time())
+    exe_c = (exe or '').replace('\n', ' ').replace('\r', ' ')[:200]
+    cmd_c = (cmdline or '').replace('\n', ' ').replace('\r', ' ')[:300]
     # 1. Simpan ke berkas log
     logging.warning(
-        f"ANOMALI TERDETEKSI: PID={pid} PPID={ppid} EXE='{exe}' "
-        f"CMD='{cmdline}' ATURAN={rule} TINDAKAN={action}"
+        f"ANOMALI TERDETEKSI: PID={pid} PPID={ppid} EXE='{exe_c}' "
+        f"CMD='{cmd_c}' ATURAN={rule} TINDAKAN={action}"
     )
     # 2. Simpan ke SQLite
     try:
@@ -221,17 +312,20 @@ def record_alert(pid, ppid, uid, exe, cmdline, cwd, rule, action):
             kunci = (nama, exe)
             if now_ts - _notif_ts.get(kunci, 0) >= 600:
                 _notif_ts[kunci] = now_ts
-                pesan = f"[ALERTA DEFENDER ELIT] Perilaku mencurigakan pada worker web (dicatat, tidak dihentikan):\nPID: {pid} (UID: {uid})\nExe: {exe}\nRinci: {cmdline[:200]}\nAturan: {rule}"
+                pesan = f"[ALERTA DEFENDER ELIT] Perilaku mencurigakan pada worker web (dicatat, tidak dihentikan):\nPID: {pid} (UID: {uid})\nExe: {exe_c}\nRinci: {cmd_c[:200]}\nAturan: {rule}"
                 cur.execute("""
                     INSERT INTO notif (ts, ip, jenis, isi, terkirim, coba, galat)
                     VALUES (?, 0, 'proc_alert', ?, 0, 0, '')
                 """, (now_ts, pesan))
         if action == "KILLED":
-            pesan = f"[ALERTA DEFENDER ELIT] Proses ilegal dimatikan:\nPID: {pid} (UID: {uid})\nEksekusi: {exe}\nCmd: {cmdline[:200]}\nAturan: {rule}"
-            cur.execute("""
-                INSERT INTO notif (ts, ip, jenis, isi, terkirim, coba, galat)
-                VALUES (?, 0, 'proc_kill', ?, 0, 0, '')
-            """, (now_ts, pesan))
+            k_kill = ("kill", nama, exe)
+            if now_ts - _notif_ts.get(k_kill, 0) >= 60:
+                _notif_ts[k_kill] = now_ts
+                pesan = f"[ALERTA DEFENDER ELIT] Proses ilegal dimatikan:\nPID: {pid} (UID: {uid})\nEksekusi: {exe_c}\nCmd: {cmd_c[:200]}\nAturan: {rule}"
+                cur.execute("""
+                    INSERT INTO notif (ts, ip, jenis, isi, terkirim, coba, galat)
+                    VALUES (?, 0, 'proc_kill', ?, 0, 0, '')
+                """, (now_ts, pesan))
             
         con.commit()
         con.close()
@@ -245,6 +339,17 @@ def is_elf(path):
             return magic == b"\x7fELF"
     except Exception:
         return False
+
+# Direktori tempat biner git sistem dipasang paket distro (bukan salinan yang bisa ditaruh akun web).
+GIT_DIR_SISTEM = frozenset(["/usr/bin", "/bin", "/usr/local/bin", "/usr/libexec/git-core", "/usr/lib/git-core"])
+_DIR_TEMPORER = ("/tmp/", "/var/tmp/", "/dev/shm/", "/run/user/", "/memfd:")
+
+
+def _exe_temporer(exe):
+    """True bila biner berjalan dari direktori temporer, memfd, atau berkas yang sudah dihapus."""
+    exe = exe or ""
+    return exe.startswith(_DIR_TEMPORER) or exe.endswith(" (deleted)")
+
 
 def load_proc_whitelist():
     global _wl_cache, _wl_mtime
@@ -302,7 +407,10 @@ def _segmen_shell(argv):
     if i + 1 >= len(argv):
         return None
     isi = argv[i + 1]
-    if SHELL_BAHAYA.search(isi):
+    # Batas panjang: isi "sh -c" dikontrol penyerang; regex SHELL_BAHAYA (\bbase64\b.*-d) berbiaya kuadrat pada
+    # string ~128 KB (sekitar 2 detik per proses sambil menahan _EVAL_LOCK, sehingga EDR buta selama itu).
+    # Skrip inline sah tidak sepanjang ini; yang lebih panjang tidak pernah di-whitelist.
+    if len(isi) > 16384 or SHELL_BAHAYA.search(isi):
         return []
     hasil = []
     for seg in re.split(r'&&|\|\||;|\||\n', isi):
@@ -377,11 +485,11 @@ INTERP_RE = re.compile(r'^(perl|python[0-9.]*|php[0-9.]*|ruby|node|lua[0-9.]*|bu
 DROPPER_RE = re.compile(r'^(curl|wget|fetch|lwp-download|aria2c|tftp)$')
 MASQ_NAMA = frozenset(['php-fpm', 'nginx', 'sshd', 'systemd', 'apache2', 'httpd', 'cron', 'crond', 'rsyslogd'])
 # Aturan yang hanya mencatat (tidak dibunuh walau mode enforce): keyakinan tidak cukup untuk SIGKILL.
-SOLO_AUDIT = frozenset(['WORKER_ANAK_ASING', 'COMM_PALSU', 'PTRACE_WEB', 'WORKER_CRASH_BERULANG'])
+SOLO_AUDIT = frozenset(['WORKER_ANAK_ASING', 'COMM_PALSU', 'PTRACE_WEB', 'WORKER_CRASH_BERULANG', 'INTERP_OUTBOUND_CONN'])
 # Aturan audit yang tetap masuk antrean notifikasi (pembunuhan selalu masuk).
 NOTIF_AUDIT = frozenset(['WORKER_FD_SOCKET', 'WORKER_DROPPER', 'INTERP_TEMP_SCRIPT', 'PTRACE_WEB',
                          'WORKER_CRASH_BERULANG', 'MEM_MEMFD_EXEC', 'MEM_SHM_EXEC', 'MEM_TEMP_LIB',
-                         'MEM_DELETED_EXEC', 'MEM_ELF_ANON'])
+                         'MEM_DELETED_EXEC', 'MEM_ELF_ANON', 'INTERP_OUTBOUND_CONN'])
 _seen_audit = {}        # pid -> set(nama aturan): satu catatan per proses per aturan
 _notif_ts = {}          # (aturan, exe) -> waktu notifikasi terakhir (batas 1 per 10 menit)
 
@@ -391,9 +499,21 @@ def _aturan_nama(rule):
 
 
 def _inet_inodes():
-    """Inode soket TCP/UDP (IPv4/IPv6) dari /proc/net. Hanya dibaca saat stdio proses berupa soket (jarang)."""
+    """Inode soket TCP/UDP (IPv4/IPv6) aktif dari /proc/net. Untuk TCP hanya mencatat status 01 (TCP_ESTABLISHED),
+    sehingga soket listening (0A) php-fpm yang diwariskan ke fd 0 tidak salah ditandai sebagai reverse shell."""
     ino = set()
-    for f in ('tcp', 'tcp6', 'udp', 'udp6'):
+    for f in ('tcp', 'tcp6'):
+        try:
+            with open('/proc/net/' + f, 'r') as fh:
+                next(fh, None)
+                for ln in fh:
+                    kol = ln.split()
+                    if len(kol) > 9 and kol[9].isdigit():
+                        if len(kol) > 3 and kol[3] == '01':
+                            ino.add(int(kol[9]))
+        except OSError:
+            pass
+    for f in ('udp', 'udp6'):
         try:
             with open('/proc/net/' + f, 'r') as fh:
                 next(fh, None)
@@ -407,9 +527,9 @@ def _inet_inodes():
 
 
 def _stdio_inet(pid):
-    """True bila stdout atau stderr proses adalah soket jaringan (reverse shell / bind shell)."""
+    """True bila stdin, stdout atau stderr proses adalah soket jaringan aktif (reverse shell / bind shell)."""
     sok = []
-    for fd in (1, 2):
+    for fd in (0, 1, 2):
         try:
             t = os.readlink(f"/proc/{pid}/fd/{fd}")
         except OSError:
@@ -419,6 +539,27 @@ def _stdio_inet(pid):
                 sok.append(int(t[8:-1]))
             except ValueError:
                 pass
+    if not sok:
+        return False
+    inet = _inet_inodes()
+    return any(i in inet for i in sok)
+
+
+def _any_fd_inet(pid):
+    """True bila salah satu file descriptor proses memegang soket jaringan aktif (TCP_ESTABLISHED)."""
+    fd_dir = f"/proc/{pid}/fd"
+    try:
+        fds = os.listdir(fd_dir)
+    except OSError:
+        return False
+    sok = []
+    for fd in fds:
+        try:
+            t = os.readlink(f"{fd_dir}/{fd}")
+            if t.startswith('socket:[') and t.endswith(']'):
+                sok.append(int(t[8:-1]))
+        except (OSError, ValueError):
+            continue
     if not sok:
         return False
     inet = _inet_inodes()
@@ -477,8 +618,11 @@ def check_process_whitelist(pid, ppid, uid, exe_path, cmdline, cwd, basename, ar
         except Exception:
             pass
 
-    # 1b. Cek apakah diinisiasi oleh proses Git (git pull, git clone, git fetch, submodule, webhook)
-    if ppid and ppid > 1:
+    # 1b. Cek apakah diinisiasi oleh proses Git (git pull, git clone, git fetch, submodule, webhook deploy).
+    # Hanya git dari direktori sistem (bukan salinan di /tmp atau webroot), dan TIDAK untuk pelanggaran keras: hook dan
+    # opsi git (core.sshCommand, -c alias) menjalankan perintah apa pun sebagai anak git, jadi induk git saja tidak boleh
+    # memaafkan eksekusi dari /tmp, memfd, ELF di webroot, atau stdio yang tersambung ke socket.
+    if ppid and ppid > 1 and not keras:
         try:
             pexe = ""
             try:
@@ -486,7 +630,8 @@ def check_process_whitelist(pid, ppid, uid, exe_path, cmdline, cwd, basename, ar
             except Exception:
                 pass
             pbase = os.path.basename(pexe)
-            if pbase in ("git", "git-remote-https", "git-remote-http", "git-remote-ftp", "git-remote-ftps", "git-upload-pack", "git-receive-pack"):
+            if pbase in ("git", "git-remote-https", "git-remote-http", "git-remote-ftp", "git-remote-ftps", "git-upload-pack", "git-receive-pack") \
+                    and os.path.dirname(pexe) in GIT_DIR_SISTEM:
                 return True, f"Git Subprocess ({pbase})"
         except Exception:
             pass
@@ -528,10 +673,17 @@ def check_process_whitelist(pid, ppid, uid, exe_path, cmdline, cwd, basename, ar
             elif _cocok_perintah(pat_lower, argv):
                 return True, r.get("name") or pat
         elif w_type == "exe_exact":
-            if exe_clean == pat or exe_clean.endswith("/" + pat.lstrip("/")):
+            # Pola absolut = jalur persis. Pola relatif (bentuk lama) hanya akhiran jalur, jadi tidak berlaku untuk
+            # pelanggaran keras dan tidak untuk biner di direktori temporer (mis. "ssh" tidak boleh memaafkan /tmp/ssh).
+            if pat.startswith("/"):
+                if exe_clean == pat:
+                    return True, r.get("name") or pat
+            elif not keras and not _exe_temporer(exe_clean) and exe_clean.endswith("/" + pat):
                 return True, r.get("name") or pat
         elif w_type == "basename":
-            if base_lower == pat_lower:
+            # Nama berkas mudah ditiru: salinan biner apa pun bisa dinamai "ssh". Biner di direktori temporer atau
+            # memfd tidak pernah dimaafkan lewat basename.
+            if base_lower == pat_lower and not _exe_temporer(exe_clean):
                 return True, r.get("name") or pat
         elif w_type in ("cwd_match", "cwd_startswith"):
             if cwd_clean.startswith(pat) or cwd_clean == pat:
@@ -639,6 +791,8 @@ def _peristiwa_ptrace(tracee, tracer, target_uid, mode):
 
 # ---- crash worker PHP berulang (tanda percobaan eksploitasi memori) ----
 FPM_LOG_GLOB = os.environ.get("SENTINEL_FPM_LOG_GLOB", "/www/server/php/*/var/log/php-fpm.log")
+# server tanpa aaPanel: log PHP-FPM distro (Debian: /var/log/php8.2-fpm.log, RHEL: /var/log/php-fpm/*.log)
+FPM_LOG_GLOB_DISTRO = ("/var/log/php*-fpm.log", "/var/log/php-fpm/*.log")
 CRASH_RE = re.compile(r"child (\d+) exited on signal (4|6|7|8|11) ")
 CRASH_JENDELA, CRASH_AMBANG, CRASH_JEDA = 300, 3, 600
 _crash_ts = []
@@ -649,7 +803,11 @@ _crash_pos = {}
 def _baca_crash(sekarang):
     """Baca baris baru log php-fpm; kembalikan jumlah crash (SEGV/ABRT/BUS/ILL/FPE) di jendela terakhir."""
     import glob
-    for path in glob.glob(FPM_LOG_GLOB):
+    daftar = glob.glob(FPM_LOG_GLOB)
+    if not daftar and not os.environ.get("SENTINEL_FPM_LOG_GLOB") and not os.path.isdir("/www/server/php"):
+        for g in FPM_LOG_GLOB_DISTRO:
+            daftar += glob.glob(g)
+    for path in daftar:
         try:
             st = os.stat(path)
         except OSError:
@@ -713,6 +871,80 @@ def pangkas_alert(hari=30):
         logging.warning(f"pangkas proc_alerts gagal: {e}")
 
 
+_JALUR_SENTINEL = ("/www/server/sentinel", "/www/server/panel/plugin/sentinel", "/etc/systemd/system/sentinel")
+_RE_UNIT_SENTINEL = re.compile(r"^sentinel(?:-[\w.-]+)?\.(?:service|timer)$")
+
+
+def _sentuh_sentinel(argv):
+    """Perintah akun web menyasar komponen ZySentinel: argumen berupa path di bawah folder ZySentinel/plugin, unit sentinel*,
+    atau program guardd/guardctl. Dulu cukup substring "sentinel-"/"guardd" di mana pun di cmdline, sehingga aplikasi seperti
+    /www/wwwroot/sentinel-shop/app.js atau 'artisan sentinel-report' ikut di-SIGKILL (berulang di bawah PM2)."""
+    for a in argv:
+        for t in [a] + a.split("=", 1)[1:]:
+            t = t.strip("'\"")
+            if t.startswith(_JALUR_SENTINEL) or _RE_UNIT_SENTINEL.match(t) or os.path.basename(t) in ("guardd", "guardctl") \
+                    or t.endswith("/uninstall.lock"):
+                return True
+    return False
+
+
+def _induk_pengelola_paket(ppid):
+    """Shell yang dijalankan npm/yarn/pnpm (skrip lifecycle 'npm start', 'npm run build', postinstall) untuk Node project aaPanel:
+    induknya node yang menjalankan npm-cli.js/yarn.js/pnpm. Shell dari aplikasi node biasa (pola RCE) TIDAK lolos."""
+    try:
+        with open(f"/proc/{ppid}/cmdline", "rb") as f:
+            argv = [x.decode("utf-8", "ignore") for x in f.read().split(b"\x00") if x]
+        exe = os.path.basename(os.readlink(f"/proc/{ppid}/exe"))
+    except OSError:
+        return False
+    if not re.match(r"^(node|nodejs|bun)$", exe) and exe not in ("npm", "yarn", "pnpm"):
+        return False
+    return any(re.search(r"(?:^|/)(?:npm-cli|npx-cli)\.js$|(?:^|/)yarn(?:\.js|\.cjs)?$|(?:^|/)pnpm(?:\.cjs|\.js)?$|(?:^|/)(?:npm|npx)$", a)
+               for a in argv[:3])
+
+
+_WEBROOT_CACHE = {"t": 0.0, "v": ("/www/wwwroot/",)}   # diisi _prefix_webroot() dari deteksi lingkungan
+
+
+def _prefix_webroot():
+    """Awalan folder situs. aaPanel: /www/wwwroot/ saja (tidak berubah). Lingkungan lain (standalone, DirectAdmin, cPanel,
+    CyberPanel): docroot situs yang dideteksi (adapters/env.py) ditambah lokasi bawaan distro; /www/wwwroot/ tetap ikut."""
+    now = time.time()
+    if now - _WEBROOT_CACHE["t"] > 60:
+        pre = {"/www/wwwroot/"}
+        try:
+            sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+            from adapters import env
+            prof = env.profile()
+            if prof["panel"]["type"] != "aapanel":
+                pre |= {"/var/www/", "/srv/www/", "/usr/share/nginx/html/"}
+                for d in env.docroots(prof):
+                    d = d.rstrip("/")
+                    if d.count("/") >= 2 and not d.startswith(("/etc", "/usr/bin", "/bin", "/sbin", "/usr/sbin", "/lib", "/boot", "/proc", "/sys")):
+                        pre.add(d + "/")
+        except Exception:
+            if not os.path.isdir("/www/wwwroot"):          # deteksi tak termuat: tanpa aaPanel pakai lokasi standar distro
+                pre |= {"/var/www/", "/srv/www/", "/usr/share/nginx/html/"}
+        _WEBROOT_CACHE["v"], _WEBROOT_CACHE["t"] = tuple(sorted(pre)), now
+    return _WEBROOT_CACHE["v"]
+
+
+def _dalam_webroot(exe_path):
+    return bool(exe_path) and exe_path.startswith(_prefix_webroot())
+
+
+def _biner_layanan_panel(exe_path):
+    """Biner layanan yang dipasang aaPanel (root) di /www/server, mis. pure-ftpd: proses sesi FTP-nya berjalan sebagai akun
+    virtual www dengan soket kontrol di fd 0/1 (bukan reverse shell). Wajib milik root dan tidak bisa ditulis akun lain."""
+    if not exe_path or not exe_path.startswith("/www/server/") or exe_path.startswith("/www/server/panel/plugin/"):
+        return False
+    try:
+        st = os.stat(exe_path)
+    except OSError:
+        return False
+    return st.st_uid == 0 and not st.st_mode & 0o022
+
+
 def _snapshot(pid):
     """Baca identitas proses SECEPAT mungkin (dipanggil begitu peristiwa exec tiba):
     shell dari system() bisa keluar dalam < 1 ms. None bila proses sudah hilang."""
@@ -721,9 +953,10 @@ def _snapshot(pid):
         uid = os.stat(d).st_uid
     except (FileNotFoundError, ProcessLookupError, PermissionError):
         return None
-    snap = {"uid": uid, "exe": "", "argv": [], "cwd": "", "ppid": 0}
+    snap = {"uid": uid, "exe": "", "argv": [], "cwd": "", "ppid": 0, "start": None, "ns_asing": False}
     if uid == 0:
         return snap
+    snap["ns_asing"] = ns_asing(pid)
     try:
         snap["exe"] = os.readlink(d + "/exe")
     except Exception:
@@ -736,7 +969,9 @@ def _snapshot(pid):
     try:
         with open(d + "/stat", "r") as f:
             isi = f.read()
-        snap["ppid"] = int(isi[isi.rindex(")") + 2:].split()[1])
+        kol = isi[isi.rindex(")") + 2:].split()
+        snap["ppid"] = int(kol[1])
+        snap["start"] = int(kol[19])
     except Exception:
         pass
     try:
@@ -759,7 +994,10 @@ def _periksa_pid(pid, target_uid, mode, found, snap=None):
     # Lewati proses root (UID 0) - root memiliki kendali penuh
     if st_uid == 0:
         return
-    is_web_user = (st_uid == target_uid or st_uid == DEFAULT_WEB_UID or st_uid == 33)
+    # Proses container (namespace lain) bukan wewenang Process Guard host
+    if snap.get("ns_asing"):
+        return
+    is_web_user = (st_uid == target_uid or st_uid in WEB_UIDS)
     exe_path = snap["exe"]
     argv = snap["argv"]
     cmdline = " ".join(argv)
@@ -775,8 +1013,13 @@ def _periksa_pid(pid, target_uid, mode, found, snap=None):
     # dulu melewati seluruh pemeriksaan.
     exe_curiga = bool(exe_path) and (
         any(exe_path.startswith(d) for d in SUSPICIOUS_DIRS)
-        or exe_path.startswith("/memfd:") or exe_path.endswith(" (deleted)"))
-    if basename in WHITELISTED_BASENAMES and not exe_curiga:
+        or exe_path.startswith("/memfd:")
+        or (exe_path.endswith(" (deleted)") and not any(exe_path.startswith(d) for d in ("/www/server/", "/usr/", "/opt/", "/bin/", "/sbin/"))))
+    # Nama aman hanya berlaku bagi biner sistem. Berkas di webroot bisa ditulis akun web: salinan shell/biner apa pun
+    # yang diberi nama "git"/"tar"/"ssh" dulu lolos dari SEMUA aturan (juga aturan 7, ELF di webroot). Biner di
+    # webroot tidak lagi mendapat jalan pintas ini dan dinilai oleh aturan biasa.
+    exe_webroot = _dalam_webroot(exe_path)
+    if basename in WHITELISTED_BASENAMES and not exe_curiga and not exe_webroot:
         return
 
     # Evaluasi aturan deteksi pelanggaran
@@ -797,11 +1040,7 @@ def _periksa_pid(pid, target_uid, mode, found, snap=None):
     if is_web_user and exe_curiga:
         rule_violation = f"TEMP_DIR_EXEC({exe_path})"
         keras = True
-    elif is_web_user and not is_git_cmd and cmdline and any(p in cmdline for p in (
-        "/www/server/sentinel", "/www/server/panel/plugin",
-        "/etc/systemd/system/sentinel", "sentinel.service", "sentinel-",
-        "guardd", "guardctl", "uninstall.lock"
-    )):
+    elif is_web_user and not is_git_cmd and _sentuh_sentinel(argv):
         rule_violation = f"TAMPER_ATTEMPT({cmdline[:50]})"
         keras = True
 
@@ -812,7 +1051,7 @@ def _periksa_pid(pid, target_uid, mode, found, snap=None):
         if basename in BLOCKED_SHELLS:
             lel = _leluhur(pid)
             if not (_tty(pid) and not WEB_INDUK.intersection(lel)
-                    and {"sshd", "su", "login", "sudo"}.intersection(lel)):
+                    and {"sshd", "su", "login", "sudo"}.intersection(lel)) and not _induk_pengelola_paket(ppid):
                 rule_violation = f"ILLEGAL_SHELL({basename})"
 
         # Aturan 1b: interpreter dengan kode sebaris (perl -e, python -c, php -r,
@@ -841,9 +1080,10 @@ def _periksa_pid(pid, target_uid, mode, found, snap=None):
         # Aturan 6: Eksekusi binary dari folder temporer
         elif exe_path and any(exe_path.startswith(d) for d in SUSPICIOUS_DIRS):
             rule_violation = f"TEMP_DIR_EXEC({exe_path})"
+            keras = True
 
         # Aturan 7: Binary ELF yang berjalan langsung di direktori webroot
-        elif exe_path and exe_path.startswith("/www/wwwroot/") and is_elf(exe_path):
+        elif _dalam_webroot(exe_path) and is_elf(exe_path):
             rule_violation = f"WEBROOT_ELF_EXEC({exe_path})"
             keras = True
 
@@ -855,9 +1095,14 @@ def _periksa_pid(pid, target_uid, mode, found, snap=None):
             keras = True
 
         # Aturan 9: stdout/stderr proses (bukan worker itu sendiri) berupa SOKET JARINGAN = reverse/bind shell.
-        elif basename not in WORKER_EXE and _stdio_inet(pid):
+        elif basename not in WORKER_EXE and not _biner_layanan_panel(exe_path) and _stdio_inet(pid):
             rule_violation = f"WORKER_FD_SOCKET({basename})"
             keras = True
+
+        # Aturan 9b: anak worker web berupa interpreter yang memegang soket jaringan keluar (C2 beacon tanpa stdio redirection).
+        elif INTERP_RE.match(basename) and _induk_worker(pid) and _any_fd_inet(pid):
+            rule_violation = f"INTERP_OUTBOUND_CONN({cmdline[:60]})"
+            solo_audit = True
 
         # Aturan 10: anak worker web (PHP, Node.js, Python, Ruby, Java, ...) berupa pengunduh. Menulis ke direktori sementara = dropper (dibunuh);
         # selain itu hanya dicatat karena sebagian aplikasi sah memanggil curl.

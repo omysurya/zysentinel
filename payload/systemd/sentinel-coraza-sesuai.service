@@ -1,0 +1,13 @@
+# ZySentinel: sesuaikan konektor Coraza dengan versi nginx aktif setelah nginx di-upgrade (dijadwalkan oleh `sentinel-waf.sh nginx-prestart`
+# dari drop-in nginx.service, atau oleh guard). Compile prioritas rendah, uji terisolasi, baru dimuat; situs tidak pernah memakai konfigurasi
+# yang gagal nginx -t. Tanpa [Install]: hanya dijalankan sesuai kebutuhan.
+[Unit]
+Description=ZySentinel: sesuaikan konektor Coraza dengan versi nginx aktif
+After=nginx.service network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/www/server/sentinel/bin/sentinel-waf.sh coraza-sesuaikan
+Nice=15
+IOSchedulingClass=idle
+TimeoutStartSec=3600

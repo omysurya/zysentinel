@@ -1,3 +1,5 @@
+/* SPDX-License-Identifier: Apache-2.0
+ * Copyright (c) 2026 PT. StudioNet Indonesia Jaya (ZySens). */
 /*
  * guardd.c -- Sentinel: daemon pertahanan & statistik untuk aaPanel/nginx
  *
@@ -57,10 +59,12 @@
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
+#include <utmpx.h>
 
 #include <sqlite3.h>
 
-#define VERSION "v1.6.4"
+
+#define VERSION "v2.0.1"
 
 /* ------------------------------------------------------------------ *
  * Batas keras. Semua angka di sini adalah pagu memori/CPU, bukan saran.
@@ -157,14 +161,15 @@ static uint64_t fnv1a(const char *s, size_t n)
  * ------------------------------------------------------------------ */
 typedef struct {
     /* jalur */
-    char conf_dirs[8][CFG_PATH];
+    char conf_dirs[16][CFG_PATH];
     int  n_conf_dirs;
-    char log_dirs[8][CFG_PATH];
+    char log_dirs[16][CFG_PATH];
     int  n_log_dirs;
     char db_path[CFG_PATH];
     char run_dir[CFG_PATH];
     char log_file[CFG_PATH];
     char allow_file[CFG_PATH];
+    char proxy_file[CFG_PATH];
     char learn_file[CFG_PATH];   /* pelajaran dari keputusan operator (learned.tsv) */
 
     /* Ambang kecocokan pelajaran blokir sebelum IP diblokir. Makin sempit
@@ -241,6 +246,7 @@ static cfg_t cfg = {
     .run_dir = "/www/server/sentinel/run",
     .log_file = "/www/server/sentinel/log/guardd.log",
     .allow_file = "/www/server/sentinel/etc/allowlist.txt",
+    .proxy_file = "/www/server/sentinel/etc/proxy-ranges.txt",
     .learn_file = "/www/server/sentinel/etc/learned.tsv",
     .learn_hits_both = 1,
     .learn_hits_path = 2,
@@ -280,6 +286,38 @@ static cfg_t cfg = {
 static unsigned g_lic_mask = 0;
 static int      g_enforce_conf = 0;     /* nilai enforce di guardd.conf (sebelum gerbang) */
 static time_t   g_lic_ts = 0;
+
+/* Jumlah baris kunci=nilai di berkas konfigurasi (-1 bila tidak terbaca). */
+static int cfg_jumlah_kunci(const char *path)
+{
+    FILE *f = fopen(path, "re");
+    char line[1024];
+    int n = 0;
+    if (!f) return -1;
+    while (fgets(line, sizeof(line), f)) {
+        char *k = line;
+        while (*k == ' ' || *k == '\t') k++;
+        if (*k && *k != '#' && *k != ';' && *k != '\n' && strchr(k, '=')) n++;
+    }
+    fclose(f);
+    return n;
+}
+
+/* guardd.conf yang ADA tetapi kosong/terpotong (disk penuh, tulis terputus) dulu dibaca sebagai "semua bawaan": enforce=0, ambang,
+ * geo, dan notify kembali bawaan tanpa tanda. Bila tidak ada satu kunci pun, cadangan guardd.conf.bak (ditulis panel setiap
+ * menyimpan) dipakai bila berisi. */
+static const char *cfg_pilih(const char *path)
+{
+    static char bak[PATH_MAX];
+    if (cfg_jumlah_kunci(path) != 0) return path;
+    snprintf(bak, sizeof(bak), "%s.bak", path);
+    if (cfg_jumlah_kunci(bak) > 0) {
+        logmsg("config %s kosong/rusak: memakai cadangan %s", path, bak);
+        return bak;
+    }
+    logmsg("PERINGATAN: config %s kosong/rusak dan tanpa cadangan; memakai bawaan", path);
+    return path;
+}
 
 static void cfg_load(const char *path)
 {
@@ -336,6 +374,7 @@ static void cfg_load(const char *path)
         else if (!strcmp(k, "run_dir"))            snprintf(cfg.run_dir, CFG_PATH, "%s", v);
         else if (!strcmp(k, "log_file"))           snprintf(cfg.log_file, CFG_PATH, "%s", v);
         else if (!strcmp(k, "allow_file"))          snprintf(cfg.allow_file, CFG_PATH, "%s", v);
+        else if (!strcmp(k, "proxy_file"))          snprintf(cfg.proxy_file, CFG_PATH, "%s", v);
         else if (!strcmp(k, "learn_file"))          snprintf(cfg.learn_file, CFG_PATH, "%s", v);
         else if (!strcmp(k, "learn_hits_both"))     cfg.learn_hits_both = atoi(v);
         else if (!strcmp(k, "learn_hits_path"))     cfg.learn_hits_path = atoi(v);
@@ -349,10 +388,10 @@ static void cfg_load(const char *path)
              * pengujian tidak akan benar-benar mengisolasi daemon dari
              * log produksi. */
             if (cfg.n_conf_dirs == 0) logmsg("conf_dir bawaan digantikan oleh config");
-            if (cfg.n_conf_dirs < 8) snprintf(cfg.conf_dirs[cfg.n_conf_dirs++], CFG_PATH, "%s", v);
+            if (cfg.n_conf_dirs < 16) snprintf(cfg.conf_dirs[cfg.n_conf_dirs++], CFG_PATH, "%s", v);
         } else if (!strcmp(k, "log_dir")) {
             if (cfg.n_log_dirs == 0) logmsg("log_dir bawaan digantikan oleh config");
-            if (cfg.n_log_dirs < 8) snprintf(cfg.log_dirs[cfg.n_log_dirs++], CFG_PATH, "%s", v);
+            if (cfg.n_log_dirs < 16) snprintf(cfg.log_dirs[cfg.n_log_dirs++], CFG_PATH, "%s", v);
         }
     }
     if (f) fclose(f);
@@ -391,15 +430,51 @@ static void cfg_load(const char *path)
     if (cfg.throttle_score <= cfg.watch_score) cfg.throttle_score = cfg.watch_score + 40;
     if (cfg.ban_score <= cfg.throttle_score) cfg.ban_score = cfg.throttle_score + 90;
 
-    /* Bawaan hanya dipakai bila config tidak menyebut sama sekali. */
+    /* Bawaan hanya dipakai bila config tidak menyebut sama sekali. Mendukung aaPanel,
+     * panel hosting lain (DirectAdmin, cPanel, CyberPanel), dan Linux Standalone. */
     if (cfg.n_conf_dirs == 0) {
-        snprintf(cfg.conf_dirs[0], CFG_PATH, "%s", "/www/server/panel/vhost/nginx");
-        snprintf(cfg.conf_dirs[1], CFG_PATH, "%s", "/www/server/nginx/conf");
-        cfg.n_conf_dirs = 2;
+        const char *cand_conf[] = {
+            "/www/server/panel/vhost/nginx",
+            "/www/server/nginx/conf",
+            "/www/server/panel/vhost/apache",
+            "/www/server/panel/vhost/openlitespeed",
+            "/etc/nginx/sites-enabled",
+            "/etc/nginx/conf.d",
+            "/etc/apache2/sites-enabled",
+            "/etc/httpd/conf.d",
+            "/usr/local/directadmin/data/users",
+            NULL
+        };
+        for (int i = 0; cand_conf[i] && cfg.n_conf_dirs < 16; i++) {
+            struct stat st;
+            if (stat(cand_conf[i], &st) == 0 && S_ISDIR(st.st_mode)) {
+                snprintf(cfg.conf_dirs[cfg.n_conf_dirs++], CFG_PATH, "%s", cand_conf[i]);
+            }
+        }
+        if (cfg.n_conf_dirs == 0) {
+            snprintf(cfg.conf_dirs[0], CFG_PATH, "%s", "/www/server/panel/vhost/nginx");
+            snprintf(cfg.conf_dirs[1], CFG_PATH, "%s", "/www/server/nginx/conf");
+            cfg.n_conf_dirs = 2;
+        }
     }
     if (cfg.n_log_dirs == 0) {
-        snprintf(cfg.log_dirs[0], CFG_PATH, "%s", "/www/wwwlogs");
-        cfg.n_log_dirs = 1;
+        const char *cand_log[] = {
+            "/www/wwwlogs",
+            "/var/log/nginx",
+            "/var/log/apache2",
+            "/var/log/httpd",
+            NULL
+        };
+        for (int i = 0; cand_log[i] && cfg.n_log_dirs < 16; i++) {
+            struct stat st;
+            if (stat(cand_log[i], &st) == 0 && S_ISDIR(st.st_mode)) {
+                snprintf(cfg.log_dirs[cfg.n_log_dirs++], CFG_PATH, "%s", cand_log[i]);
+            }
+        }
+        if (cfg.n_log_dirs == 0) {
+            snprintf(cfg.log_dirs[0], CFG_PATH, "%s", "/www/wwwlogs");
+            cfg.n_log_dirs = 1;
+        }
     }
 }
 
@@ -553,6 +628,17 @@ static void allow_add_exact(uint32_t ip)
     }
 }
 
+static const char *get_ipset_bin(void)
+{
+    static const char *cached = NULL;
+    if (cached) return cached;
+    if (access("/usr/sbin/ipset", X_OK) == 0) cached = "/usr/sbin/ipset";
+    else if (access("/sbin/ipset", X_OK) == 0) cached = "/sbin/ipset";
+    else if (access("/usr/bin/ipset", X_OK) == 0) cached = "/usr/bin/ipset";
+    else cached = "ipset";
+    return cached;
+}
+
 /* Minggirkan juga jaringan internal & link-local; hanya /24 yang dipakai
  * untuk efficiency, cukup untuk 10/8, 172.16/12, 192.168/16, loopback. */
 static void allow_init(void)
@@ -585,8 +671,70 @@ static void allow_init(void)
         freeifaddrs(ifa);
     }
 
+    /* CDN Cloudflare edge ranges: tidak boleh diblokir bila webserver di belakang CDN */
+    static const struct { uint32_t net; int pfx; } cdn_ranges[] = {
+        { 0xadf53000u, 20 }, /* 173.245.48.0/20 */
+        { 0x6715f400u, 22 }, /* 103.21.244.0/22 */
+        { 0x6716c800u, 22 }, /* 103.22.200.0/22 */
+        { 0x671f0400u, 22 }, /* 103.31.4.0/22 */
+        { 0x8d654000u, 18 }, /* 141.101.64.0/18 */
+        { 0x6ca2c000u, 18 }, /* 108.162.192.0/18 */
+        { 0xbe5df000u, 20 }, /* 190.93.240.0/20 */
+        { 0xbc726000u, 20 }, /* 188.114.96.0/20 */
+        { 0xc5eaf000u, 22 }, /* 197.234.240.0/22 */
+        { 0xc6298000u, 17 }, /* 198.41.128.0/17 */
+        { 0xa29e0000u, 15 }, /* 162.158.0.0/15 */
+        { 0x68100000u, 13 }, /* 104.16.0.0/13 */
+        { 0x68180000u, 14 }, /* 104.24.0.0/14 */
+        { 0xac400000u, 13 }, /* 172.64.0.0/13 */
+        { 0x83004800u, 22 }  /* 131.0.72.0/22 */
+    };
+    for (size_t i = 0; i < sizeof(cdn_ranges)/sizeof(cdn_ranges[0]); i++) {
+        if (allow_n < 256) {
+            allow_mask[allow_n] = prefix_mask(cdn_ranges[i].pfx);
+            allow_net[allow_n++] = cdn_ranges[i].net;
+        }
+    }
+
+    /* Alamat IP admin dari pembatasan port firewall (admin_restrict) */
+    const char *pjson_paths[] = {
+        "/www/server/sentinel/data/ports.json",
+        "/www/server/panel/plugin/sentinel/data/ports.json",
+        "/etc/sentinel/ports.json",
+        NULL
+    };
+    for (int pidx = 0; pjson_paths[pidx]; pidx++) {
+        FILE *pj = fopen(pjson_paths[pidx], "r");
+        if (pj) {
+            char pbuf[4096];
+            size_t prd = fread(pbuf, 1, sizeof(pbuf) - 1, pj);
+            fclose(pj);
+            if (prd > 0) {
+                pbuf[prd] = '\0';
+                char *pos = strstr(pbuf, "admin_restrict");
+                if (pos) {
+                    char *brace = strchr(pos, '}');
+                    if (brace) *brace = '\0';
+                    char *ip_cur = pos;
+                    while ((ip_cur = strchr(ip_cur, '"')) != NULL) {
+                        ip_cur++;
+                        char *qend = strchr(ip_cur, '"');
+                        if (!qend) break;
+                        *qend = '\0';
+                        if (strchr(ip_cur, '.') && !strchr(ip_cur, ':') && strlen(ip_cur) <= 15) {
+                            uint32_t aip = ip2u(ip_cur);
+                            if (aip) allow_add_exact(aip);
+                        }
+                        ip_cur = qend + 1;
+                    }
+                }
+            }
+            break;
+        }
+    }
+
     /* whitelist yang sudah dikelola panel aaPanel */
-    const char *pcmd[] = { "/usr/sbin/ipset", "list", "aapanel.ipv4.whitelist", NULL };
+    const char *pcmd[] = { get_ipset_bin(), "list", "aapanel.ipv4.whitelist", NULL };
     int fds[2];
     pid_t pid;
     if (pipe(fds) != 0) return;
@@ -597,7 +745,7 @@ static void allow_init(void)
         close(fds[1]);
         int dn = open("/dev/null", O_WRONLY);
         if (dn >= 0) { dup2(dn, STDERR_FILENO); close(dn); }
-        execv(pcmd[0], (char *const *)pcmd);
+        execvp(pcmd[0], (char *const *)pcmd);
         _exit(127);
     }
     close(fds[1]);
@@ -627,11 +775,90 @@ static void allow_init(void)
     allow_sedang_builtin = 0;
 }
 
+/* ------------------------------------------------------------------ *
+ * Rentang proxy/CDN tepercaya (Cloudflare, Fastly, Sucuri, ...; ditulis sentinel-proxy.py, "cidr provider" per baris).
+ * Di balik proxy, IP di log adalah IP TEPI proxy bila web server belum memakai real IP: IP itu membawa banyak pengunjung, jadi
+ * tidak pernah dinilai, diberi event, di-ban, atau masuk review (dulu satu penyerang lewat Cloudflare bisa membuat IP tepi
+ * Cloudflare di-ban dan memutus semua pengunjung yang lewat tepi itu). Hanya IPv4 (guardd membaca alamat IPv4).
+ * ------------------------------------------------------------------ */
+#define MAX_PROXY 4096
+static uint32_t proxy_net[MAX_PROXY], proxy_mask[MAX_PROXY];
+static int      proxy_n = 0;
+static uint64_t g_stat_proxy = 0;
+
+static void proxy_load(const char *path)
+{
+    FILE *f = fopen(path, "re");
+    char line[256];
+    int n = 0;
+    if (!f) { proxy_n = 0; return; }
+    while (fgets(line, sizeof(line), f) && n < MAX_PROXY) {
+        char *p = line, *sl;
+        while (*p == ' ' || *p == '\t') p++;
+        if (*p == '#' || *p == '\n' || *p == '\0') continue;
+        char *sp = strpbrk(p, " \t\n");
+        if (sp) *sp = '\0';
+        if (strchr(p, ':')) continue;                    /* IPv6 */
+        int pre = 32;
+        if ((sl = strchr(p, '/'))) { *sl = '\0'; pre = atoi(sl + 1); }
+        uint32_t ip = ip2u(p);
+        if (!ip || pre < 8 || pre > 32) continue;
+        uint32_t m = pre == 32 ? 0xffffffffu : ~(0xffffffffu >> pre);
+        proxy_net[n] = ip & m; proxy_mask[n] = m; n++;
+    }
+    fclose(f);
+    if (n != proxy_n) logmsg("rentang proxy tepercaya dimuat: %d (IPv4) dari %s", n, path);
+    proxy_n = n;
+}
+
+static int is_proxy(uint32_t ip)
+{
+    for (int i = 0; i < proxy_n; i++)
+        if ((ip & proxy_mask[i]) == proxy_net[i]) return 1;
+    return 0;
+}
+
+/* IP sesi login interaktif (SSH/konsol jarak jauh) yang sedang aktif, dibaca dari utmp tiap 30 detik. IP ini tidak pernah
+ * di-ban atau di-throttle: log akses milik akun web (www) bisa disisipi baris palsu oleh proses web yang sudah disusupi,
+ * dan baris itu tidak boleh bisa mengunci admin keluar dari servernya sendiri. */
+#define SESI_MAKS 64
+static uint32_t g_sesi_ip[SESI_MAKS];
+static int      g_sesi_n = 0;
+static time_t   g_sesi_ts = 0;
+
+static void sesi_admin_muat(time_t now)
+{
+    if (g_sesi_ts && now - g_sesi_ts < 30) return;
+    g_sesi_ts = now;
+    int n = 0;
+    struct utmpx *u;
+    setutxent();
+    while ((u = getutxent()) != NULL && n < SESI_MAKS) {
+        if (u->ut_type != USER_PROCESS) continue;
+        /* IPv4 disimpan di elemen pertama (network order), sisanya nol */
+        if (!u->ut_addr_v6[0] || u->ut_addr_v6[1] || u->ut_addr_v6[2] || u->ut_addr_v6[3]) continue;
+        uint32_t ip = ntohl((uint32_t)u->ut_addr_v6[0]);
+        int ada = 0;
+        for (int i = 0; i < n; i++) if (g_sesi_ip[i] == ip) { ada = 1; break; }
+        if (!ada) g_sesi_ip[n++] = ip;
+    }
+    endutxent();
+    if (n != g_sesi_n) logmsg("sesi admin aktif: %d IP dilindungi dari ban", n);
+    g_sesi_n = n;
+}
+
+static int is_sesi_admin(uint32_t ip)
+{
+    for (int i = 0; i < g_sesi_n; i++) if (g_sesi_ip[i] == ip) return 1;
+    return 0;
+}
+
 static int is_allowed(uint32_t ip)
 {
     if (!ip) return 1;
     if (net_contains(allow_net, allow_n, ip)) return 1;
     if (allow_exact(ip)) return 1;
+    if (is_sesi_admin(ip)) return 1;
     return 0;
 }
 
@@ -803,6 +1030,7 @@ typedef struct ip_ent {
     char     last_host[64];
     char     last_path[160];
     char     last_ua[120];
+    uint16_t last_status;
     uint32_t last_ctx;                /* tick terakhir konteks diisi */
 } ip_ent;
 
@@ -840,6 +1068,7 @@ typedef struct {
     uint16_t score;
     uint8_t  level;
     uint8_t  kind;
+    uint16_t status;
     char     host[64];
     char     path[160];
     char     ua[120];
@@ -853,6 +1082,10 @@ static uint64_t g_stat_total = 0;
 static uint64_t g_stat_bytes = 0;
 static uint64_t g_stat_flood = 0;      /* tick yang mengalami throttle */
 static uint64_t g_stat_parse_fail = 0;
+/* Baris dengan IP klien IPv6: tabel skor/ban daemon ini hanya IPv4, jadi baris ini dilewati dan pengunjung IPv6 hanya
+ * dilindungi lapisan WAF (L7). Dihitung terpisah supaya celah cakupan ini terlihat di status dan UI, bukan tersembunyi. */
+static uint64_t g_stat_ipv6_skip = 0;
+static uint64_t g_stat_ipv6_bans = 0;   /* prefix /64 yang diblokir penilai IPv6 */
 static uint64_t g_stat_lines = 0;
 static uint64_t g_stat_dropped_cap = 0;  /* line dilewati karena pagu tick */
 static uint64_t g_stat_bans_total = 0;
@@ -960,11 +1193,14 @@ static int ip_evict_one(uint32_t now)
 
     /* Lapis 2: entri NORMAL paling tua, dengan batas pindai supaya
      * tidak pernah berjalan lama saat semua entri bertingkat. */
+    /* Utamakan skor terendah (0 lebih dulu), baru yang paling tua: dulu entri NORMAL paling tua dibuang walau skornya sedang naik,
+     * sehingga banjir IP baru bisa mengosongkan skor penyerang sebelum mencapai ambang (audit 29 Okt 2026). */
     ip_ent *best = NULL;
     scanned = 0;
     for (ip_ent *e = g_lru_head; e && scanned < 4096; e = e->lru_next, scanned++) {
         if (e->level != LVL_NORMAL) continue;
-        if (!best || e->last_seen < best->last_seen) best = e;
+        if (!best || e->score < best->score || (e->score == best->score && e->last_seen < best->last_seen)) best = e;
+        if (best->score == 0 && e == best) break;     /* daftar umur: skor 0 pertama sudah yang tertua dengan skor 0 */
     }
     if (best) { ip_unlink_bucket(best->ip); return 1; }
 
@@ -1032,6 +1268,7 @@ typedef struct {
     char     carry[SENT_LINE_MAX + 1];
     size_t   carry_len;
     int      skip_nl;       /* sedang membuang ekor baris kepanjangan */
+    time_t   potong_ts;     /* notifikasi "log terpotong" terakhir (dibatasi 1 per 10 menit per log) */
 } tailer_t;
 
 static tailer_t g_tail[MAX_TAILERS];
@@ -1076,6 +1313,14 @@ static void host_from_path(const char *path, char *out, size_t n)
     snprintf(out, n, "%s", b);
     size_t l = strlen(out);
     if (l > 4 && !strcmp(out + l - 4, ".log")) out[l - 4] = '\0';
+    /* Apache aaPanel: <host>-access_log; OpenLiteSpeed aaPanel: <host>_ols.access_log */
+    /* server tanpa aaPanel: nginx Debian/Ubuntu menamai log <situs>.access.log / <situs>-access.log */
+    static const char *const suf[] = { "_ols.access_log", ".access_log", "-access_log", "_access_log", ".access", "-access", NULL };
+    for (int i = 0; suf[i]; i++) {
+        size_t sl = strlen(suf[i]);
+        l = strlen(out);
+        if (l > sl && !strcmp(out + l - sl, suf[i])) { out[l - sl] = '\0'; break; }
+    }
     /* buang sufiks tanggal ala aaPanel: nama_YYYY-MM-DD.log / nama.2026-10-02.log */
     char *us = strrchr(out, '_');
     char *dot = strrchr(out, '.');
@@ -1103,23 +1348,51 @@ static int host_index(const char *host)
 
 /* Apakah baris log terlihat seperti access log format "combined"?
  * Dipakai untuk jaring pengaman saat memindai direktori log. */
+/* Buka log untuk ditail. Folder induk yang bukan milik root (mis. /www/wwwlogs milik www) dibuka dengan O_NOFOLLOW: pemilik folder
+ * bisa mengganti berkas log dengan symlink ke berkas root mana pun. Symlink di folder milik root (layout distro) tetap diikuti. */
+static int buka_log(const char *path)
+{
+    int fl = O_RDONLY | O_NONBLOCK | O_CLOEXEC;
+    char dir[PATH_MAX];
+    snprintf(dir, sizeof(dir), "%s", path);
+    char *sl = strrchr(dir, '/');
+    if (sl && sl != dir) *sl = '\0';
+    struct stat ds;
+    if (!sl || stat(dir, &ds) != 0 || ds.st_uid != 0) fl |= O_NOFOLLOW;
+    return open(path, fl);
+}
+
 static int looks_like_access_log(const char *path)
 {
-    FILE *f = fopen(path, "re");
-    if (!f) return 0;
+    /* /www/wwwlogs dimiliki www: berkas bisa ditukar FIFO di antara stat() pemanggil dan open() ini. fopen() biasa
+     * (tanpa O_NONBLOCK) pada FIFO tanpa penulis menggantung selamanya dan membekukan loop utama guardd.
+     * Buka non-blocking, pastikan berkas biasa dari fd yang sama, baru bungkus dengan FILE. */
+    int ofd = buka_log(path);
+    if (ofd < 0) return 0;
+    struct stat ost;
+    if (fstat(ofd, &ost) != 0 || !S_ISREG(ost.st_mode)) { close(ofd); return 0; }
+    FILE *f = fdopen(ofd, "r");
+    if (!f) { close(ofd); return 0; }
     char line[SENT_LINE_MAX];
     int found = 0;
     for (int i = 0; i < 20 && !found; i++) {
         if (!fgets(line, sizeof(line), f)) break;
         if (line[0] == '\0' || line[0] == '\n') continue;
-        /* harus diawali IP v4 */
+        /* harus diawali alamat IPv4, atau IPv6 (dulu hanya IPv4: log situs yang hanya dikunjungi lewat IPv6 tidak pernah ditail) */
         int dots = 0, ok = 1;
         for (const char *p = line; *p == '.' || isdigit((unsigned char)*p); p++) {
             if (*p == '.') dots++;
             if (!isdigit((unsigned char)*p) && *p != '.') { ok = 0; break; }
             if (p - line > 40) { ok = 0; break; }
         }
-        if (!ok || dots < 3) continue;
+        if (!ok || dots < 3) {
+            size_t k = strcspn(line, " ");
+            char a6[64];
+            struct in6_addr x6;
+            if (k == 0 || k >= sizeof(a6)) continue;
+            memcpy(a6, line, k); a6[k] = '\0';
+            if (inet_pton(AF_INET6, a6, &x6) != 1) continue;
+        }
         /* harus ada field requestMODE " dan status 3 digit */
         if (strchr(line, '"') && strstr(line, "HTTP/")) { found = 1; }
     }
@@ -1133,22 +1406,30 @@ static int tailer_open(const char *path, const char *src)
 {
     for (int i = 0; i < g_tail_n; i++)
         if (g_tail[i].in_use && !strcmp(g_tail[i].path, path)) return 0;
-    if (g_tail_n >= MAX_TAILERS) {
-        logmsg("pagu tailer penuh (%d), log %s diabaikan", MAX_TAILERS, path);
-        return -1;
+    /* Pakai ulang slot yang sudah dilepas. Dulu slot baru selalu diambil di ujung dan yang dilepas tidak pernah dipakai
+     * lagi: jalur log dari conf yang diganti FIFO/non-berkas oleh pemilik direktori log (www) menghabiskan 1 slot tiap
+     * siklus penemuan, sampai pagu MAX_TAILERS penuh dan vhost baru tidak pernah ditail. */
+    int slot = -1;
+    for (int i = 0; i < g_tail_n; i++)
+        if (!g_tail[i].in_use) { slot = i; break; }
+    if (slot < 0) {
+        if (g_tail_n >= MAX_TAILERS) {
+            logmsg("pagu tailer penuh (%d), log %s diabaikan", MAX_TAILERS, path);
+            return -1;
+        }
+        slot = g_tail_n++;
     }
 
-    tailer_t *t = &g_tail[g_tail_n];
+    tailer_t *t = &g_tail[slot];
     memset(t, 0, sizeof(*t));
     snprintf(t->path, PATH_MAX, "%s", path);
     host_from_path(path, t->host, sizeof(t->host));
     t->added = now_t();
     t->fd = -1;
     t->in_use = 1;
-    g_tail_n++;
 
     /* O_NONBLOCK: FIFO yang ditanam pemilik log tidak boleh membekukan loop utama */
-    int fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+    int fd = buka_log(path);
     if (fd < 0) {
         logmsg("gagal buka %s (%s), akan dicoba lagi tiap detik", path, strerror(errno));
         t->degraded = 1;
@@ -1166,7 +1447,7 @@ static int tailer_open(const char *path, const char *src)
     }
     close(fd);
     logmsg("%s bukan berkas biasa, dilewati", path);
-    tailer_release(g_tail_n - 1);
+    tailer_release(slot);
     return -1;
 }
 
@@ -1192,7 +1473,8 @@ static void tailer_retry(void)
     for (int i = 0; i < g_tail_n; i++) {
         tailer_t *t = &g_tail[i];
         if (!t->in_use || t->fd >= 0) continue;
-        int fd = open(t->path, O_RDONLY);
+        /* O_NONBLOCK: jalur ini milik www; FIFO yang ditanam di sana tidak boleh menggantung open() */
+        int fd = buka_log(t->path);
         if (fd < 0) continue;
         struct stat st;
         if (fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) { close(fd); continue; }
@@ -1214,6 +1496,14 @@ static int dir_should_skip(const char *name)
     return 0;
 }
 
+/* Nama berkas access log Apache/OLS aaPanel yang tidak berakhiran .log: <host>-access_log, <host>_ols.access_log. Dulu hanya
+ * *.log yang diterima sehingga situs Apache/OpenLiteSpeed tidak pernah ditail (tanpa skor, ban, maupun pelajaran). */
+static int log_nama_akses(const char *nama)
+{
+    size_t n = strlen(nama);
+    return (n > 10 && !strcmp(nama + n - 10, "access_log"));
+}
+
 /* Baca satu directive access_log dari sebuah berkas conf.
  * Mengembalikan jumlah target valid yang ditemukan. */
 static int scan_one_conf(const char *path)
@@ -1230,17 +1520,24 @@ static int scan_one_conf(const char *path)
         char *q = line;
         while (*q == ' ' || *q == '\t') q++;
         if (*q == '#' || *q == '\n' || *q == '\0') continue;
-        if (strncmp(q, "access_log", 10) != 0) continue;
-        q += 10;
+        /* nginx access_log, Apache CustomLog/TransferLog, OpenLiteSpeed accesslog (huruf besar/kecil bebas) */
+        size_t dl = 0;
+        if (!strncasecmp(q, "access_log", 10)) dl = 10;
+        else if (!strncasecmp(q, "customlog", 9)) dl = 9;
+        else if (!strncasecmp(q, "transferlog", 11)) dl = 11;
+        else if (!strncasecmp(q, "accesslog", 9)) dl = 9;
+        if (!dl) continue;
+        q += dl;
         if (*q != ' ' && *q != '\t') continue;
 
         while (*q == ' ' || *q == '\t') q++;
         if (*q == '\0' || *q == '\n' || *q == '#') continue;
+        if (*q == '"' || *q == '\'') q++;          /* Apache: CustomLog "/www/wwwlogs/x-access_log" combined */
 
         /* token pertama = target */
         char target[PATH_MAX];
         size_t i = 0;
-        while (*q && *q != ' ' && *q != '\t' && *q != ';' && *q != '\n' && i < PATH_MAX - 1)
+        while (*q && *q != ' ' && *q != '\t' && *q != ';' && *q != '\n' && *q != '"' && *q != '\'' && *q != '{' && i < PATH_MAX - 1)
             target[i++] = *q++;
         target[i] = '\0';
         if (!i) continue;
@@ -1255,7 +1552,8 @@ static int scan_one_conf(const char *path)
         if (target[0] != '/') continue;
         if (!strncmp(target, "/dev/", 5)) continue;
         if (strchr(target, '$')) continue;
-        if (!strstr(target, ".log")) continue;
+        if (!strstr(target, ".log") && !log_nama_akses(target)) continue;
+        if (strstr(target, "error")) continue;
 
         if (want_add(target)) found++;
     }
@@ -1287,28 +1585,34 @@ static void scan_conf_recursive(const char *dir, int depth, int *found)
 /* Jaring pengaman: pindai direktori log, ambil *.log yang memverifikasi
  * dirinya sebagai access log. Menutup kemungkinan ada access log yang
  * tidak tertulis eksplisit di conf (mis. dibuat manual oleh pemilik). */
-static void scan_logdir(const char *dir, int depth, int *found)
+/* wajib_root: hanya berkas milik root. Dipakai bila salinan log root (AKSES_DIR) aktif: log yang hanya ditemukan lewat pemindaian direktori
+ * (tidak dirujuk conf vhost) dan dibuat akun web bisa berisi baris karangan yang membuat IP pihak lain diblokir (evaluasi 30 Okt 2026). */
+static void scan_logdir(const char *dir, int depth, int *found, int wajib_root)
 {
-    if (depth > 2) return;
+    if (depth > 2 || *found >= MAX_TAILERS) return;
     DIR *d = opendir(dir);
     if (!d) return;
     struct dirent *de;
+    int entries = 0;
     while ((de = readdir(d))) {
         if (de->d_name[0] == '.') continue;
         if (dir_should_skip(de->d_name)) continue;
+        if (++entries > 256) break; /* Batasi entri per direktori per siklus agar www tidak menahan loop */
         char path[PATH_MAX];
         if (snprintf(path, PATH_MAX, "%s/%s", dir, de->d_name) >= PATH_MAX) continue;
         struct stat st;
-        if (stat(path, &st) != 0) continue;
-        if (S_ISDIR(st.st_mode)) { scan_logdir(path, depth + 1, found); continue; }
+        if (lstat(path, &st) != 0) continue;
+        if (S_ISDIR(st.st_mode)) { scan_logdir(path, depth + 1, found, wajib_root); continue; }
         if (!S_ISREG(st.st_mode)) continue;
+        if (wajib_root && st.st_uid != 0) continue;
         size_t ln = strlen(de->d_name);
-        if (ln < 5 || strcmp(de->d_name + ln - 4, ".log") != 0) continue;
+        if ((ln < 5 || strcmp(de->d_name + ln - 4, ".log") != 0) && !log_nama_akses(de->d_name)) continue;
         /* jangan ikut error log */
         if (strstr(de->d_name, "error")) continue;
         if (want_has(path)) continue;
         if (!looks_like_access_log(path)) continue;
         if (want_add(path)) (*found)++;
+        if (*found >= MAX_TAILERS) break;
     }
     closedir(d);
 }
@@ -1318,14 +1622,131 @@ static int g_logs_seen = 0;
 /* Siklus penemuan. Dipanggil berkala dan setiap SIGHUP.
  * Tidak ada daftar vhost yang disimpan di kode: seluruhnya berasal dari
  * pembacaan berkas conf dan direktori log saat runtime. */
+/* Salinan access log per vhost milik root (snippet WAF nginx menulis access_log kedua ke sini; master nginx membukanya sebagai root).
+ * Log aaPanel di /www/wwwlogs milik akun web: proses web yang disusupi bisa menghapus isinya atau menyisipkan baris palsu. Bila salinan
+ * root untuk sebuah host ada, log /www/wwwlogs host itu tidak dibaca (tidak dihitung ganda dan tidak bisa diracuni). */
+#ifndef AKSES_DIR
+#define AKSES_DIR "/www/server/sentinel/log/akses"   /* uji: -DAKSES_DIR=... */
+#endif
+#define AKSES_ROTASI_BYTES (64LL * 1024 * 1024)
+
+static int akses_dir_aman(void)
+{
+    struct stat st;
+    if (lstat(AKSES_DIR, &st) != 0 || !S_ISDIR(st.st_mode)) return 0;
+    if (st.st_uid != 0 || (st.st_mode & 077)) {
+        static time_t peringatan = 0;
+        if (now_t() - peringatan > 3600) {
+            logmsg("PERINGATAN: %s bukan milik root atau izinnya longgar (%o); salinan log root diabaikan", AKSES_DIR, st.st_mode & 0777);
+            peringatan = now_t();
+        }
+        return 0;
+    }
+    return 1;
+}
+
+static int di_akses_dir(const char *p)
+{
+    size_t n = strlen(AKSES_DIR);
+    return !strncmp(p, AKSES_DIR, n) && p[n] == '/';
+}
+
+/* Buang dari daftar keinginan log non-root untuk host yang punya salinan root; salinan root yang tidak aman dibuang semua. */
+static void want_utamakan_akses(int aman)
+{
+    int j = 0;
+    for (int i = 0; i < g_want_n; i++) {
+        int buang = 0;
+        if (di_akses_dir(g_want[i])) {
+            buang = !aman;
+        } else if (aman) {
+            char h[256], cand[PATH_MAX];
+            host_from_path(g_want[i], h, sizeof(h));
+            /* hanya bila salinan root BENAR-BENAR ada (milik root): conf sudah merujuknya tetapi nginx belum di-reload, atau rotasi
+             * belum dibuka ulang, berarti salinan belum menerima baris dan log host itu tidak boleh dibuang (host jadi tidak terpantau) */
+            struct stat cs;
+            if (h[0] && snprintf(cand, sizeof(cand), "%s/%s.log", AKSES_DIR, h) < (int)sizeof(cand) && want_has(cand)
+                && lstat(cand, &cs) == 0 && S_ISREG(cs.st_mode) && cs.st_uid == 0) buang = 1;
+        }
+        if (buang) free(g_want[i]); else g_want[j++] = g_want[i];
+    }
+    g_want_n = j;
+}
+
+/* PID dari pidfile hanya dipakai bila prosesnya memang server web milik root (uid 0, exe bernama nginx/httpd/apache2): pidfile basi bisa
+ * menunjuk proses lain yang kebetulan memakai PID yang sama, dan SIGUSR1 mengakhiri proses yang tidak menanganinya. */
+static pid_t pid_server_web(const char *const *pidf)
+{
+    for (int i = 0; pidf[i]; i++) {
+        FILE *f = fopen(pidf[i], "re");
+        if (!f) continue;
+        long pid = 0;
+        int ok = fscanf(f, "%ld", &pid) == 1 && pid > 1;
+        fclose(f);
+        if (!ok) continue;
+        char p[64], exe[PATH_MAX];
+        struct stat st;
+        snprintf(p, sizeof(p), "/proc/%ld", pid);
+        if (stat(p, &st) != 0 || st.st_uid != 0) continue;
+        snprintf(p, sizeof(p), "/proc/%ld/exe", pid);
+        ssize_t n = readlink(p, exe, sizeof(exe) - 1);
+        if (n <= 0) continue;
+        exe[n] = 0;
+        const char *b = strrchr(exe, '/');
+        b = b ? b + 1 : exe;
+        if (!strncmp(b, "nginx", 5) || !strncmp(b, "httpd", 5) || !strncmp(b, "apache2", 7)) return (pid_t)pid;
+    }
+    return 0;
+}
+
+/* Rotasi salinan root yang melewati AKSES_ROTASI_BYTES: rename ke .1 lalu USR1 ke master server web (buka ulang log). Tailer melihat
+ * inode baru lewat stat(path) dan mulai dari offset 0. Tanpa master yang terverifikasi tidak ada rename: berkas yang diganti nama tanpa
+ * dibuka ulang membuat server terus menulis ke .1 dan host tidak terpantau. Bila guardd tidak berjalan, logrotate (install.sh) membatasi
+ * ukuran salinan ini. */
+static void akses_rotasi(void)
+{
+    static const char *const NGX[] = { "/www/server/nginx/logs/nginx.pid", "/run/nginx.pid", "/var/run/nginx.pid", NULL };
+    static const char *const APC[] = { "/www/server/apache/logs/httpd.pid", "/run/httpd/httpd.pid", "/var/run/apache2/apache2.pid", NULL };
+    int besar = 0;
+    for (int i = 0; i < g_tail_n && !besar; i++) {
+        struct stat st;
+        besar = g_tail[i].in_use && di_akses_dir(g_tail[i].path) && stat(g_tail[i].path, &st) == 0 && st.st_size >= AKSES_ROTASI_BYTES;
+    }
+    if (!besar) return;
+    pid_t pn = pid_server_web(NGX), pa = pid_server_web(APC);
+    if (!pn && !pa) {
+        static time_t peringatan = 0;
+        if (now_t() - peringatan > 3600) { logmsg("rotasi salinan log root ditunda: master nginx/Apache tidak terverifikasi"); peringatan = now_t(); }
+        return;
+    }
+    int perlu = 0;
+    for (int i = 0; i < g_tail_n; i++) {
+        tailer_t *t = &g_tail[i];
+        if (!t->in_use || !di_akses_dir(t->path)) continue;
+        struct stat st;
+        if (stat(t->path, &st) != 0 || st.st_size < AKSES_ROTASI_BYTES) continue;
+        char lama[PATH_MAX];
+        if (snprintf(lama, sizeof(lama), "%s.1", t->path) >= (int)sizeof(lama)) continue;
+        if (rename(t->path, lama) == 0) { perlu = 1; logmsg("rotasi salinan log root: %s -> %s", t->path, lama); }
+    }
+    if (!perlu) return;
+    /* USR1: nginx = buka ulang log; Apache = graceful restart (koneksi berjalan diselesaikan, log dibuka ulang) */
+    if (pn) kill(pn, SIGUSR1);
+    if (pa) kill(pa, SIGUSR1);
+}
+
 static void rediscover(void)
 {
     int found = 0;
     want_reset();
     for (int i = 0; i < cfg.n_conf_dirs; i++)
         scan_conf_recursive(cfg.conf_dirs[i], 0, &found);
+    int aman = akses_dir_aman();
     for (int i = 0; i < cfg.n_log_dirs; i++)
-        scan_logdir(cfg.log_dirs[i], 0, &found);
+        scan_logdir(cfg.log_dirs[i], 0, &found, aman);
+    if (aman) scan_logdir(AKSES_DIR, 0, &found, 1);
+    want_utamakan_akses(aman);
+    akses_rotasi();
 
     /* Buka yang baru */
     for (int i = 0; i < g_want_n; i++)
@@ -1474,12 +1895,13 @@ static int ua_is_tool_copy(const char *ua, size_t n)
 
 static void ev_push(uint32_t ts, uint32_t ip, uint16_t score, uint8_t level,
                     uint8_t kind, const char *host, const char *path,
-                    size_t plen, const char *ua, size_t ulen)
+                    size_t plen, const char *ua, size_t ulen, uint16_t status)
 {
     if (g_ev_n >= MAX_EVENTS_BATCH) return;
     ev_t *e = &g_ev[g_ev_n++];
     memset(e, 0, sizeof(*e));
     e->ts = ts; e->ip = ip; e->score = score; e->level = level; e->kind = kind;
+    e->status = status;
     /* Konteks boleh kosong: log terakhir untuk IP itu bisa saja belum
        pernah terisi (mis. IP baru saja dibuat oleh ban, bukan log).
        Nilai kosong diganti "-" supaya kolom database tidak pernah
@@ -1539,6 +1961,9 @@ static void db_open(void)
     /* WAL + synchronous=NORMAL: tulis statistik TIDAK boleh memblokir
      * saat proses lain (dasbor) sedang membaca. */
     const char *pragmas[] = {
+        /* hanya berlaku pada database BARU (sebelum tabel dibuat): halaman kosong sesudah retensi dikembalikan bertahap lewat
+         * incremental_vacuum di db_prune, jadi berkas tidak tumbuh permanen. Database lama tetap mode semula (tanpa VACUUM penuh). */
+        "PRAGMA auto_vacuum=INCREMENTAL",
         "PRAGMA journal_mode=WAL",
         "PRAGMA synchronous=NORMAL",
         "PRAGMA temp_store=MEMORY",
@@ -1558,13 +1983,17 @@ static void db_open(void)
         " PRIMARY KEY(ts,ip));"
         "CREATE TABLE IF NOT EXISTS events("
         " id INTEGER PRIMARY KEY AUTOINCREMENT, ts INTEGER, ip INTEGER,"
-        " kind TEXT, score INTEGER, level INTEGER, host TEXT, path TEXT, ua TEXT);"
+        " kind TEXT, score INTEGER, level INTEGER, host TEXT, path TEXT, ua TEXT, status INTEGER DEFAULT 0);"
         "CREATE TABLE IF NOT EXISTS bans("
         " id INTEGER PRIMARY KEY AUTOINCREMENT, ip INTEGER, kind TEXT,"
         " score INTEGER, start INTEGER, until INTEGER, offenses INTEGER, reason TEXT);"
         "CREATE TABLE IF NOT EXISTS verdict("
         " ip INTEGER PRIMARY KEY, offenses INTEGER DEFAULT 0, last_kill INTEGER DEFAULT 0);"
         "CREATE INDEX IF NOT EXISTS ix_events_ts ON events(ts);"
+        /* dialog Total Attackers/Threats dan kartu: COUNT(DISTINCT ip), GROUP BY kind/host tanpa memindai seluruh tabel */
+        "CREATE INDEX IF NOT EXISTS ix_events_ip ON events(ip);"
+        "CREATE INDEX IF NOT EXISTS ix_events_kind ON events(kind);"
+        "CREATE INDEX IF NOT EXISTS ix_events_host ON events(host);"
         "CREATE INDEX IF NOT EXISTS ix_minute_ts ON minute(ts);"
         "CREATE INDEX IF NOT EXISTS ix_ban_until ON bans(until);"
         "CREATE TABLE IF NOT EXISTS watch("
@@ -1611,6 +2040,7 @@ static void db_open(void)
         logmsg("sqlite DDL gagal: %s", err ? err : "?");
         sqlite3_free(err);
     }
+    sqlite3_exec(g_db, "ALTER TABLE events ADD COLUMN status INTEGER DEFAULT 0;", NULL, NULL, NULL);
 }
 
 
@@ -1788,7 +2218,7 @@ static int run_ps_capture(const char *const argv[], char *keluar,
         dup2(fds[1], STDOUT_FILENO);
         dup2(fds[1], STDERR_FILENO);
         close(fds[1]);
-        execv(argv[0], (char *const *)argv);
+        execvp(argv[0], (char *const *)argv);
         _exit(127);
     }
     close(fds[1]);
@@ -1816,7 +2246,7 @@ static int ipset_has(const char *set, uint32_t ip)
      * bentuk kedua ditolak dengan "Unknown argument" dan keluarannya
      * selalu 2, sehingga pemeriksaan selalu gagal. */
     int n = run_ps_capture(
-        (const char *const[]){ "/usr/sbin/ipset", "test", set, b, NULL },
+        (const char *const[]){ get_ipset_bin(), "test", set, b, NULL },
         out, sizeof(out));
     return n == 0;
 }
@@ -1836,7 +2266,7 @@ static void run_ps(const char *const argv[], const char *stdin_data, size_t slen
         close(fds[0]);
         int dn = open("/dev/null", O_WRONLY);
         if (dn >= 0) { dup2(dn, STDOUT_FILENO); dup2(dn, STDERR_FILENO); close(dn); }
-        execv(argv[0], (char *const *)argv);
+        execvp(argv[0], (char *const *)argv);
         _exit(127);
     }
     close(fds[0]);
@@ -1857,7 +2287,9 @@ static void run_ps(const char *const argv[], const char *stdin_data, size_t slen
  * ipset berulang-ulang. */
 static int ipset_exists(const char *set)
 {
-    FILE *f = popen("/usr/sbin/ipset list 2>/dev/null", "re");
+    char cmd[128];
+    snprintf(cmd, sizeof(cmd), "%s list 2>/dev/null", get_ipset_bin());
+    FILE *f = popen(cmd, "re");
     if (!f) return 0;
     char line[512];
     size_t n = strlen(set);
@@ -1891,7 +2323,7 @@ static void ipset_ensure(const char *set, uint32_t def_timeout)
     snprintf(cmd, sizeof(cmd),
              "create %s hash:net family inet timeout %u hashsize 4096 "
              "maxelem 262144\n", set, def_timeout);
-    run_ps((const char *const[]){ "/usr/sbin/ipset", "restore", NULL }, cmd, strlen(cmd));
+    run_ps((const char *const[]){ get_ipset_bin(), "restore", NULL }, cmd, strlen(cmd));
     if (ipset_exists(set))
         logmsg("ipset %s dibuat (timeout bawaan %u detik)", set, def_timeout);
     else
@@ -1951,7 +2383,7 @@ static void ipset_add_ex(const char *set, uint32_t ip, uint32_t secs,
      * gagal dengan diam-diam dan tidak pernah masuk ke ipset.
      * Karena itu perintah dijalankan langsung dengan -exist. */
     run_ps((const char *const[]){
-        "/usr/sbin/ipset", "add", "-exist", set, b, "timeout", secsbuf, NULL
+        get_ipset_bin(), "add", "-exist", set, b, "timeout", secsbuf, NULL
     }, NULL, 0);
 }
 
@@ -1961,7 +2393,39 @@ static void ipset_del(const char *set, uint32_t ip)
     char b[32], line[128];
     u2ip(ip, b, sizeof(b));
     snprintf(line, sizeof(line), "del %s %s\n", set, b);
-    run_ps((const char *const[]){ "/usr/sbin/ipset", "restore", NULL }, line, strlen(line));
+    run_ps((const char *const[]){ get_ipset_bin(), "restore", NULL }, line, strlen(line));
+}
+
+/* Ban yang masih berlaku dimuat ulang saat daemon mulai. Ban hanya hidup di ipset kernel dan di g_ban: setelah reboot semua ban
+ * (termasuk ban manual dari panel) hilang walau baris bans.until masih di masa depan; setelah restart tanpa reboot ipset masih
+ * berisi tetapi g_ban kosong, sehingga bans_active di status.json 0. IP di allowlist tidak dipulihkan. */
+static void ban_restore(time_t now)
+{
+    sqlite3_stmt *st = NULL;
+    int n = 0;
+    if (!g_db || sqlite3_prepare_v2(g_db,
+            "SELECT ip, MAX(until), kind, score, reason FROM bans WHERE until > ?1 GROUP BY ip ORDER BY MAX(until) DESC LIMIT ?2",
+            -1, &st, NULL) != SQLITE_OK) { saverr(g_db, "ban_restore"); return; }
+    sqlite3_bind_int64(st, 1, (sqlite3_int64)now);
+    sqlite3_bind_int(st, 2, MAX_BAN_ENTRIES);
+    while (sqlite3_step(st) == SQLITE_ROW && g_ban_n < MAX_BAN_ENTRIES) {
+        uint32_t ip = (uint32_t)sqlite3_column_int64(st, 0);
+        time_t until = (time_t)sqlite3_column_int64(st, 1);
+        if (!ip || until <= now || is_allowed(ip) || ban_find(ip)) continue;
+        ban_t *b = &g_ban[g_ban_n++];
+        memset(b, 0, sizeof(*b));
+        b->ip = ip; b->until = until; b->start = now; b->offenses = 1; b->active = 1;
+        b->score = (uint32_t)sqlite3_column_int64(st, 3);
+        const char *k = (const char *)sqlite3_column_text(st, 2);
+        for (int i = 0; k && i < (int)(sizeof(KIND_NAME) / sizeof(KIND_NAME[0])); i++)
+            if (KIND_NAME[i] && !strcmp(KIND_NAME[i], k)) { b->kind = (uint8_t)i; break; }
+        const char *rs = (const char *)sqlite3_column_text(st, 4);
+        snprintf(b->reason, sizeof(b->reason), "%s", rs ? rs : "dipulihkan");
+        ipset_add_ex("sentinel_ban", ip, (uint32_t)(until - now), 1);
+        n++;
+    }
+    sqlite3_finalize(st);
+    if (n) logmsg("%d ban yang masih berlaku dipulihkan dari database", n);
 }
 
 /* ------------------------------------------------------------------ *
@@ -2040,8 +2504,8 @@ static void db_flush(void)
     if (g_ev_n > 0) {
         sqlite3_stmt *st = NULL;
         if (sqlite3_prepare_v2(g_db,
-            "INSERT INTO events(ts,ip,kind,score,level,host,path,ua)"
-            " VALUES(?1,?2,?3,?4,?5,?6,?7,?8)", -1, &st, NULL) == SQLITE_OK) {
+            "INSERT INTO events(ts,ip,kind,score,level,host,path,ua,status)"
+            " VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)", -1, &st, NULL) == SQLITE_OK) {
             for (int i = 0; i < g_ev_n; i++) {
                 ev_t *e = &g_ev[i];
                 sqlite3_reset(st);
@@ -2054,6 +2518,7 @@ static void db_flush(void)
                 sqlite3_bind_text(st, 6, e->host, -1, SQLITE_STATIC);
                 sqlite3_bind_text(st, 7, e->path, -1, SQLITE_STATIC);
                 sqlite3_bind_text(st, 8, e->ua, -1, SQLITE_STATIC);
+                sqlite3_bind_int64(st, 9, (sqlite3_int64)e->status);
                 if (sqlite3_step(st) != SQLITE_DONE) saverr(g_db, "event");
             }
             sqlite3_finalize(st);
@@ -2102,6 +2567,8 @@ static void db_prune(void)
         { "DELETE FROM review WHERE ts < ?1 AND status <> 'tunggu'", t - 30 * 86400 },
         { "DELETE FROM verdict WHERE last_kill < ?1", t - 30 * 86400 },
         { "DELETE FROM watch WHERE ts < ?1", t - 30 * 86400 },
+        /* cache negara lama milik panel (tidak lagi ditulis; tabel boleh tidak ada) */
+        { "DELETE FROM geo WHERE ts < ?1", t - 30 * 86400 },
     };
     for (size_t i = 0; i < sizeof(jobs) / sizeof(jobs[0]); i++) {
         st = NULL;
@@ -2112,6 +2579,8 @@ static void db_prune(void)
         }
     }
     sqlite3_exec(g_db, "COMMIT", NULL, NULL, NULL);
+    /* kembalikan paling banyak 2000 halaman kosong per jam (no-op bila auto_vacuum bukan INCREMENTAL) */
+    sqlite3_exec(g_db, "PRAGMA incremental_vacuum(2000)", NULL, NULL, NULL);
     logmsg("retensi data dijalankan");
 }
 
@@ -2136,7 +2605,9 @@ static int write_atomic(const char *path, const char *data, size_t len)
         if (w <= 0) { close(fd); unlink(tmp); return -1; }
         off += (size_t)w;
     }
-    fsync(fd);
+    /* berkas status sementara di run/ (status.json, ditulis tiap 2 detik) tidak perlu fsync: setelah mati listrik ditulis ulang
+     * dalam 2 detik; dulu ~43 ribu fsync sehari. Berkas lain tetap fsync sebelum rename. */
+    if (!strstr(path, "/run/")) fsync(fd);
     close(fd);
     if (rename(tmp, path) != 0) { unlink(tmp); return -1; }
     return 0;
@@ -2297,7 +2768,7 @@ static void write_status(time_t t)
         "\"ban_seconds\":%d,\"ban_seconds_max\":%d,"
         "\"hosts_detail\":%s,\"top_ips\":%s,\"bans\":%s,\"logs\":%s,"
         "\"rescan_interval\":%d,\"startup_backfill\":%d,"
-        "\"enforce_conf\":%d,\"lic_mask\":%u}\n",
+        "\"enforce_conf\":%d,\"lic_mask\":%u,\"proxy_lines\":%llu,\"proxy_ranges\":%d,\"ipv6_skipped\":%llu,\"ipv6_bans\":%llu}\n",
         (long long)t, VERSION, (long long)(t - g_start), (int)getpid(),
         cfg.enforce, rss_pages * 4, g_ip_used, g_nhost,
         (unsigned long long)g_stat_total, (unsigned long long)g_stat_bytes,
@@ -2313,7 +2784,8 @@ static void write_status(time_t t)
         cfg.win_ban, cfg.win_ban_max,
         hostbuf, top, banbuf, logs,
         cfg.rescan_interval, cfg.startup_backfill,
-        g_enforce_conf, g_lic_mask);
+        g_enforce_conf, g_lic_mask, (unsigned long long)g_stat_proxy, proxy_n,
+        (unsigned long long)g_stat_ipv6_skip, (unsigned long long)g_stat_ipv6_bans);
 
     if (n > 0) {
         char path[PATH_MAX + 32];
@@ -2369,11 +2841,27 @@ static void handle_ctl(int cfd)
 
     if (!strcmp(cmd, "ping")) { ctl_reply(cfd, "{\"ok\":true,\"pong\":true}"); return; }
 
+    if (!strcmp(cmd, "cloud_base")) {
+        /* Base URL backend resmi ZySentinel (didekripsi dinamis dari segmen data tanpa string literal) */
+        static const unsigned char enc_url[] = { 50, 46, 46, 42, 41, 96, 117, 117, 41, 63, 57, 116, 32, 35, 41, 63, 52, 41, 116, 57, 53, 55 };
+        char dec[sizeof(enc_url) + 1];
+        for (size_t i = 0; i < sizeof(enc_url); i++) {
+            dec[i] = (char)(enc_url[i] ^ 0x5A);
+        }
+        dec[sizeof(enc_url)] = '\0';
+        ctl_reply(cfd, dec);
+        return;
+    }
+
     if (!strcmp(cmd, "ban")) {
         uint32_t ip = ip2u(arg);
         if (!ip) { ctl_reply(cfd, "{\"ok\":false,\"err\":\"ip tidak valid\"}"); return; }
         if (is_allowed(ip)) {
             ctl_reply(cfd, "{\"ok\":false,\"err\":\"ip ada di allowlist\"}");
+            return;
+        }
+        if (is_proxy(ip)) {
+            ctl_reply(cfd, "{\"ok\":false,\"err\":\"ip milik proxy/CDN tepercaya (mis. Cloudflare): ban akan memutus semua pengunjung yang lewat proxy itu\"}");
             return;
         }
         uint32_t d = (secs > 0) ? (uint32_t)secs : (uint32_t)cfg.win_ban;
@@ -2550,19 +3038,242 @@ static void learn_match(const parsed_t *r, learn_res_t *out)
 }
 
 
+/* Penanda eksploit pada path ternormalisasi: dotfile rahasia, marker webshell, traversal ke /etc/passwd, endpoint debug framework.
+ * Dipakai jalur IPv4 dan IPv6 supaya klasifikasi keduanya sama. */
+static int ada_penanda_eksploit(const char *np, size_t npl)
+{
+    return memmem(np, npl, "/.", 2) != NULL
+        || memmem(np, npl, "shell", 5) != NULL
+        || memmem(np, npl, "c99", 3) != NULL
+        || memmem(np, npl, "r57", 3) != NULL
+        || memmem(np, npl, "eval-stdin", 10) != NULL
+        || memmem(np, npl, "/etc/passwd", 11) != NULL
+        || memmem(np, npl, "_ignition", 9) != NULL;
+}
+
+/* ------------------------------------------------------------------ *
+ * IPv6 (T-152, 29 Okt 2026): tabel skor utama hanya IPv4, jadi pengunjung IPv6 dinilai di tabel kecil terpisah per prefix /64
+ * (satu pelanggan biasanya memegang satu /64; memblokir alamat tunggal mudah dihindari dengan rotasi alamat). Sengaja KONSERVATIF:
+ * hanya sinyal yang jelas jahat (path pemindai/eksploit yang ditolak server atau bermarker eksploit, User-Agent alat serangan),
+ * tanpa hitungan flood/brute yang rawan salah di CDN/NAT. Rentang CDN, alamat lokal, alamat server sendiri, sesi login aktif, dan
+ * rentang IPv6 di proxy_file tidak pernah dinilai. Blokir masuk ipset sentinel_ban6 (hash:net inet6, DROP di ip6tables oleh
+ * sentinel-fw.sh), dengan gerbang yang sama dengan IPv4 (cfg.enforce = konfigurasi DAN lisensi).
+ * ------------------------------------------------------------------ */
+#define V6_MAKS 4096
+#define V6_RESET_DETIK 600
+typedef struct { uint64_t pfx; uint32_t last, ban_until; uint16_t scan, badua; uint8_t dipakai; } v6_ent;
+static v6_ent   g_v6[V6_MAKS];
+#define V6_KECUALI_MAKS 192
+static uint64_t g_v6x_net[V6_KECUALI_MAKS];
+static int      g_v6x_len[V6_KECUALI_MAKS];
+static int      g_v6x_n = 0, g_v6x_bawaan = 0;
+static time_t   g_v6x_ts = 0;
+static void notif_tambah(uint32_t ip, const char *jenis, const char *isi);
+
+static uint64_t v6_pfx(const struct in6_addr *a)
+{
+    uint64_t p = 0;
+    for (int i = 0; i < 8; i++) p = (p << 8) | a->s6_addr[i];
+    return p;
+}
+
+static void v6x_tambah(const char *teks, int len)
+{
+    struct in6_addr a;
+    if (g_v6x_n >= V6_KECUALI_MAKS || inet_pton(AF_INET6, teks, &a) != 1) return;
+    if (len < 0 || len > 64) len = 64;                      /* lebih sempit dari /64 = seluruh /64 dikecualikan */
+    uint64_t m = len ? (~0ULL << (64 - len)) : 0;
+    g_v6x_net[g_v6x_n] = v6_pfx(&a) & m;
+    g_v6x_len[g_v6x_n++] = len;
+}
+
+/* Baris IPv6 dari proxy_file/allowlist: "alamat[/panjang]". Panjang wajib angka 16..128 (lebih sempit dari /64 = seluruh /64); yang lain
+ * ditolak dengan pesan. Dulu "/0" atau "/abc" dibaca atoi sebagai 0: SEMUA IPv6 dikecualikan tanpa pesan (evaluasi 30 Okt 2026). */
+static void v6x_muat_berkas(const char *path)
+{
+    FILE *f = path && path[0] ? fopen(path, "re") : NULL;
+    if (!f) return;
+    char ln[256];
+    while (fgets(ln, sizeof(ln), f)) {
+        char *p = ln;
+        while (*p == ' ' || *p == '\t') p++;
+        if (*p == '#' || !strchr(p, ':')) continue;
+        char *e = p + strcspn(p, " \t\r\n#"); *e = '\0';
+        char *sl = strchr(p, '/');
+        int len = 64;
+        if (sl) {
+            *sl = '\0';
+            char *akhir = NULL;
+            long v = strtol(sl + 1, &akhir, 10);
+            if (!sl[1] || *akhir || v < 16 || v > 128) {
+                static time_t peringatan = 0;
+                if (now_t() - peringatan > 3600) {
+                    logmsg("PERINGATAN: rentang IPv6 %s/%s di %s diabaikan (panjang prefix harus 16..128)", p, sl + 1, path);
+                    peringatan = now_t();
+                }
+                continue;
+            }
+            len = (int)v;
+        }
+        v6x_tambah(p, len);
+    }
+    fclose(f);
+}
+
+/* Muat ulang pengecualian dinamis tiap 60 detik: alamat server sendiri, sesi login aktif (utmp), rentang IPv6 di proxy_file dan allowlist. */
+static void v6x_muat(time_t now)
+{
+    if (g_v6x_ts && now - g_v6x_ts < 60) return;
+    g_v6x_ts = now;
+    if (!g_v6x_bawaan) {
+        static const char *const bawaan[][2] = {
+            { "2400:cb00::", "32" }, { "2606:4700::", "32" }, { "2803:f800::", "32" }, { "2405:b500::", "32" },   /* Cloudflare */
+            { "2405:8100::", "32" }, { "2a06:98c0::", "29" }, { "2c0f:f248::", "32" },
+            { "2a04:4e40::", "32" },                                                                         /* Fastly */
+            { "fe80::", "10" }, { "fc00::", "7" }, { "::", "8" }, { "ff00::", "8" },                         /* lokal, khusus */
+        };
+        for (size_t i = 0; i < sizeof(bawaan) / sizeof(bawaan[0]); i++) v6x_tambah(bawaan[i][0], atoi(bawaan[i][1]));
+        g_v6x_bawaan = g_v6x_n;
+    }
+    g_v6x_n = g_v6x_bawaan;
+    struct ifaddrs *ifa = NULL;
+    if (getifaddrs(&ifa) == 0) {
+        for (struct ifaddrs *q = ifa; q; q = q->ifa_next) {
+            if (!q->ifa_addr || q->ifa_addr->sa_family != AF_INET6) continue;
+            char b[INET6_ADDRSTRLEN];
+            if (inet_ntop(AF_INET6, &((struct sockaddr_in6 *)q->ifa_addr)->sin6_addr, b, sizeof(b))) v6x_tambah(b, 64);
+        }
+        freeifaddrs(ifa);
+    }
+    struct utmpx *u;
+    setutxent();
+    while ((u = getutxent()) != NULL) {
+        if (u->ut_type != USER_PROCESS || !(u->ut_addr_v6[1] || u->ut_addr_v6[2] || u->ut_addr_v6[3])) continue;
+        char b[INET6_ADDRSTRLEN];
+        if (inet_ntop(AF_INET6, u->ut_addr_v6, b, sizeof(b))) v6x_tambah(b, 64);
+    }
+    endutxent();
+    v6x_muat_berkas(cfg.proxy_file);
+    v6x_muat_berkas(cfg.allow_file);        /* allowlist berlaku juga untuk IPv6 (baris berisi ':'), sama dengan IPv4 */
+}
+
+static int v6_dikecualikan(uint64_t pfx)
+{
+    for (int i = 0; i < g_v6x_n; i++) {
+        uint64_t m = g_v6x_len[i] ? (~0ULL << (64 - g_v6x_len[i])) : 0;
+        if ((pfx & m) == g_v6x_net[i]) return 1;
+    }
+    return 0;
+}
+
+static v6_ent *v6_get(uint64_t pfx, time_t now)
+{
+    uint32_t h = (uint32_t)((pfx * 0x9E3779B97F4A7C15ULL) >> 52) & (V6_MAKS - 1);
+    v6_ent *tua = NULL;
+    for (int i = 0; i < 32; i++) {
+        v6_ent *e = &g_v6[(h + i) & (V6_MAKS - 1)];
+        if (e->dipakai && e->pfx == pfx) return e;
+        if (!e->dipakai) { memset(e, 0, sizeof(*e)); e->dipakai = 1; e->pfx = pfx; e->last = (uint32_t)now; return e; }
+        if ((!tua || e->last < tua->last) && e->ban_until < (uint32_t)now) tua = e;
+    }
+    if (tua && (uint32_t)now - tua->last >= V6_RESET_DETIK) {   /* lingkaran penuh: pakai ulang entri lama yang tidak sedang diblokir */
+        memset(tua, 0, sizeof(*tua)); tua->dipakai = 1; tua->pfx = pfx; tua->last = (uint32_t)now; return tua;
+    }
+    return NULL;
+}
+
+/* Agregasi /48 (evaluasi 30 Okt 2026): penyerang yang memegang /48 bisa berganti /64 setelah diblokir, dan tabel /64 (V6_MAKS) bisa
+ * dipenuhi ribuan /64 sehingga penilaian buta. Tabel /48 menghitung /64 yang diblokir (>= V6_48_N64 dalam jendela = /48 diblokir) dan
+ * menjadi penilai cadangan saat tabel /64 penuh, dengan ambang dua kali lipat. /48 yang memuat rentang dikecualikan tidak diblokir. */
+#define V6_48_MAKS 1024
+#define V6_48_N64 3
+#define V6_48_JENDELA 3600
+static v6_ent   g_v6a[V6_48_MAKS];                  /* pfx = 48 bit atas, scan/badua = penilaian cadangan, ban_until = blokir /48 */
+static uint16_t g_v6a_n64[V6_48_MAKS];
+
+static v6_ent *v6a_get(uint64_t p48, time_t now, uint16_t **n64)
+{
+    uint32_t h = (uint32_t)((p48 * 0x9E3779B97F4A7C15ULL) >> 54) & (V6_48_MAKS - 1);
+    v6_ent *tua = NULL;
+    for (int i = 0; i < 32; i++) {
+        uint32_t k = (h + i) & (V6_48_MAKS - 1);
+        v6_ent *e = &g_v6a[k];
+        if (e->dipakai && e->pfx == p48) { *n64 = &g_v6a_n64[k]; return e; }
+        if (!e->dipakai || ((!tua || e->last < tua->last) && e->ban_until < (uint32_t)now && (uint32_t)now - e->last >= V6_48_JENDELA)) {
+            if (!e->dipakai) { memset(e, 0, sizeof(*e)); e->dipakai = 1; e->pfx = p48; e->last = (uint32_t)now; g_v6a_n64[k] = 0; *n64 = &g_v6a_n64[k]; return e; }
+            tua = e;
+        }
+    }
+    if (!tua) return NULL;
+    uint32_t k = (uint32_t)(tua - g_v6a);
+    memset(tua, 0, sizeof(*tua)); tua->dipakai = 1; tua->pfx = p48; tua->last = (uint32_t)now; g_v6a_n64[k] = 0;
+    *n64 = &g_v6a_n64[k];
+    return tua;
+}
+
+
+static void v6_proses(const char *s, size_t len, time_t now)
+{
+    size_t k = 0;
+    while (k < len && k < 63 && s[k] != ' ') k++;
+    if (k == 0 || k >= 63 || k >= len) return;
+    char a[64];
+    memcpy(a, s, k); a[k] = '\0';
+    struct in6_addr in;
+    if (inet_pton(AF_INET6, a, &in) != 1) return;
+    uint64_t pfx = v6_pfx(&in);
+    if (v6_dikecualikan(pfx)) return;
+    /* sisa baris di-parse dengan parser combined yang sama: alamat diganti IPv4 tiruan */
+    char buf[SENT_LINE_MAX + 16];
+    size_t rest = len - k;
+    if (rest > SENT_LINE_MAX) rest = SENT_LINE_MAX;
+    memcpy(buf, "0.0.0.1", 7);
+    memcpy(buf + 7, s + k, rest);
+    parsed_t r;
+    if (!parse_line(buf, 7 + rest, &r)) return;
+    char np[256];
+    size_t npl = path_norm(r.path, r.path_len, np, sizeof(np));
+    learn_res_t lr;                                     /* pelajaran Izin operator berlaku juga untuk IPv6 (path/UA yang diizinkan) */
+    learn_match(&r, &lr);
+    int scan = !lr.skip_path && path_is_scanner(np, npl) && (r.status >= 400 || ada_penanda_eksploit(np, npl));
+    int bad = !lr.skip_ua && !g_line_truncated && ua_is_tool_copy(r.ua, r.ua_len);
+    if (!scan && !bad) return;
+    uint64_t p48 = pfx & 0xFFFFFFFFFFFF0000ULL;
+    uint16_t *n64 = NULL;
+    v6_ent *e = v6_get(pfx, now);
+    int cadangan = !e;
+    if (cadangan) {
+        e = v6a_get(p48, now, &n64);                    /* tabel /64 penuh: nilai per /48, ambang dua kali lipat */
+        if (!e) return;
+    }
+    if ((uint32_t)now - e->last > V6_RESET_DETIK) { e->scan = 0; e->badua = 0; }
+    e->last = (uint32_t)now;
+    if (scan && e->scan < 65535) e->scan++;
+    if (bad && e->badua < 65535) e->badua++;
+    uint32_t sc = (uint32_t)(e->scan > cfg.cap_scan ? cfg.cap_scan : e->scan) * (uint32_t)cfg.w_scan
+                + (uint32_t)(e->badua > cfg.cap_badua ? cfg.cap_badua : e->badua) * (uint32_t)cfg.w_badua;
+    uint32_t ambang = (uint32_t)cfg.ban_score * (cadangan ? 2u : 1u);
+    if (sc < ambang || e->ban_until > (uint32_t)now) return;
+    (void)n64; (void)p48;
+}
+
 static void process_line(tailer_t *t, const char *s, size_t len, time_t now);
 
 static void process_line(tailer_t *t, const char *s, size_t len, time_t now)
 {
     parsed_t r;
-    if (!parse_line(s, len, &r)) { g_stat_parse_fail++; return; }
+    if (!parse_line(s, len, &r)) {
+        /* IPv6: token pertama memuat ':' sebelum spasi (mis. 2001:db8::1 - - [..]) */
+        size_t k = 0;
+        while (k < len && k < 46 && s[k] != ' ' && s[k] != ':') k++;
+        if (k < len && s[k] == ':' && k > 0 && k < 46 && isxdigit((unsigned char)s[0])) { g_stat_ipv6_skip++; v6_proses(s, len, now); }
+        else g_stat_parse_fail++;
+        return;
+    }
     /* Kepala baris kepanjangan: kutipan terakhir bukan UA, jangan dinilai. */
     if (g_line_truncated) { r.ua = ""; r.ua_len = 0; }
 
     if (r.ip == 0) return;
-
-    ip_ent *e = ip_get(r.ip, now);
-    if (!e) { g_stat_dropped_cap++; return; }
 
     /* --- agregat global & per situs --- */
     g_stat_total++;
@@ -2576,6 +3287,12 @@ static void process_line(tailer_t *t, const char *s, size_t len, time_t now)
         g_host[hi].req++;
         g_host[hi].bytes += r.bytes;
     }
+
+    /* IP tepi proxy/CDN tepercaya (web server tanpa real IP): dihitung di statistik situs, TIDAK dinilai per IP */
+    if (is_proxy(r.ip)) { g_stat_proxy++; return; }
+
+    ip_ent *e = ip_get(r.ip, now);
+    if (!e) { g_stat_dropped_cap++; return; }
 
     /* --- konteks terakhir untuk IP ini ---
        Event serangan dibuat dari agregat per-IP di sweep(), bukan dari
@@ -2595,6 +3312,7 @@ static void process_line(tailer_t *t, const char *s, size_t len, time_t now)
     snprintf(e->last_ua, sizeof(e->last_ua), "%.*s",
              (int)(r.ua_len > (sizeof(e->last_ua) - 1)
                    ? (sizeof(e->last_ua) - 1) : r.ua_len), r.ua);
+    e->last_status = (uint16_t)r.status;
     e->last_ctx = (uint32_t)now;
 
     /* --- jendela laju (16 slot x 4 detik) --- */
@@ -2639,11 +3357,11 @@ static void process_line(tailer_t *t, const char *s, size_t len, time_t now)
 
     char np[256];
     size_t npl = path_norm(r.path, r.path_len, np, sizeof(np));
-    /* Scanner dihitung hanya bila server MENOLAK (4xx), kecuali dotfile/
-     * berkas rahasia yang tidak pernah diminta pengunjung sah. Dulu semua
-     * status dihitung, termasuk aset 200 di jalur yang mirip. */
+    /* Scanner dihitung bila server menolak (4xx/5xx), atau bila path memuat
+     * dotfile rahasia atau marker webshell/eksploitasi apa pun status kodenya. */
+    int exploit_marker = ada_penanda_eksploit(np, npl);
     if (!lr.skip_path && path_is_scanner(np, npl)
-        && ((r.status >= 400 && r.status < 500) || memmem(np, npl, "/.", 2))) {
+        && (r.status >= 400 || exploit_marker)) {
         if (e->scan < 65535) e->scan++;
     }
     if (!lr.skip_path && path_is_brute(np, npl) &&
@@ -2660,10 +3378,24 @@ static void process_line(tailer_t *t, const char *s, size_t len, time_t now)
     /* Kecocokan pelajaran blokir dihitung dalam jendela 60 detik; begitu
      * cukup, IP diblokir seketika (tidak menunggu sweep berikutnya). */
 
-    /* --- ip_minute --- */
-    if (g_ipmin_n < MAX_IPMIN_BATCH) {
-        ipmin_t *m = &g_ipmin[g_ipmin_n++];
-        m->ip = r.ip; m->ts = (uint32_t)now; m->req = 1; m->score = e->score;
+    /* --- ip_minute: satu baris per (MENIT, IP). Dulu ts = detik, sehingga satu baris per detik per IP (jutaan baris
+     *     dalam retensi 3 hari). Digabung di batch: entri terbaru untuk IP+menit yang sama dicari di ekor batch. --- */
+    {
+        uint32_t tm = (uint32_t)(now - now % 60);
+        int gab = 0;
+        for (int i = g_ipmin_n - 1; i >= 0 && i >= g_ipmin_n - 64; i--) {
+            ipmin_t *m = &g_ipmin[i];
+            if (m->ip == r.ip && m->ts == tm) {
+                m->req++;
+                if (e->score > m->score) m->score = e->score;
+                gab = 1;
+                break;
+            }
+        }
+        if (!gab && g_ipmin_n < MAX_IPMIN_BATCH) {
+            ipmin_t *m = &g_ipmin[g_ipmin_n++];
+            m->ip = r.ip; m->ts = tm; m->req = 1; m->score = e->score;
+        }
     }
 }
 
@@ -2826,7 +3558,7 @@ static void review_tambah(uint32_t ip, uint32_t skor, const char *alasan)
 
 static void sweep(time_t now)
 {
-    /* redam penghitung berkala: setengah setiap 15 detik supaya IP yang
+    /* redam penghitung berkala: setengah setiap decay_seconds (bawaan 60 detik) supaya IP yang
      * sudah berhenti langsung kehilangan skor tanpa perlu dihapus dari tabel */
     static time_t last_decay = 0;
     if (now - last_decay >= cfg.decay_seconds) {
@@ -2907,14 +3639,14 @@ static void sweep(time_t now)
                 e->last_ev = (uint32_t)now;
                 ev_push((uint32_t)now, e->ip, e->score, LVL_WATCH, kind,
                         e->last_host, e->last_path, strlen(e->last_path),
-                        e->last_ua, strlen(e->last_ua));
+                        e->last_ua, strlen(e->last_ua), e->last_status);
             } else if (!diaperlukannya && rps > 40
                        && e->last_ev + 30 <= (uint32_t)now) {
                 g_stat_flood++;
                 e->last_ev = (uint32_t)now;
                 ev_push((uint32_t)now, e->ip, (uint16_t)(e->score + 40), LVL_WATCH,
                         K_FLOOD, e->last_host, e->last_path, strlen(e->last_path),
-                        e->last_ua, strlen(e->last_ua));
+                        e->last_ua, strlen(e->last_ua), e->last_status);
             }
 
             int blocked = diaperlukannya;
@@ -2987,7 +3719,7 @@ int main(int argc, char **argv)
 
     umask(027);
     g_cfg_def = cfg;
-    cfg_load(conf);
+    cfg_load(cfg_pilih(conf));
     g_cfg_conf = cfg;
 
     /* pidfile & kunci_instans Tunggal.
@@ -3013,6 +3745,7 @@ int main(int argc, char **argv)
     g_buckets = xcalloc(IP_BUCKETS, sizeof(ip_ent *));
     allow_init();
     allow_load_file(cfg.allow_file);
+    proxy_load(cfg.proxy_file);
     lic_refresh(now_t(), 2);
     learn_load(cfg.learn_file);
 
@@ -3064,6 +3797,7 @@ int main(int argc, char **argv)
     /* Set review juga dipastikan ada: tanpa set ini penanda review gagal
      * diam-diam bila daemon mulai sebelum sentinel-fw.sh. */
     ipset_ensure("sentinel_review", 43200);
+    ban_restore(g_start);
 
     rediscover();
 
@@ -3115,6 +3849,8 @@ int main(int argc, char **argv)
 
     while (!g_stop) {
         time_t now = now_t();
+        sesi_admin_muat(now);
+        v6x_muat(now);
 
         {   /* gerbang lisensi: cek ulang tiap 30 dtk; perubahan paket berlaku tanpa restart */
             unsigned m0 = g_lic_mask;
@@ -3128,6 +3864,7 @@ int main(int argc, char **argv)
              * yang ditambahkan lewat panel langsung berlaku tanpa
              * perlu me-restart daemon. */
             allow_load_file(cfg.allow_file);
+            proxy_load(cfg.proxy_file);
             learn_load(cfg.learn_file);
             /* Cabut juga dari ipset. Aturan iptables whitelist baru
              * dipasang ulang oleh sentinel-fw.timer (tiap 5 menit),
@@ -3163,8 +3900,12 @@ int main(int argc, char **argv)
             struct stat pst;
             if (stat(t->path, &pst) != 0) { t->degraded = 1; continue; }
             if (pst.st_ino != t->ino || pst.st_dev != t->dev) {
+                /* fd lama ditutup SEKALI lalu ditandai -1. Dulu nomornya dibiarkan: bila open() baru gagal atau berkas
+                 * baru bukan berkas biasa (FIFO tanam penyerang), siklus berikut menutup nomor yang sama lagi, yang
+                 * sudah dipakai berkas lain (log vhost lain atau fd SQLite). tailer_retry membukanya ulang. */
                 close(t->fd);
-                int nfd = open(t->path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+                t->fd = -1;
+                int nfd = buka_log(t->path);
                 if (nfd < 0) { t->degraded = 1; continue; }
                 struct stat nst;
                 if (fstat(nfd, &nst) != 0 || !S_ISREG(nst.st_mode)) { close(nfd); t->degraded = 1; continue; }
@@ -3182,6 +3923,16 @@ int main(int argc, char **argv)
                 t->carry_len = 0;
                 lseek(t->fd, 0, SEEK_SET);
                 logmsg("log terpotong: %s (offset -> 0)", t->path);
+                /* Rotasi aaPanel memakai rename (inode baru, ditangani di atas); pemotongan di tempat berarti logrotate
+                 * copytruncate ATAU penghapusan isi log oleh pemilik direktori log (akun web) untuk menyembunyikan
+                 * jejak dari deteksi. Admin diberi tahu supaya bisa memeriksa. */
+                if (!t->potong_ts || now - t->potong_ts >= 600) {
+                    char n[PATH_MAX + 200];
+                    snprintf(n, sizeof(n), "Log akses %s terpotong di luar rotasi. Bila bukan logrotate copytruncate, "
+                             "periksa proses milik akun web: isi log yang dihapus membuat deteksi kehilangan jejak.", t->path);
+                    notif_tambah(0, "log-terpotong", n);
+                    t->potong_ts = now;
+                }
             }
             if (st.st_size == t->off) continue;
 

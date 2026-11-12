@@ -147,12 +147,15 @@ learn_hits_path = 2
 learn_hits_ua   = 3
 # hanya user-agent yang dapat dipelajari
 
-# Direktori yang dipindai rekursif untuk mencari directive access_log.
+# Direktori yang dipindai rekursif untuk mencari directive access_log (nginx), CustomLog (Apache), dan accesslog
+# (OpenLiteSpeed). Direktori yang tidak ada dilewati.
 conf_dir = /www/server/panel/vhost/nginx
 conf_dir = /www/server/nginx/conf
+conf_dir = /www/server/panel/vhost/apache
+conf_dir = /www/server/panel/vhost/openlitespeed
 
-# Direktori log yang dipindai sebagai jaring pengaman (berkas *.log yang
-# memverifikasi dirinya sebagai access log). Tidak perlu diubah saat
+# Direktori log yang dipindai sebagai jaring pengaman (berkas *.log, *-access_log Apache, *.access_log OpenLiteSpeed
+# yang memverifikasi dirinya sebagai access log). Tidak perlu diubah saat
 # menambah/menghapus vhost.
 log_dir = /www/wwwlogs
 
@@ -173,3 +176,10 @@ notify_token   = ""
 # memscan_interval = 30
 # memscan_kill     = tinggi
 # memscan_ignore   =
+
+# ---- Egress Guard (sentinel-fw.sh, paket Pro): batas koneksi KELUAR akun web (www), IPv4 dan IPv6
+# Bawaan: DNS hanya ke resolver di /etc/resolv.conf, TCP 80/443 dan email 465/587; tujuan di threat intel ditolak.
+# egress_allow_git   = 1 membuka SSH/Git keluar (22, 2222, 9418) untuk deploy dari PHP; bawaan 0 (webshell tidak bisa SSH ke server lain)
+# egress_extra_ports = port TCP tambahan dipisah koma (maks 14), mis. 3306 untuk database jarak jauh
+# egress_allow_git   = 0
+# egress_extra_ports =

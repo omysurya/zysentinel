@@ -4,6 +4,7 @@ Documentation=https://github.com/omysurya/zysentinel
 # Aturan firewall harus ada lebih dulu sebelum
 # permintaan masuk supaya tidak ada celah tanpa perlindungan.
 After=network-online.target
+Wants=network-online.target
 Before=nginx.service
 
 [Service]

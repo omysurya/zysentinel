@@ -1,4 +1,9 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 PT. StudioNet Indonesia Jaya (ZySens).
+# Interpreter ZySentinel (dipilih installer, lihat etc/python): bin/py hanya berisi symlink python3, mis. ke python3.9 di EL8.
+# Tanpa bin/py (instalasi lama) perilaku tidak berubah: python3 dari PATH sistem.
+PATH="/www/server/sentinel/bin/py:$PATH"
 # ============================================================
 # sentinel-av.sh -- pengelola Antivirus (ClamAV) untuk ZySentinel
 #
@@ -34,7 +39,9 @@ Q_FALLBACK_META=$AV_DIR/quarantine/meta
 mkdir -p "$BASE_DIR" "$LAST_DIR" "$Q_FALLBACK_FILES" "$Q_FALLBACK_META" 2>/dev/null
 
 # ---- konfigurasi & direktori Rkhunter ----
-RKHUNTER_BIN=/usr/bin/rkhunter
+RKHUNTER_BIN="${SENTINEL_RKHUNTER_BIN:-/usr/bin/rkhunter}"
+# konfigurasi rkhunter dibaca berurutan seperti rkhunter sendiri (nilai terakhir menang); SENTINEL_RKHUNTER_CONF hanya untuk uji
+RKHUNTER_CONF="${SENTINEL_RKHUNTER_CONF:-/etc/rkhunter.conf}"
 RKHUNTER_DB=/www/server/sentinel/db/rkhunter
 RKHUNTER_TMP=/www/server/sentinel/tmp/rkhunter
 RKHUNTER_LOG=/www/server/sentinel/log/rkhunter.log
@@ -224,11 +231,62 @@ cv_quarantine_fallback() {
   return 0
 }
 
+# pulihkan_karantina_aman <berkas-karantina> <path-asal> <uid> <gid> <mode>: kebalikan pindah_karantina_aman. Folder tujuan ditelusuri
+# komponen demi komponen lewat file descriptor (O_NOFOLLOW|O_DIRECTORY) dari "/", folder yang belum ada dibuat (mkdir relatif fd), dan
+# berkas ditulis O_CREAT|O_EXCL|O_NOFOLLOW relatif fd folder itu. Tidak ada jarak antara pemeriksaan dan pemindahan yang bisa dipakai
+# akun web untuk menukar komponen path menjadi symlink ke direktori sistem (restore berjalan sebagai root). Kode keluar 1 = ditolak.
+pulihkan_karantina_aman() {
+  local py="/www/server/panel/pyenv/bin/python3"
+  [ -x "$py" ] || py="python3"
+  "$py" -I - "$@" <<'PYR'
+import os, stat, sys
+qpath, orig, uid, gid, mode = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5]
+if not orig.startswith("/") or "\x00" in orig:
+    sys.exit(1)
+bagian = [x for x in orig.split("/") if x]
+if len(bagian) < 2 or ".." in bagian or "." in bagian:
+    sys.exit(1)
+try:
+    uid, gid, mode = int(uid or 0), int(gid or 0), int(mode or "644", 8) & 0o7777 & ~0o6000   # tanpa setuid/setgid
+except ValueError:
+    sys.exit(1)
+qfd = os.open(qpath, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
+try:
+    if not stat.S_ISREG(os.fstat(qfd).st_mode):
+        sys.exit(1)
+    for k in bagian[:-1]:
+        try:
+            nfd = os.open(k, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+        except FileNotFoundError:
+            os.mkdir(k, 0o755, dir_fd=fd)
+            nfd = os.open(k, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+        os.close(fd); fd = nfd
+    ofd = os.open(bagian[-1], os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=fd)
+    with os.fdopen(ofd, "wb") as o:
+        while True:
+            b = os.read(qfd, 1 << 20)
+            if not b:
+                break
+            o.write(b)
+        o.flush(); os.fsync(o.fileno())
+        os.fchown(o.fileno(), uid, gid)
+        os.fchmod(o.fileno(), mode)
+    os.unlink(qpath)
+    print("RESTORED: " + orig)
+except OSError:
+    sys.exit(1)
+finally:
+    os.close(fd); os.close(qfd)
+PYR
+}
+
 cv_restore_fallback() {
   local meta="$1"
   [ -f "$meta" ] || { err "metadata tidak ditemukan: $meta"; return 1; }
   local orig qpath uid gid mode
   orig=$(grep '^original_path=' "$meta" | cut -d= -f2-)
+  orig="$(printf '%b' "$orig")"
   qpath=$(grep '^quarantine_path=' "$meta" | cut -d= -f2-)
   uid=$(grep '^uid=' "$meta" | cut -d= -f2-)
   gid=$(grep '^gid=' "$meta" | cut -d= -f2-)
@@ -243,17 +301,25 @@ cv_restore_fallback() {
   if [ "$(realpath -m "$odir")" != "$(realpath -sm "$odir")" ]; then
     err "path asal memuat symlink: $odir"; return 1
   fi
+  local cur=""
+  local p
+  local IFS='/'
+  for p in $odir; do
+    [ -z "$p" ] && continue
+    cur="$cur/$p"
+    if [ -L "$cur" ]; then
+      err "path asal memuat symlink: $cur"; return 1
+    fi
+  done
+  unset IFS
   case "$(realpath -m "$odir")/" in
-    /www/wwwroot/*|/home/*|/var/www/*|/srv/*|/opt/*|/tmp/*) ;;
+    /www/wwwroot/*|/home/*|/var/www/*|/srv/*|/opt/*|/usr/share/nginx/*|/usr/local/lsws/*) ;;   # /tmp tidak: folder bersama yang bisa disiapkan akun mana pun
     *) err "tujuan di luar area situs: $odir"; return 1 ;;
   esac
   [ -e "$orig" ] || [ -L "$orig" ] && { err "berkas tujuan sudah ada, tidak ditimpa: $orig"; return 1; }
-  mkdir -p "$odir" 2>/dev/null
-  mv -n "$qpath" "$orig" || return 1
-  chown -h "${uid:-0}:${gid:-0}" "$orig" 2>/dev/null
-  chmod "${mode:-644}" "$orig" 2>/dev/null
+  # Pemeriksaan di atas hanya pesan galat yang jelas; perlindungan sebenarnya ada di pulihkan_karantina_aman (fd, tanpa jarak TOCTOU).
+  pulihkan_karantina_aman "$qpath" "$orig" "$uid" "$gid" "$mode" || { err "restore ditolak: path tujuan berubah atau tidak aman: $orig"; return 1; }
   rm -f "$meta"
-  echo "RESTORED: $orig"
   return 0
 }
 
@@ -329,9 +395,44 @@ do_q_purge() {
   say "$n entri karantina dihapus permanen"
 }
 
+# Retensi karantina AV: entri lebih tua dari QUARANTINE_RETENTION_DAYS (bawaan 90 hari; 0 = simpan selamanya) dihapus permanen
+# bersama metadatanya, supaya disk tidak tumbuh tanpa batas. Hanya karantina pemindaian AV (q_meta); karantina Upload Protection
+# per vhost dikelola layanannya sendiri. Dipanggil scan-all (timer harian).
+q_retensi() {
+  local hari="${QUARANTINE_RETENTION_DAYS:-90}" dir f qpath n=0
+  case "$hari" in ''|*[!0-9]*) hari=90 ;; esac
+  [ "$hari" -gt 0 ] || return 0
+  dir="$(q_meta)"
+  [ -d "$dir" ] || return 0
+  while IFS= read -r -d '' f; do
+    qpath="$(sed -n 's/^quarantine_path=//p' "$f" | tail -1)"
+    q_hapus_berkas "$qpath"
+    rm -f "$f" 2>/dev/null
+    n=$((n+1))
+  done < <(find "$dir" -maxdepth 1 -type f -name '*.meta' -mtime +"$hari" -print0 2>/dev/null)
+  [ "$n" -gt 0 ] && say "retensi karantina: $n entri lebih tua dari $hari hari dihapus"
+  return 0
+}
+
 # ==================================================================
 # SCAN per vhost
 # ==================================================================
+# Daftar situs "label<TAB>folder" menurut lingkungan yang DIDETEKSI (adapters/env.py), bukan tebakan /www/wwwroot:
+#   aaPanel                      : folder /www/wwwroot/<situs> (perilaku lama)
+#   standalone / DirectAdmin / cPanel / CyberPanel / ...: situs dari konfigurasi web server yang aktif (docroot nyata)
+daftar_situs() {
+  local d py=python3 here tipe
+  [ -x /www/server/panel/pyenv/bin/python3 ] && py=/www/server/panel/pyenv/bin/python3
+  here="$(dirname "$(readlink -f "$0")")"
+  tipe="$("$py" "$here/adapters/env.py" panel 2>/dev/null)"
+  if [ "$tipe" = aapanel ] || { [ -z "$tipe" ] && [ -d /www/wwwroot ]; }; then
+    for d in /www/wwwroot/*; do [ -d "$d" ] && printf '%s\t%s\n' "$(basename "$d")" "$d"; done
+    return 0
+  fi
+  "$py" "$here/adapters/env.py" sites --tsv 2>/dev/null
+  return 0
+}
+
 scan_satu() {
   local path="$1" label="${2:-$(basename "$path")}"
   [ -d "$path" ] || { err "path bukan direktori: $path"; return 1; }
@@ -365,7 +466,7 @@ scan_satu() {
   printf '{"label":"%s","path":"%s","status":"running","total":%s,"found":0,"mulai":%s}\n' \
     "$label" "$path" "${total:-0}" "$t0" > "$out"
 
-  local found=0 rc=0
+  local found=0 quar=0 rc=0
   if clamd_ada; then
     nice -n 10 ionice -c2 -n7 clamdscan --no-summary --infected -f "$flist" \
       > "$tmp" 2>/dev/null || rc=$?
@@ -387,7 +488,8 @@ scan_satu() {
           found=$((found+1))
           if [ "${ACTION_ON_DETECT:-quarantine}" = "quarantine" ]; then
             # selalu pemindah aman milik sendiri (O_NOFOLLOW); cv_quarantine pustaka host memakai mv berbasis path (TOCTOU symlink)
-            cv_quarantine_fallback "$f" "$sig" >/dev/null 2>&1 || true
+            # karantina yang berhasil dihitung terpisah: kartu Total Viruses menjumlahkan karantina + temuan yang BELUM dikarantina
+            cv_quarantine_fallback "$f" "$sig" >/dev/null 2>&1 && quar=$((quar+1)) || true
             printf '%s\tSCAN_DETECTED\t%s\t%s\n' \
               "$(date -Is)" "$f" "$sig" >> "${EVENT_LOG:-/var/log/clamav/realtime.log}" 2>/dev/null || true
           fi
@@ -399,8 +501,8 @@ scan_satu() {
   local t1; t1=$(date +%s)
   rm -f "$tmp" "$flist"
 
-  printf '{"label":"%s","path":"%s","status":"done","total":%s,"found":%s,"rc":%s,"mulai":%s,"selesai":%s,"waktu":%s}\n' \
-    "$label" "$path" "${total:-0}" "${found:-0}" "$rc" "$t0" "$t1" "$((t1 - t0))" > "$out"
+  printf '{"label":"%s","path":"%s","status":"done","total":%s,"found":%s,"quarantined":%s,"rc":%s,"mulai":%s,"selesai":%s,"waktu":%s}\n' \
+    "$label" "$path" "${total:-0}" "${found:-0}" "${quar:-0}" "$rc" "$t0" "$t1" "$((t1 - t0))" > "$out"
   say "scan $label: $total berkas, $found terinfeksi, $((t1 - t0)) dtk"
   return 0
 }
@@ -415,25 +517,28 @@ do_scan_all() {
   clam_ada || { err "ClamAV tidak terpasang"; return 1; }
   local n=0
   local t0; t0=$(date +%s)
-  local total_found=0
+  local total_found=0 total_quar=0
   local all_out="$LAST_DIR/all.json"
   printf '{"label":"all","status":"running","mulai":%s}\n' "$t0" > "$all_out"
 
-  for d in /www/wwwroot/*; do
-    [ -d "$d" ] || continue
-    local sname; sname="$(basename "$d")"
+  local d sname
+  while IFS=$'\t' read -r sname d; do
+    [ -n "$sname" ] && [ -d "$d" ] || continue
     scan_satu "$d" "$sname" || true
     if [ -f "$LAST_DIR/$sname.json" ]; then
       local fnd; fnd="$(grep -o '"found":[0-9]*' "$LAST_DIR/$sname.json" 2>/dev/null | cut -d: -f2)"
       total_found=$((total_found + ${fnd:-0}))
+      local qn; qn="$(grep -o '"quarantined":[0-9]*' "$LAST_DIR/$sname.json" 2>/dev/null | cut -d: -f2)"
+      total_quar=$((total_quar + ${qn:-0}))
     fi
     n=$((n+1))
-  done
+  done < <(daftar_situs)
 
   local t1; t1=$(date +%s)
-  printf '{"label":"all","status":"done","vhost_count":%s,"total_found":%s,"mulai":%s,"selesai":%s,"waktu":%s}\n' \
-    "$n" "$total_found" "$t0" "$t1" "$((t1 - t0))" > "$all_out"
+  printf '{"label":"all","status":"done","vhost_count":%s,"total_found":%s,"total_quarantined":%s,"mulai":%s,"selesai":%s,"waktu":%s}\n' \
+    "$n" "$total_found" "$total_quar" "$t0" "$t1" "$((t1 - t0))" > "$all_out"
   say "scan-all selesai: $n vhost, $total_found terinfeksi, $((t1 - t0)) dtk"
+  q_retensi
 }
 
 # ==================================================================
@@ -454,6 +559,65 @@ baseline_path() { printf '%s' "$BASE_DIR/$1.txt"; }
 integ_hitung() {
   find "$1" -type f -regextype posix-extended -regex ".*$EXT_POLA" ! -regex ".*$INTEG_KECUALI.*" -print0 2>/dev/null \
     | nice -n 10 ionice -c3 xargs -0 -r sha256sum 2>/dev/null | LC_ALL=C sort -k2
+}
+
+# Seperti integ_hitung, tetapi INKREMENTAL: hash disimpan per (inode, ukuran, mtime, ctime) di cache $2 dan hanya berkas yang
+# berubah yang di-hash ulang. Dulu timer per jam membaca ulang seluruh /www/wwwroot (IO besar, page cache MySQL tergusur).
+# ctime tidak bisa dipalsukan dengan touch, jadi perubahan isi yang mtime-nya dikembalikan tetap terdeteksi. Cache lebih tua
+# dari 24 jam diabaikan (hash penuh harian). Tanpa python: kembali ke integ_hitung.
+integ_hitung_cache() {
+  local py=/www/server/panel/pyenv/bin/python3
+  [ -x "$py" ] || py="$(command -v python3 2>/dev/null)"
+  [ -n "$py" ] || { integ_hitung "$1"; return; }
+  find "$1" -type f -regextype posix-extended -regex ".*$EXT_POLA" ! -regex ".*$INTEG_KECUALI.*" \
+       -printf '%i\t%s\t%T@\t%C@\t%p\0' 2>/dev/null \
+    | nice -n 10 ionice -c3 "$py" -I -c '
+import hashlib, os, sys, time
+cache_f = sys.argv[1]
+lama = {}
+try:
+    if time.time() - os.stat(cache_f).st_mtime < 86400:
+        with open(cache_f, "rb") as f:
+            for ln in f.read().split(b"\0"):
+                if ln:
+                    k, h, p = ln.split(b"\t", 2)
+                    lama[p] = (k, h)
+except (OSError, ValueError):
+    lama = {}
+baru, keluar = [], []
+for rec in sys.stdin.buffer.read().split(b"\0"):
+    if not rec:
+        continue
+    try:
+        ino, size, mt, ct, p = rec.split(b"\t", 4)
+    except ValueError:
+        continue
+    k = b"%s:%s:%s:%s" % (ino, size, mt, ct)
+    c = lama.get(p)
+    if c and c[0] == k:
+        h = c[1]
+    else:
+        try:
+            d = hashlib.sha256()
+            with open(p, "rb", buffering=0) as f:
+                for blok in iter(lambda: f.read(1 << 20), b""):
+                    d.update(blok)
+            h = d.hexdigest().encode()
+        except OSError:
+            continue
+    baru.append(b"%s\t%s\t%s" % (k, h, p))
+    keluar.append((p, h))
+tmp = cache_f + ".tmp"
+with open(tmp, "wb") as f:
+    f.write(b"\0".join(baru))
+os.replace(tmp, cache_f)
+keluar.sort()
+out = sys.stdout.buffer
+for p, h in keluar:
+    if b"\n" in p:
+        continue
+    out.write(h + b"  " + p + b"\n")
+' "$2"
 }
 
 # Bandingkan baseline ($1) dengan keadaan sekarang ($2) dalam SATU lintasan awk.
@@ -597,8 +761,13 @@ do_check_sys() {
 do_db_update() {
   command -v freshclam >/dev/null 2>&1 || { err "freshclam tidak ada"; return 1; }
   # Kode keluar freshclam dipertahankan (dulu '| tail' menelan kegagalan).
-  local out rc
-  out="$(nice -n 10 freshclam 2>&1)"; rc=$?
+  # Daemon clamav-freshclam yang berjalan mengunci UpdateLogFile (fcntl), sehingga freshclam manual selalu gagal rc=2
+  # ("Failed to lock the log file ... Resource temporarily unavailable"). Pembaruan manual menulis log sendiri (--log), daemon
+  # tidak dihentikan; dua pembaruan bersamaan tetap dicegah kunci direktori basis data milik freshclam.
+  local out rc log
+  log=/var/log/clamav/freshclam-manual.log
+  [ -d /var/log/clamav ] || log=/www/server/sentinel/log/freshclam-manual.log
+  out="$(nice -n 10 timeout 900 freshclam --log="$log" 2>&1)"; rc=$?
   printf '%s\n' "$out" | tail -5
   return $rc
 }
@@ -612,8 +781,28 @@ do_rkhunter_propupd() {
   "$RKHUNTER_BIN" --propupd --dbdir "$RKHUNTER_DB" --tmpdir "$RKHUNTER_TMP" --logfile "$RKHUNTER_LOG"
 }
 
+# Nilai WEB_CMD efektif: berkas utama, lalu .local, lalu rkhunter.d (urutan yang dibaca rkhunter; nilai terakhir menang).
+rkhunter_web_cmd() {
+  local f v=""
+  for f in "$RKHUNTER_CONF" "$RKHUNTER_CONF.local" "${RKHUNTER_CONF%/*}"/rkhunter.d/*.conf; do
+    [ -f "$f" ] || continue
+    local x; x="$(sed -n 's/^[[:space:]]*WEB_CMD[[:space:]]*=[[:space:]]*//p' "$f" | tail -1)"
+    [ -n "$x" ] && v="$x"
+  done
+  v="${v%\"}"; v="${v#\"}"
+  printf '%s' "$v"
+}
+
 do_rkhunter_update() {
   rkhunter_ada || { err "rkhunter tidak terpasang"; return 1; }
+  # Paket Debian/Ubuntu sengaja mematikan pembaruan online (WEB_CMD="/bin/false", UPDATE_MIRRORS=0): data signature
+  # mengikuti paket distro. Dulu rkhunter --update selalu gagal rc=1 ("Invalid WEB_CMD configuration option").
+  # Konfigurasi OS tidak diubah; tugas dilewati dengan penjelasan.
+  case "$(rkhunter_web_cmd)" in
+    /bin/false|/usr/bin/false|false)
+      say "rkhunter: pembaruan online dinonaktifkan distro (WEB_CMD=/bin/false di $RKHUNTER_CONF); signature mengikuti paket rkhunter (apt/dnf upgrade rkhunter). Dilewati."
+      return 0 ;;
+  esac
   say "Memeriksa pembaruan database signature rkhunter..."
   "$RKHUNTER_BIN" --update --dbdir "$RKHUNTER_DB" --tmpdir "$RKHUNTER_TMP" --logfile "$RKHUNTER_LOG"
 }

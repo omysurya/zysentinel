@@ -1,5 +1,6 @@
 #!/bin/bash
-# ZySens-Security-Shield: ​‌​‌‌​‌​​‌​‌‌​​‌​‌​​​‌‌‌​‌​‌​‌​‌​‌​​​​​‌​‌​‌​​‌​​‌​​​‌​​​​‌​‌‌​‌​‌​​​​​‌​‌​​‌​​‌​​‌​‌‌​‌​‌​‌​​‌‌​‌​​​‌​‌​‌​​​​‌‌​‌​‌​‌​‌​‌​‌​​‌​​‌​​‌​​‌​‌​‌​‌​​​‌​‌‌​​‌​​‌​‌‌​‌​‌​‌​​​​​‌​​‌‌‌‌​‌​​‌‌​​​‌​​‌​​‌​‌​​​​‌‌​‌​‌‌​​‌​​‌‌‌​‌​​​‌​​​​​​‌​‌​​‌‌​‌‌‌​‌​​​‌‌‌​​‌​​‌‌​‌​​‌​‌‌​​​‌‌​‌‌‌​‌​​​​‌​​​​​​‌​​​​​‌​‌​​‌​​‌​​‌​​​​​​‌​​​‌​​​‌‌​‌​​‌​‌‌‌​​‌​​‌‌​​‌​‌​‌‌​​​‌‌​‌‌‌​‌​​​‌‌​‌​​‌​‌‌‌​‌‌​​‌‌​​‌​‌​​‌​‌‌‌​​​​​‌​‌​​‌​‌​‌​‌​‌‌​‌‌‌​​‌‌​​​​‌​‌‌‌​‌​‌​‌‌‌​‌​​​‌‌​‌​​​​‌‌​‌‌‌‌​‌‌‌​​‌​​‌‌​‌​​‌​‌‌‌‌​‌​​‌‌​​‌​‌​‌‌​​‌​​​​‌​​​​​​‌​​​​​‌​‌​​‌​​‌​​‌​​​​​​‌‌​​​​‌​‌‌​​‌‌‌​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌‌​‌​​​‌‌‌​​‌‌​​‌​​​​​​​‌​‌​​​​‌​​​​‌‌​‌‌‌​‌​‌​‌‌‌​​‌​​‌‌‌​​‌‌​‌‌​‌‌‌‌​‌‌‌​​‌​​​‌​‌‌​​​​‌​​​​​​‌​​​​‌‌​‌‌​‌‌‌‌​‌‌‌​​​​​‌‌​‌​​‌​‌‌​‌‌​​​‌‌​‌‌‌‌​‌‌‌​‌​​​​‌​‌‌​​​​‌​​​​​​‌​‌​‌‌‌​‌‌​‌​​‌​‌‌​‌‌‌​​‌‌​​‌​​​‌‌‌​​‌‌​‌‌‌​‌​‌​‌‌‌​​‌​​‌‌​​‌‌​​​‌​‌‌​​​​‌​​​​​​‌​​​​‌‌​‌‌​‌‌​​​‌‌​​​​‌​‌‌‌​‌​‌​‌‌​​‌​​​‌‌​​‌​‌​​‌​‌‌​​​​‌​​​​​​‌​​​‌‌‌​‌​‌​​​​​‌​‌​‌​​​​‌​‌‌​​​​‌​​​​​​‌​​​‌​​​‌‌​​‌​‌​‌‌‌​‌‌​​‌‌​‌​​‌​‌‌​‌‌‌​​​‌​‌‌​​​​‌​​​​​​‌​​​​​‌​‌‌​‌​​‌​‌‌​​‌​​​‌‌​​‌​‌​‌‌‌​​‌​​​‌​‌​​‌​​‌​​​​​​‌‌​​​​‌​‌‌‌​​‌​​‌‌​​‌​‌​​‌​​​​​​‌‌‌​​​​​‌‌‌​​‌​​‌‌​‌‌‌‌​‌‌​‌​​​​‌‌​‌​​‌​‌‌​​​‌​​‌‌​‌​​‌​‌‌‌​‌​​​‌‌​​‌​‌​‌‌​​‌​​​​‌​​​​​​‌‌​​‌‌​​‌‌‌​​‌​​‌‌​‌‌‌‌​‌‌​‌‌​‌​​‌​​​​​​‌‌​​‌​‌​‌‌‌‌​​​​‌‌‌​​​​​‌‌​‌‌​​​‌‌​​​​‌​‌‌​‌​​‌​‌‌​‌‌‌​​‌‌​‌​​‌​‌‌​‌‌‌​​‌‌​​‌‌‌​​‌​‌‌​​​​‌​​​​​​‌‌‌​​‌​​‌‌​​‌​‌​‌‌‌​‌‌​​‌‌​​‌​‌​‌‌‌​​‌​​‌‌‌​​‌‌​‌‌​​‌​‌​​‌​‌‌​‌​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​​‌‌‌​‌‌​‌​​‌​‌‌​‌‌‌​​‌‌​​‌​‌​‌‌​​‌​‌​‌‌‌​​‌​​‌‌​‌​​‌​‌‌​‌‌‌​​‌‌​​‌‌‌​​‌​‌‌​​​​‌​​​​​​‌‌‌​​‌​​‌‌​​‌​‌​‌‌​​‌‌​​‌‌​​​​‌​‌‌​​​‌‌​‌‌‌​‌​​​‌‌​‌‌‌‌​‌‌‌​​‌​​‌‌​‌​​‌​‌‌​‌‌‌​​‌‌​​‌‌‌​​‌​‌‌​​​​‌​​​​​​‌‌​‌‌‌‌​‌‌‌​​‌​​​‌​​​​​​‌‌​‌‌​‌​‌‌​‌‌‌‌​‌‌​​‌​​​‌‌​‌​​‌​‌‌​​‌‌​​‌‌‌‌​​‌​‌‌​‌​​‌​‌‌​‌‌‌​​‌‌​​‌‌‌​​‌​​​​​​‌‌‌​‌​​​‌‌​‌​​​​‌‌​‌​​‌​‌‌‌​​‌‌​​‌​​​​​​‌‌​​​‌‌​‌‌​‌‌‌‌​‌‌​​‌​​​‌‌​​‌​‌​‌‌​​​‌​​‌‌​​​​‌​‌‌‌​​‌‌​‌‌​​‌​‌​​‌​‌‌‌​​​​​‌​‌​​‌​​​‌​​​‌‌​​‌​‌​‌‌‌​‌‌​​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​‌‌‌‌​‌‌‌​​​​​‌‌​​‌​‌​‌‌‌​​‌​​​‌​​​​​​‌‌​​​​‌​‌‌‌​‌​‌​‌‌‌​‌​​​‌‌​‌​​​​‌‌​‌‌‌‌​‌‌‌​​‌​​‌‌​‌​​‌​‌‌‌‌​‌​​‌‌​​​​‌​‌‌‌​‌​​​‌‌​‌​​‌​‌‌​‌‌‌‌​‌‌​‌‌‌​​​‌​​​​​​‌‌‌​​‌​​‌‌​​‌​‌​‌‌‌​​​‌​‌‌‌​‌​‌​‌‌​‌​​‌​‌‌‌​​‌​​‌‌​​‌​‌​‌‌‌​​‌‌​​‌​​​​​​‌‌​‌‌​‌​‌‌​​​​‌​‌‌‌​‌​​​‌‌​​​‌‌​‌‌​‌​​​​‌‌​‌​​‌​‌‌​‌‌‌​​‌‌​​‌‌‌​​‌​​​​​​‌‌​​‌‌‌​‌‌​‌​​‌​‌‌‌​‌​​​​‌​​​​​​‌‌​‌‌‌‌​‌‌‌​‌‌‌​‌‌​‌‌‌​​‌‌​​‌​‌​‌‌‌​​‌​​​‌​​​​​​​‌​‌​​​​‌‌​‌‌‌‌​‌‌​‌‌​‌​‌‌‌‌​​‌​‌‌‌​​‌‌​‌‌‌​‌​‌​‌‌‌​​‌​​‌‌‌‌​​‌​‌‌​​​​‌​​‌​‌‌‌‌​‌‌​‌‌​‌​‌‌​‌‌‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌‌‌​​‌​‌‌​‌​​​​‌‌​​​​‌​‌‌​‌‌‌​​‌‌​​​​‌​‌​​​​​​​‌‌​​‌‌‌​‌‌​‌‌​‌​‌‌​​​​‌​‌‌​‌​​‌​‌‌​‌‌​​​​‌​‌‌‌​​‌‌​​​‌‌​‌‌​‌‌‌‌​‌‌​‌‌​‌​​‌​‌​​‌​​‌​​​​​​‌‌​​​​‌​‌‌​‌‌‌​​‌‌​​‌​​​​‌​​​​​​‌‌​​​​‌​‌‌‌​‌​‌​‌‌‌​‌​​​‌‌​‌​​​​‌‌​‌‌‌‌​‌‌‌​​‌​​‌‌​‌​​‌​‌‌‌‌​‌​​‌‌​​‌​‌​‌‌​​‌​​​​‌​​​​​​‌‌​​‌​​​‌‌​​‌​‌​‌‌‌​‌‌​​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​‌‌‌‌​‌‌‌​​​​​‌‌​​‌​‌​‌‌‌​​‌​​​‌​​​​​​‌​‌​​‌‌​‌​‌​​‌‌​‌​​‌​​​​​‌​​​​​​‌‌‌​​​​​‌‌‌​‌​‌​‌‌​​​‌​​‌‌​‌‌​​​‌‌​‌​​‌​‌‌​​​‌‌​​‌​​​​​​‌‌​‌​‌‌​‌‌​​‌​‌​‌‌‌‌​​‌​​‌​​​​​​​‌​‌​​​​‌​‌​‌​​​‌‌​‌​​​​‌‌​‌​​‌​‌‌​‌‌‌​​‌‌​‌​‌‌​‌​​​​‌​​‌‌​‌‌‌‌​‌‌​‌‌‌‌​‌‌​‌​‌‌​​‌​‌‌​‌​‌​​‌​​‌​‌​‌​‌​​​‌​​‌‌​​​‌​​​‌‌‌​​‌‌​​‌​​​‌​​​​​​​‌​‌‌‌‌​​‌​​​​​​‌​​​​​‌​‌​​​​​‌​‌​​​​​‌​‌​​​​​‌​‌​​​​‌‌​​‌‌​​‌‌​‌​​‌‌‌​​‌‌‌‌​‌​​‌‌​​​​‌​‌​​​​‌‌​​‌‌​​​‌​‌‌​‌‌​​​‌​‌‌​‌​​‌​​​‌​​​‌​​‌​​‌​​‌‌​​​‌​‌​​‌‌‌​​‌​‌​‌​​​‌​​​‌​‌​​‌‌​‌​‌​‌​​​​​‌​‌​​​​​‌​‌​​​​​‌​‌​​​​​‌​‌​​‌​​‌​‌​​‌‌‌​​‌‌‌​‌‌‌​​‌​‌​‌‌​​‌‌​‌​‌​‌‌​​‌‌​​‌‌‌‌​​‌​‌‌‌​‌‌​​‌‌​‌‌​​​​‌‌​​‌​​‌​​​​‌‌​‌‌‌​‌​​​​‌‌​​‌‌​‌‌​​​‌‌​‌‌‌​‌​​​‌​‌​​​‌​‌​‌​‌‌‌​‌​​‌‌​‌​‌​‌​‌‌‌​‌​​​‌​​​‌‌​​​‌‌​‌​‌‌​‌​​‌‌‌‌​​​​​‌​‌‌‌‌​‌​​‌‌​​​‌‌​‌​‌​​‌​‌​​​​​​‌‌​​‌‌​‌‌‌​‌​‌​‌‌​​‌‌​​​‌​‌‌‌‌​​‌‌​​‌​​​‌‌​​‌‌​‌​‌‌​‌​​​‌‌​‌‌‌​​‌‌‌​​‌​‌‌‌‌​​‌​‌‌​‌​​​​‌‌‌‌​‌​​‌‌‌​​‌‌​‌​​‌‌​​​​‌​‌​‌‌​‌​​‌​‌​​‌‌​​​‌‌​​‌​‌​​‌​​‌​‌‌‌​​​​​‌​‌​​‌​​‌​​‌​‌‌​​‌‌​​​‌​​​​​​‌‌‌​‌​‌​‌‌​‌‌‌​​‌‌​​​​‌​‌‌‌​‌​‌​‌‌‌​‌​​​‌‌​‌​​​​‌‌​‌‌‌‌​‌‌‌​​‌​​‌‌​‌​​‌​‌‌‌‌​‌​​‌‌​​‌​‌​‌‌​​‌​​​​‌​‌‌​​​​‌​​​​​​‌‌‌‌​​‌​‌‌​‌‌‌‌​‌‌‌​‌​‌​​‌​​​​​​‌‌​‌‌​‌​‌‌‌​‌​‌​‌‌‌​​‌‌​‌‌‌​‌​​​​‌​​​​​​‌‌‌​​‌​​‌‌​​‌​‌​‌‌​​‌‌​​‌‌‌​‌​‌​‌‌‌​​‌‌​‌‌​​‌​‌​​‌​​​​​​‌‌​​​​‌​‌‌​‌‌‌​​‌‌​​‌​​​​‌​​​​​​‌‌​‌​​‌​‌‌​‌‌‌​​‌‌‌​​‌‌​‌‌‌​‌​​​‌‌‌​​‌​​‌‌‌​‌​‌​‌‌​​​‌‌​‌‌‌​‌​​​​‌​​​​​​‌‌‌​‌​​​‌‌​‌​​​​‌‌​​‌​‌​​‌​​​​​​‌‌‌​‌​‌​‌‌‌​​‌‌​‌‌​​‌​‌​‌‌‌​​‌​​​‌‌‌​‌​​​‌​​​​​​​‌​​​‌​​‌​‌​​‌‌​‌‌​‌​​‌​‌‌​‌‌​​​‌‌​​​​‌​‌‌​‌​‌‌​‌‌​​​​‌​‌‌​‌‌‌​​​‌​​​​​​‌‌‌​​‌‌​‌‌​​​​‌​‌‌​‌‌​‌​‌‌‌​​​​​‌‌​​​​‌​‌‌​‌​​‌​‌‌​‌​‌‌​‌‌​​​​‌​‌‌​‌‌‌​​​‌​​​​​​‌‌​​‌‌​​‌‌​​‌​‌​‌‌​​‌​‌​‌‌​​‌​​​‌‌​​​‌​​‌‌​​​​‌​‌‌​​​‌‌​‌‌​‌​‌‌​​‌​​​​​​‌‌​​‌​​​‌‌​​​​‌​‌‌​‌‌‌​​​‌​​​​​​‌‌​‌‌​​​‌‌​​​​‌​‌‌‌​​​​​‌‌​‌‌‌‌​‌‌‌​​‌​​‌‌​​​​‌​‌‌​‌‌‌​​​‌​​​​​​‌‌​​​‌​​‌‌‌​‌​‌​‌‌​​‌‌‌​​‌​​​​​​‌‌​‌‌​​​‌‌​​​​‌​‌‌​‌‌‌​​‌‌​​‌‌‌​‌‌‌​​‌‌​‌‌‌​‌​‌​‌‌​‌‌‌​​‌‌​​‌‌‌​​‌​​​​​​‌‌​‌‌​‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​​​‌​‌‌​‌‌​​​‌‌‌​‌​‌​‌‌​‌​​‌​​‌​​​​​​‌‌‌​​​​​‌‌​​​​‌​‌‌​‌‌‌​​‌‌​​‌​‌​‌‌​‌‌​​​​‌​​​​​​‌‌‌​​​​​‌‌​‌‌​​​‌‌‌​‌​‌​‌‌​​‌‌‌​‌‌​‌​​‌​‌‌​‌‌‌​​​‌​​​​​​‌​‌‌​‌​​‌‌‌‌​​‌​‌​‌​​‌‌​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌‌​‌​​​‌‌​‌​​‌​‌‌​‌‌‌​​‌‌​​‌​‌​‌‌​‌‌​​​​‌​​​​​​​‌​‌​​​‌‌‌‌​​​​‌​​‌‌‌‌‌‌​​‌​​‌​‌​‌​‌‌​​​​‌​​​​​​‌​​​‌‌​​‌‌​​‌​‌​‌‌​​‌​‌​‌‌​​‌​​​‌‌​​​‌​​‌‌​​​​‌​‌‌​​​‌‌​‌‌​‌​‌‌​​‌​​​​​​​‌​​‌‌​​​‌​​​​​​‌​‌​​‌​​‌‌​​‌​‌​‌‌‌​​​​​‌‌​‌‌‌‌​‌‌‌​​‌​​‌‌‌​‌​​​​‌​​​​​​‌​​​​‌​​‌‌‌​‌​‌​‌‌​​‌‌‌​‌‌‌​​‌‌​​‌​‌​​‌​​‌​​​‌​​​‌​‌‌‌​
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 PT. StudioNet Indonesia Jaya (ZySens).
 # ============================================================
 # Pemasangan dan pencabutan Sentinel.
 #
@@ -71,6 +72,22 @@ unduh_berkas() {
   return 1
 }
 
+# Public key RELEASE Ed25519 (sama dengan RELEASE_PUBKEY_HEX di sentinel_main.py dan release_pubkey.hex Pro).
+RELEASE_PUBKEY_HEX=581b3001b61c4e7c757a431385b614597139de16d16785964fa1053d737f9172
+# sig_rilis_sah <SHA256SUMS.txt> <SHA256SUMS.txt.sig>: rc 0 hanya bila signature Ed25519 release key atas isi persis berkas sah.
+# Library cryptography tidak ada = rc 1 (fail-closed).
+sig_rilis_sah() {
+  local py=""
+  if [ -x "$PYENV" ]; then py="$PYENV"; elif command -v python3 >/dev/null 2>&1; then py=python3; else return 1; fi
+  "$py" -I -c '
+import base64, re, sys
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
+sig = open(sys.argv[2], "rb").read(600).decode("ascii", "replace").strip()
+if not re.fullmatch(r"[A-Za-z0-9_-]{86}", sig): sys.exit(1)
+Ed25519PublicKey.from_public_bytes(bytes.fromhex(sys.argv[3])).verify(base64.urlsafe_b64decode(sig + "=="), open(sys.argv[1], "rb").read(65536))
+' "$1" "$2" "$RELEASE_PUBKEY_HEX" >/dev/null 2>&1
+}
+
 unduh_payload() {
   # Payload hilang (dipanggil lewat pipa, atau folder plugin belum ada):
   # ambil paket resmi versi yang sama dari GitHub lalu pasang ke folder
@@ -93,11 +110,15 @@ unduh_payload() {
     if unduh_berkas "$rel/SHA256SUMS.txt" "$sums" && [ -s "$sums" ]; then
       want="$(awk -v f="zysentinel-v$ver.zip" '$2==f || $2=="*"f {print $1; exit}' "$sums")"
       got="$(sha256sum "$zip" 2>/dev/null | awk '{print $1}')"
-      if [ -z "$want" ] || [ "$want" != "$got" ]; then
+      # SHA256SUMS.txt wajib signed release key: checksum dari release yang sama saja tidak melindungi dari akun GitHub yang diambil alih
+      if ! unduh_berkas "$rel/SHA256SUMS.txt.sig" "$sums.sig" || ! sig_rilis_sah "$sums" "$sums.sig"; then
+        err "signature release (SHA256SUMS.txt.sig) tidak ada atau tidak sah; paket ditolak"
+        rm -f "$zip"
+      elif [ -z "$want" ] || [ "$want" != "$got" ]; then
         err "SHA-256 paket tidak cocok dengan SHA256SUMS.txt; paket ditolak"
         rm -f "$zip"
       else
-        say "SHA-256 paket terverifikasi"
+        say "signature release dan SHA-256 paket terverifikasi"
       fi
     else
       err "SHA256SUMS.txt rilis tidak tersedia; paket tidak bisa diverifikasi"
@@ -124,6 +145,7 @@ unduh_payload() {
   rm -rf "$tmp"
   payload_sah "$PANEL_PLUG/payload"
 }
+
 
 cari_payload() {
   local c
@@ -208,11 +230,32 @@ deteksi_os() {
   fi
 }
 
+# Daftar paket terpasang (nama saja, terurut). Dipakai untuk mencatat APA yang benar-benar baru dipasang installer,
+# supaya uninstall hanya mencabut milik kita (adapters/pkgclean.py), bukan paket yang memang sudah ada di server.
+pkg_snapshot() {
+  case "$OS_FAM" in
+    deb) dpkg-query -W -f='${Package}\n' 2>/dev/null | sort -u ;;
+    rpm) rpm -qa --qf '%{NAME}\n' 2>/dev/null | sort -u ;;
+  esac
+}
+
+catat_paket_baru() {   # $1 = berkas snapshot sebelum pemasangan; selalu dihapus (tidak meninggalkan berkas sementara)
+  local sebelum="$1"
+  if [ -n "$sebelum" ] && [ -s "$sebelum" ]; then
+    mkdir -p "$ETC" 2>/dev/null || true
+    pkg_snapshot | comm -13 "$sebelum" - >>"$ETC/dipasang-paket.list" 2>/dev/null || true
+    chmod 600 "$ETC/dipasang-paket.list" 2>/dev/null || true
+  fi
+  [ -n "$sebelum" ] && rm -f "$sebelum"
+  return 0
+}
+
 pm_pasang() {
   # Pasang paket SATU per SATU: di apt satu nama paket yang tidak
   # dikenal menggagalkan seluruh transaksi, sehingga paket lain yang
   # sebenarnya tersedia ikut tidak terpasang.
-  local p ok=0
+  local p ok=0 sebelum=""
+  sebelum="$(mktemp /tmp/zys-pkg.XXXXXX 2>/dev/null)" && pkg_snapshot >"$sebelum"
   for p in "$@"; do
     case "$OS_FAM" in
       deb)
@@ -232,6 +275,7 @@ pm_pasang() {
         ;;
     esac
   done
+  catat_paket_baru "$sebelum"
   [ "$ok" -eq 1 ]
 }
 
@@ -487,8 +531,14 @@ prasyarat_maxminddb() {
     catat_dep "maxminddb (GeoIP)" opsi "OK" "aaPanel pyenv"
   elif [ -x "$PYENV" ] && "$PYENV" -m pip install -q maxminddb >>"$LOG_DEPS" 2>&1 && cek_maxminddb; then
     catat_dep "maxminddb (GeoIP)" opsi "DIPASANG" "pip aaPanel pyenv"
+  elif [ ! -x "$PYENV" ] && ada python3 && python3 -c 'import maxminddb' >/dev/null 2>&1; then
+    catat_dep "maxminddb (GeoIP)" opsi "OK" "python3 sistem"
+  elif [ ! -x "$PYENV" ] && ada python3 && { pm_pasang python3-maxminddb || pm_pasang python-maxminddb; } && python3 -c 'import maxminddb' >/dev/null 2>&1; then
+    catat_dep "maxminddb (GeoIP)" opsi "DIPASANG" "repo OS (python3-maxminddb)"
+  elif [ ! -x "$PYENV" ] && ada python3 && python3 -m pip install -q --break-system-packages maxminddb >>"$LOG_DEPS" 2>&1 && python3 -c 'import maxminddb' >/dev/null 2>&1; then
+    catat_dep "maxminddb (GeoIP)" opsi "DIPASANG" "pip (python3 sistem)"
   else
-    catat_dep "maxminddb (GeoIP)" opsi "LEWAT" "tanpa pyenv aaPanel"
+    catat_dep "maxminddb (GeoIP)" opsi "LEWAT" "tidak tersedia; peta asal serangan tanpa data negara"
   fi
 }
 
@@ -610,7 +660,7 @@ siapkan_guardd() {
   fi
   if command -v gcc >/dev/null 2>&1 && [ -f /usr/include/sqlite3.h ]; then
     say "menyusun guardd dari sumber C (hardening: canary, PIE, RELRO)"
-    if gcc -O2 -Wall -Wextra -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -pie -Wl,-z,relro,-z,now \
+    if gcc -std=gnu11 -O2 -Wall -Wextra -fstack-protector-strong -D_FORTIFY_SOURCE=2 -fPIE -pie -Wl,-z,relro,-z,now \
          -o "$tmp" "$src" -lsqlite3 -lm >>"$LOG_DEPS" 2>&1 && "$tmp" -V >/dev/null 2>&1; then
       chmod 750 "$tmp"; mv -f "$tmp" "$BIN/guardd"; printf '%s\n' "$want" > "$BIN/guardd.srchash"
       return 0
@@ -644,6 +694,31 @@ segarkan_guardd() {
 }
 
 
+# Tata letak log/vhost untuk guardd. guardd.conf.default menyebut direktori aaPanel secara eksplisit, jadi di server tanpa aaPanel guardd
+# tidak melihat satu pun vhost/log (hosts=0, total_req=0). Di server non-aaPanel baris conf_dir/log_dir bawaan (milik aaPanel) diganti
+# direktori standar nginx/Apache/OpenLiteSpeed; penyesuaian operator (baris di luar bawaan aaPanel) dibiarkan. Direktori yang belum
+# ada dilewati guardd, jadi web server yang dipasang belakangan tetap terbaca.
+guardd_atur_tata_letak() {
+  local conf="$ETC/guardd.conf" tmp tipe baris
+  [ -f "$conf" ] || return 0
+  tipe="$(env_jalankan panel 2>/dev/null)"
+  [ "$tipe" = aapanel ] && return 0                   # aaPanel: tata letak bawaan sudah benar
+  [ -z "$tipe" ] && [ -d /www/server/panel/class ] && return 0   # deteksi tak tersedia: jangan menebak di server aaPanel
+  # sudah disesuaikan (penanda) atau operator sudah mengisi sendiri: jangan ditimpa
+  grep -q '^# tata-letak: ' "$conf" && return 0
+  if grep -E '^(conf_dir|log_dir)[[:space:]]*=' "$conf" | grep -vqE '/www/server/(panel|nginx)|/www/wwwlogs'; then return 0; fi
+  baris="$(env_jalankan guardd-conf 2>/dev/null)"
+  if [ -z "$baris" ]; then   # cadangan: lokasi standar kedua keluarga distro
+    baris="$(for d in /etc/nginx/sites-enabled /etc/nginx/conf.d /etc/apache2/sites-enabled /etc/apache2/conf-enabled /etc/httpd/conf.d /etc/httpd/conf /usr/local/lsws/conf/vhosts; do echo "conf_dir = $d"; done
+             for d in /var/log/nginx /var/log/apache2 /var/log/httpd /usr/local/lsws/logs; do echo "log_dir = $d"; done)"
+  fi
+  tmp="$conf.baru.$$"
+  grep -vE '^(conf_dir|log_dir)[[:space:]]*=' "$conf" >"$tmp"
+  { echo ""; echo "# tata-letak: ${tipe:-standalone} (ditulis installer dari deteksi lingkungan; baris conf_dir/log_dir bawaan aaPanel diganti)"; echo "$baris"; } >>"$tmp"
+  cat "$tmp" >"$conf" && rm -f "$tmp"
+  say "guardd.conf: direktori vhost/log diarahkan sesuai lingkungan terdeteksi (${tipe:-standalone})"
+}
+
 pasang_daemon() {
   mkdir -p "$ETC" "$BASE/run" "$BASE/data" "$BASE/log" "$BASE/src" "$BIN" \
            "$BASE/av/baseline" "$BASE/av/last" "$BASE/av/quarantine/files" "$BASE/av/quarantine/meta"
@@ -653,12 +728,19 @@ pasang_daemon() {
   # Salin BERKAS yang dibutuhkan dari payload ke tempat kerjanya.
   if [ -d "$pay" ]; then
     mkdir -p "$BIN" "$BASE/src"
-    for f in guardctl sentinel-fw.sh sentinel-waf.sh sentinel-av.sh sentinel-proc.py sentinel-intel.sh sentinel-ports.py sentinel-zyrules.py sentinel_license.py license_features.json; do
+    for f in guardctl sentinel-fw.sh sentinel-waf.sh sentinel-av.sh sentinel-proc.py sentinel-intel.sh sentinel-ports.py sentinel-zyrules.py sentinel-cve.py sentinel-proxy.py sentinel_license.py license_features.json; do
       if [ -f "$pay/$f" ]; then
-        cp -p "$pay/$f" "$BIN/$f"
-        chmod 755 "$BIN/$f"
+        # salin ke berkas sementara lalu rename (atomik): timer sentinel-fw (bash membaca skrip bertahap) atau licgate yang sedang
+        # berjalan tidak boleh melihat berkas setengah tertulis, dan update yang terputus tidak meninggalkan biner terpotong
+        cp -p "$pay/$f" "$BIN/.$f.baru.$$" && chmod 755 "$BIN/.$f.baru.$$" && mv -f "$BIN/.$f.baru.$$" "$BIN/$f" \
+          || { rm -f "$BIN/.$f.baru.$$"; err "gagal memasang $f ke $BIN"; }
       fi
     done
+    if [ -d "$pay/adapters" ]; then
+      rm -rf "$BIN/adapters"
+      cp -a "$pay/adapters" "$BIN/adapters"
+      chmod -R 755 "$BIN/adapters" 2>/dev/null || true
+    fi
     # config TIDAK ditimpa bila sudah ada: isinya memuat penyesuaian
     # operator (ambang, geo-ban, throttle) yang tidak boleh hilang saat
     # update plugin.
@@ -666,6 +748,7 @@ pasang_daemon() {
       cp -p "$pay/guardd.conf.default" "$ETC/guardd.conf"
       say "guardd.conf dibuat dari default"
     fi
+    guardd_atur_tata_letak
     if [ -f "$pay/allowlist.txt.default" ] && [ ! -f "$ETC/allowlist.txt" ]; then
       cp -p "$pay/allowlist.txt.default" "$ETC/allowlist.txt"
     fi
@@ -714,7 +797,7 @@ EOF
     err "guardd tidak bisa disiapkan"
     return 1
   fi
-  chmod 755 "$BIN/guardd" "$BIN/guardctl" "$BIN/sentinel-fw.sh" "$BIN/sentinel-av.sh" "$BIN/sentinel-proc.py" "$BIN/sentinel-intel.sh" "$BIN/sentinel-ports.py" "$BIN/sentinel-zyrules.py" 2>/dev/null
+  chmod 755 "$BIN/guardd" "$BIN/guardctl" "$BIN/sentinel-fw.sh" "$BIN/sentinel-av.sh" "$BIN/sentinel-proc.py" "$BIN/sentinel-intel.sh" "$BIN/sentinel-ports.py" "$BIN/sentinel-zyrules.py" "$BIN/sentinel-cve.py" "$BIN/sentinel-proxy.py" 2>/dev/null
   return 0
 }
 
@@ -791,7 +874,13 @@ pasang_antivirus() {
       # Nama unit berbeda per distro: Debian/Ubuntu clamav-*,
       # RHEL clamd@scan + clamav-freshclam.
       systemctl enable --now clamav-freshclam 2>/dev/null || true
-      if ls /var/lib/clamav/main.c[vl]d >/dev/null 2>&1; then
+      # clamd memuat seluruh basis tanda tangan di RAM (~1-1,3 GB, sekitar 2x saat reload): di server < 2 GB RAM clamd tidak
+      # diaktifkan otomatis (OOM membunuh situs pelanggan). Pemindaian memakai clamscan per tugas; operator tetap bisa
+      # mengaktifkan clamav-daemon sendiri.
+      mem_kb="$(awk '/^MemTotal:/{print $2}' /proc/meminfo 2>/dev/null)"
+      if [ "${mem_kb:-0}" -gt 0 ] && [ "${mem_kb:-0}" -lt 1900000 ]; then
+        say "RAM server $((mem_kb / 1024)) MB (< 2 GB): clamd tidak diaktifkan otomatis, pemindaian memakai clamscan"
+      elif ls /var/lib/clamav/main.c[vl]d >/dev/null 2>&1; then
         systemctl enable --now clamav-daemon 2>/dev/null || systemctl enable --now clamd@scan 2>/dev/null || true
       else
         # Tanpa basis data tanda tangan clamd menolak start. Unduhan
@@ -862,6 +951,16 @@ pasang_logrotate() {
     copytruncate
     su root root
 }
+# salinan access log milik root per vhost (guardd merotasinya sendiri di 64 MB; batas ini berlaku bila guardd tidak berjalan)
+/www/server/sentinel/log/akses/*.log {
+    size 256M
+    rotate 1
+    nocompress
+    missingok
+    notifempty
+    copytruncate
+    su root root
+}
 LR
   chmod 644 /etc/logrotate.d/zysentinel
   say "rotasi log plugin terpasang (/etc/logrotate.d/zysentinel)"
@@ -892,6 +991,55 @@ pasang_defender_elit() {
   return 0
 }
 
+# Kompatibilitas mundur systemd. Kunci unit yang baru dikenal systemd versi tertentu membuat setiap daemon-reload mencetak
+# "Unknown key name ... ignoring" ke jurnal (berisik, dan menutupi pesan yang penting). Systemd lama sudah mengabaikan kunci itu,
+# jadi menyesuaikan salinan terpasang tidak mengubah perilaku; payload tetap utuh untuk systemd baru. Tabel yang sama ada di
+# sentinel_main.py (_systemd_sesuaikan) dan diuji agar tetap sinkron (tests/standalone_test.py).
+#   dibuang bila versi < N:  Kunci:N     | ditulis ulang: ProtectSystem=strict -> full (<231), MemoryMax -> MemoryLimit (<231)
+#   StandardOutput/StandardError=append:BERKAS butuh systemd >= 240: di bawah itu perintah dibungkus `sh -c 'exec CMD >>BERKAS 2>&1'`
+#   (log berkas, mis. av.log yang dibaca UI, tetap tertulis); bila perintahnya tidak sederhana, keluaran dialihkan ke journal.
+systemd_versi() { systemctl --version 2>/dev/null | awk 'NR==1{print $2+0}'; }
+SYSTEMD_KUNCI_MIN="RestartSteps:254 RestartMaxDelaySec:254 ProtectProc:247 ProcSubset:247 ProtectClock:245 ProtectKernelLogs:244 \
+LogRateLimitIntervalSec:240 LogRateLimitBurst:240 ProtectHostname:242 RestrictSUIDSGID:242 LockPersonality:235 RemoveIPC:235 \
+RuntimeDirectoryPreserve:235 RestrictNamespaces:233 ProtectKernelModules:232 ProtectControlGroups:232 RestrictRealtime:231 \
+MemoryHigh:231 TasksMax:227 ProtectKernelTunables:232 ReadWritePaths:231"
+systemd_sesuaikan() {   # systemd_sesuaikan <berkas-unit>...
+  local v f pair k min
+  v="$(systemd_versi)"; [ -n "$v" ] && [ "$v" -gt 0 ] 2>/dev/null || return 0
+  for f in "$@"; do
+    [ -f "$f" ] || continue
+    for pair in $SYSTEMD_KUNCI_MIN; do
+      k="${pair%%:*}"; min="${pair##*:}"
+      [ "$v" -lt "$min" ] && sed -i "/^[[:space:]]*${k}=/d" "$f"
+    done
+    if [ "$v" -lt 231 ]; then
+      sed -i -e 's/^\([[:space:]]*\)ProtectSystem=strict/\1ProtectSystem=full/' -e 's/^\([[:space:]]*\)MemoryMax=/\1MemoryLimit=/' \
+             -e '/^[[:space:]]*SystemCallFilter=@/d' -e '/^[[:space:]]*SystemCallErrorNumber=/d' "$f"
+    fi
+    if [ "$v" -lt 230 ]; then
+      sed -i -e '/^[[:space:]]*StartLimitIntervalSec=/d' -e '/^[[:space:]]*StartLimitBurst=/d' "$f"
+    fi
+    if [ "$v" -lt 240 ] && grep -q '^[[:space:]]*Standard\(Output\|Error\)=append:' "$f"; then
+      local lo le cmd
+      lo="$(sed -n 's/^[[:space:]]*StandardOutput=append:\(.*\)$/\1/p' "$f" | head -1)"
+      le="$(sed -n 's/^[[:space:]]*StandardError=append:\(.*\)$/\1/p' "$f" | head -1)"
+      cmd="$(sed -n 's/^ExecStart=\(.*\)$/\1/p' "$f" | head -1)"
+      sed -i -e '/^[[:space:]]*StandardOutput=append:/d' -e '/^[[:space:]]*StandardError=append:/d' "$f"
+      case "$cmd$lo" in
+        ''|*\'*|*\"*|*\$*|*%*|*\\*|*\;*|*\|*|*\&*|*\<*|*\>*|*' '' '*|*'`'*)
+          sed -i -e '/^\[Service\]/a StandardOutput=journal\nStandardError=journal' "$f" ;;   # tidak sederhana atau berkas beda: journal
+        *)
+          if [ -n "$lo" ] && [ "$lo" = "$le" ]; then
+            sed -i "s|^ExecStart=.*|ExecStart=/bin/sh -c 'exec ${cmd} >>${lo} 2>\&1'|" "$f"
+          else
+            sed -i -e '/^\[Service\]/a StandardOutput=journal\nStandardError=journal' "$f"
+          fi ;;
+      esac
+    fi
+  done
+  return 0
+}
+
 pasang_unit_dari_payload() {
   local pay
   pay="$PAY/systemd"
@@ -908,9 +1056,10 @@ pasang_unit_dari_payload() {
     chmod 644 "/etc/systemd/system/$b"
     # Di luar aaPanel pyenv tidak ada; arahkan unit ke python3 sistem
     # supaya sentinel-proc & upload-scan tidak gagal start diam-diam.
-    if [ ! -x "$PYENV" ] && command -v python3 >/dev/null 2>&1; then
-      sed -i "s|$PYENV|$(command -v python3)|g" "/etc/systemd/system/$b"
+    if [ ! -x "$PYENV" ] && [ -n "$(py_terpilih)" ]; then
+      sed -i "s|$PYENV|$(py_terpilih)|g" "/etc/systemd/system/$b"      # path eksplisit (mis. /usr/bin/python3.9 di EL8)
     fi
+    systemd_sesuaikan "/etc/systemd/system/$b"
   done
   say "unit systemd dipasang dari payload"
   pasang_dropin_restart
@@ -928,7 +1077,8 @@ pasang_dropin_restart() {
     u="$(basename "$f" .conf)"
     if systemctl list-unit-files "$u" 2>/dev/null | grep -q "^$u"; then
       mkdir -p "/etc/systemd/system/$u.d" && cp -f "$f" "/etc/systemd/system/$u.d/zysentinel-restart.conf" \
-        && chmod 644 "/etc/systemd/system/$u.d/zysentinel-restart.conf" && say "pemulihan crash dipasang untuk $u"
+        && chmod 644 "/etc/systemd/system/$u.d/zysentinel-restart.conf" && systemd_sesuaikan "/etc/systemd/system/$u.d/zysentinel-restart.conf" \
+        && say "pemulihan crash dipasang untuk $u"
     fi
   done
   return 0
@@ -990,7 +1140,11 @@ bersihkan_persistensi() {
     tmp="$(mktemp /tmp/zysentinel-rules.XXXXXX)" || continue
     grep -viE '(^:SENTINEL|^-A SENTINEL|-j SENTINEL|--match-set sentinel_|--comment "?sentinel:)' "$f" > "$tmp"
     if iptables-restore --test < "$tmp" >/dev/null 2>&1; then
-      cp -p "$f" "$f.bak.$(date +%Y%m%d%H%M%S)" && cat "$tmp" > "$f" && say "baris Sentinel dibuang dari $f"
+      local bak="$f.bak.$(date +%Y%m%d%H%M%S)"
+      if cp -p "$f" "$bak" && cat "$tmp" > "$f"; then
+        rm -f "$bak"      # hasil sudah lolos iptables-restore --test; cadangan hanya menambah berkas sisa
+        say "baris Sentinel dibuang dari $f"
+      fi
     else
       err "$f tidak diubah: hasil pembersihan tidak lolos iptables-restore --test"
     fi
@@ -1002,12 +1156,82 @@ bersihkan_persistensi() {
 hentikan_semua_daemon() {
   local u
   if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
-    for u in sentinel-upload-scan.service sentinel-proc.service sentinel-intel.timer sentinel-intel.service sentinel-av.timer sentinel-av.service sentinel-integ.timer sentinel-integ.service sentinel-fw.timer sentinel-fw.service sentinel-notify.timer sentinel-notify.service sentinel-selfheal.timer sentinel-selfheal.service sentinel-license.timer sentinel-license.service sentinel-sweeper.timer sentinel-sweeper.service sentinel.service; do  # zys-legacy-cleanup
+    for u in sentinel-upload-scan.service sentinel-proc.service sentinel-intel.timer sentinel-intel.service sentinel-av.timer sentinel-av.service sentinel-integ.timer sentinel-integ.service sentinel-fw.timer sentinel-fw.service sentinel-coraza-sesuai.service sentinel-notify.timer sentinel-notify.service sentinel-selfheal.timer sentinel-selfheal.service sentinel-license.timer sentinel-license.service sentinel-sweeper.timer sentinel-sweeper.service sentinel.service; do  # zys-legacy-cleanup
       systemctl stop "$u" 2>/dev/null || true
     done
   fi
   [ -x "$BIN/guardctl" ] && "$BIN/guardctl" stop >/dev/null 2>&1
   return 0
+}
+
+# Sisa halus setelah unit dicabut: unit milik kita yang tidak ada di daftar tetap (dikenali dari penanda kepemilikan di isinya,
+# bukan sekadar nama), status "failed" unit yang berkasnya sudah tiada, stempel timer persisten, symlink SysV, dan /run.
+cabut_unit_sisa() {
+  local f u
+  for f in /etc/systemd/system/sentinel*.service /etc/systemd/system/sentinel*.timer; do
+    [ -f "$f" ] || continue
+    grep -qE 'ZySentinel|/www/server/sentinel' "$f" 2>/dev/null || continue
+    u="$(basename "$f")"
+    if command -v systemctl >/dev/null 2>&1; then systemctl stop "$u" 2>/dev/null || true; systemctl disable "$u" 2>/dev/null || true; fi
+    rm -f "$f"
+  done
+  for f in /etc/rc[0-6S].d/[SK][0-9][0-9]sentinel; do
+    [ -L "$f" ] && case "$(readlink "$f")" in */init.d/sentinel) rm -f "$f" ;; esac
+  done
+  rm -f /var/lib/systemd/timers/stamp-sentinel*.timer 2>/dev/null || true
+  rm -rf /run/sentinel 2>/dev/null || true
+  if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
+    systemctl daemon-reload 2>/dev/null || true
+    systemctl reset-failed 'sentinel*' 2>/dev/null || true
+  fi
+}
+
+# Paket prasyarat (mis. clamav) yang DIPASANG installer ini dicabut bila aman (lihat adapters/pkgclean.py): disimulasikan dulu,
+# dilewati bila akan menyeret paket lain, tanpa autoremove. Paket yang sudah ada sebelum pemasangan tidak pernah disentuh.
+cabut_paket_prasyarat() {
+  [ -s "$ETC/dipasang-paket.list" ] || return 0
+  local sk
+  if ! ada python3 || ! sk="$(adapter_skrip pkgclean.py)"; then
+    say "paket prasyarat dibiarkan terpasang (python3/pkgclean.py tidak tersedia); daftar: $ETC/dipasang-paket.list"
+    return 0
+  fi
+  local tunda="$ETC/dipasang-paket.tunda" fam pk tool
+  python3 -B "$sk" remove "$ETC/dipasang-paket.list" --deferred-out "$tunda" || err "pencabutan paket prasyarat gagal sebagian; periksa: apt-get -s remove"
+  # Pemilik interpreter (python3 yang kita pasang di CentOS 7) dicabut DI SINI, setelah Python keluar; rencananya sudah lolos
+  # simulasi (tidak menyeret paket di luar daftar). Nama paket divalidasi ketat oleh pkgclean.py.
+  if [ -s "$tunda" ]; then
+    read -r fam pk < "$tunda"
+    case "$fam" in
+      deb) DEBIAN_FRONTEND=noninteractive apt-get -y -q remove --purge $pk >/dev/null 2>&1 && say "paket interpreter dicabut: $pk" || err "pencabutan paket interpreter gagal: $pk" ;;
+      rpm) tool="$(command -v dnf || command -v yum)"; [ -n "$tool" ] && "$tool" -y remove $pk >/dev/null 2>&1 && say "paket interpreter dicabut: $pk" || err "pencabutan paket interpreter gagal: $pk" ;;
+    esac
+    rm -f "$tunda"
+  fi
+}
+
+# Jaring pengaman setelah `sentinel-fw.sh remove`: cabut rantai dan ipset milik kita SECARA NAMA di tingkat shell, tidak bergantung pada
+# Python/skrip lain (di Python 3.6 atau iptables lama pencabutan lewat skrip bisa gagal diam-diam dan menyisakan rantai/ipset).
+# Hanya objek berawalan "sentinel_"/"SENTINEL" milik kita; set IPv6 (*6) ikut karena memakai awalan yang sama.
+cabut_sisa_firewall() {
+  local ipt c s
+  for ipt in iptables ip6tables; do
+    command -v "$ipt" >/dev/null 2>&1 || continue
+    for c in SENTINEL SENTINEL_IN_PORTS SENTINEL_OUT_PORTS; do
+      "$ipt" -w 10 -D INPUT -j "$c" 2>/dev/null || true
+      "$ipt" -w 10 -D OUTPUT -j "$c" 2>/dev/null || true
+    done
+    "$ipt" -w 10 -F SENTINEL 2>/dev/null || true            # SENTINEL melompat ke chain port; kosongkan dulu agar bisa dihapus
+    for c in SENTINEL_IN_PORTS SENTINEL_OUT_PORTS SENTINEL; do
+      "$ipt" -w 10 -F "$c" 2>/dev/null || true
+      "$ipt" -w 10 -X "$c" 2>/dev/null || true
+    done
+  done
+  if command -v ipset >/dev/null 2>&1; then
+    for s in $(ipset list -n 2>/dev/null | grep -E '^sentinel_[a-z0-9_]+$'); do
+      ipset flush "$s" 2>/dev/null || true
+      ipset destroy "$s" 2>/dev/null || true
+    done
+  fi
 }
 
 uninstall_clean() {
@@ -1044,13 +1268,18 @@ uninstall_clean() {
   #    peninggalan versi lama; lalu uji dan reload nginx.
   say "Mencabut snippet WAF dari webserver"
   rm -f /www/server/panel/vhost/nginx/extension/*/sentinel-waf.conf \
-        /www/server/panel/vhost/apache/extension/*/sentinel-waf.conf 2>/dev/null || true
+        /www/server/panel/vhost/apache/extension/*/sentinel-waf.conf \
+        /www/server/panel/vhost/nginx/extension/*/sentinel-akses.conf \
+        /www/server/panel/vhost/apache/extension/*/sentinel-akses.conf \
+        /www/server/panel/vhost/nginx/extension/*/sentinel-realip.conf \
+        /www/server/panel/vhost/apache/extension/*/sentinel-realip.conf 2>/dev/null || true
   # OLS: folder waf/ bisa berisi berkas milik pihak lain; hanya hapus yang ditulis plugin ini.
   for f in /www/server/panel/vhost/openlitespeed/waf/*.conf; do
     [ -f "$f" ] && grep -q 'dikelola sentinel-waf.sh' "$f" 2>/dev/null && rm -f "$f"
   done
   rm -f /www/server/panel/vhost/nginx/sentinel_waf.conf 2>/dev/null || true
   if [ -x "$BIN/sentinel-waf.sh" ]; then
+    bash "$BIN/sentinel-waf.sh" strip-includes 2>/dev/null || true      # standalone: cabut include WAF dari vhost nginx/Apache distro
     bash "$BIN/sentinel-waf.sh" coraza-uninstall 2>/dev/null || true
   fi
   if [ -x /www/server/nginx/sbin/nginx ]; then
@@ -1065,18 +1294,13 @@ uninstall_clean() {
     say "Mencabut aturan rantai kernel firewall"
     bash "$BIN/sentinel-fw.sh" remove 2>/dev/null || true
   fi
-  if command -v ipset >/dev/null 2>&1; then
-    for s in sentinel_ban sentinel_throttle sentinel_review sentinel_geo sentinel_intel sentinel_ports_in sentinel_ports_out; do
-      ipset flush "$s" 2>/dev/null || true
-      ipset destroy "$s" 2>/dev/null || true
-    done
-  fi
+  cabut_sisa_firewall
 
   bersihkan_persistensi
 
   # 3. Hentikan & hapus seluruh unit systemd
   if [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1; then
-    local units="sentinel-upload-scan.service sentinel-proc.service sentinel-intel.timer sentinel-intel.service sentinel-av.timer sentinel-av.service sentinel-integ.timer sentinel-integ.service sentinel-fw.timer sentinel-fw.service sentinel-notify.timer sentinel-selfheal.timer sentinel-selfheal.service sentinel-license.timer sentinel-license.service sentinel-sweeper.timer sentinel-sweeper.service sentinel.service"  # zys-legacy-cleanup
+    local units="sentinel-upload-scan.service sentinel-proc.service sentinel-intel.timer sentinel-intel.service sentinel-av.timer sentinel-av.service sentinel-integ.timer sentinel-integ.service sentinel-fw.timer sentinel-fw.service sentinel-coraza-sesuai.service sentinel-notify.timer sentinel-notify.service sentinel-selfheal.timer sentinel-selfheal.service sentinel-license.timer sentinel-license.service sentinel-sweeper.timer sentinel-sweeper.service sentinel.service"  # zys-legacy-cleanup
     for u in $units; do
       systemctl stop "$u" 2>/dev/null || true
       systemctl disable "$u" 2>/dev/null || true
@@ -1089,26 +1313,37 @@ uninstall_clean() {
     say "seluruh layanan systemd dihentikan dan unit dicabut"
   else
     [ -x "$BIN/guardctl" ] && "$BIN/guardctl" stop 2>/dev/null || true
-    for u in sentinel-upload-scan.service sentinel-proc.service sentinel-intel.timer sentinel-intel.service sentinel-av.timer sentinel-av.service sentinel-integ.timer sentinel-integ.service sentinel-fw.timer sentinel-fw.service sentinel-notify.timer sentinel-notify.service sentinel-selfheal.timer sentinel-selfheal.service sentinel-license.timer sentinel-license.service sentinel-sweeper.timer sentinel-sweeper.service sentinel.service; do  # zys-legacy-cleanup
+    for u in sentinel-upload-scan.service sentinel-proc.service sentinel-intel.timer sentinel-intel.service sentinel-av.timer sentinel-av.service sentinel-integ.timer sentinel-integ.service sentinel-fw.timer sentinel-fw.service sentinel-coraza-sesuai.service sentinel-notify.timer sentinel-notify.service sentinel-selfheal.timer sentinel-selfheal.service sentinel-license.timer sentinel-license.service sentinel-sweeper.timer sentinel-sweeper.service sentinel.service; do  # zys-legacy-cleanup
       rm -f "/etc/systemd/system/$u" 2>/dev/null || true
     done
     rm -f /etc/init.d/sentinel 2>/dev/null || true
     say "seluruh layanan dihentikan via guardctl stop"
   fi
 
+  cabut_ui_standalone || true
+  cabut_unit_sisa
+  cabut_paket_prasyarat
+
   # Sisa konfigurasi sistem milik plugin ini
   if [ -f /etc/ld.so.conf.d/sentinel-coraza.conf ]; then
     rm -f /etc/ld.so.conf.d/sentinel-coraza.conf && command -v ldconfig >/dev/null 2>&1 && ldconfig 2>/dev/null || true
   fi
   rm -f /etc/logrotate.d/zysentinel-waf 2>/dev/null || true
+  rm -f /www/wwwlogs/zysentinel_waf_audit.jsonl /www/wwwlogs/zysentinel_waf_audit.jsonl.* 2>/dev/null || true   # log audit WAF milik kita
   rm -f /etc/logrotate.d/zysentinel 2>/dev/null || true
 
   # 4. Hapus seluruh direktori kerja, basis data, dan log Sentinel
   rm -rf "$BASE"
   say "berkas di $BASE dan log dibersihkan secara total"
+  # direktori induk yang dibuat installer dan kini kosong (rmdir: tidak pernah menghapus isi milik pihak lain)
+  rmdir "$(dirname "$BASE")" 2>/dev/null || true
+  rmdir /www/wwwlogs 2>/dev/null || true
+  rmdir /www 2>/dev/null || true
   # Penanda: sampai install berikutnya, panel tidak boleh membangkitkan kembali bin/ dan unit
   # (self-heal di sentinel_main) pada plugin yang sudah dicabut.
-  touch "$PLUG_DIR/.uninstalled" 2>/dev/null || true
+  # hanya untuk plugin aaPanel (mencegah self-heal panel membangkitkan bin/ dan unit); di panel lain PLUG_DIR adalah folder sumber
+  # instalasi dan tidak boleh dikotori berkas penanda.
+  if [ -d /www/server/panel/class ]; then touch "$PLUG_DIR/.uninstalled" 2>/dev/null || true; fi   # tidak bergantung pada deteksi_panel (uninstall tidak memanggilnya)
   say "pencabutan bersih selesai. Server kembali ke konfigurasi awal."
   return 0
 }
@@ -1126,6 +1361,8 @@ cabut() {
 }
 
 pasang_fresh() {
+  deteksi_panel
+  siapkan_python || exit 3
   rm -f "$PLUG_DIR/.uninstalled" 2>/dev/null || true
   say "memulai instalasi baru (Fresh Install) ZySentinel..."
   rm -f "$ETC/uninstall.lock" 2>/dev/null || true
@@ -1141,6 +1378,7 @@ pasang_fresh() {
   pasang_antivirus || true
   pasang_defender_elit || true
   kunci_keamanan_benteng || true
+  pasang_ui_standalone || true
   say "fresh install selesai. Status: systemctl status sentinel.service"
 }
 
@@ -1158,16 +1396,21 @@ perbaiki_mandiri() {
   cek_prasyarat || true
 
   # 2. Periksa skrip biner di BIN
-  for f in guardctl sentinel-fw.sh sentinel-waf.sh sentinel-av.sh sentinel-proc.py sentinel-intel.sh sentinel-ports.py sentinel-zyrules.py sentinel_license.py license_features.json; do
+  for f in guardctl sentinel-fw.sh sentinel-waf.sh sentinel-av.sh sentinel-proc.py sentinel-intel.sh sentinel-ports.py sentinel-zyrules.py sentinel-cve.py sentinel-proxy.py sentinel_license.py license_features.json; do
     # Hilang, kosong, ATAU isinya berbeda dari payload (rusak, termodifikasi,
     # atau versi lama setelah pembaruan plugin): payload adalah sumber kebenaran.
     if [ -f "$pay/$f" ] && ! cmp -s "$pay/$f" "$BIN/$f"; then
-      cp -p "$pay/$f" "$BIN/$f"
+      cp -p "$pay/$f" "$BIN/.$f.baru.$$" && mv -f "$BIN/.$f.baru.$$" "$BIN/$f" || rm -f "$BIN/.$f.baru.$$"
       chmod 750 "$BIN/$f"
       say "skrip $f dipulihkan dari payload"
       dipulihkan=$((dipulihkan + 1))
     fi
   done
+  if [ -d "$pay/adapters" ]; then
+    rm -rf "$BIN/adapters"
+    cp -a "$pay/adapters" "$BIN/adapters"
+    chmod -R 755 "$BIN/adapters" 2>/dev/null || true
+  fi
 
   # 3. Periksa biner guardd (harus cocok dengan sumber, bukan sekadar bisa jalan)
   siapkan_guardd; local grc=$?
@@ -1285,12 +1528,11 @@ kunci_keamanan_benteng() {
   say "menerapkan pengerasan keamanan berkas & hak akses benteng ZySentinel"
   local plug_dir="$PLUG_DIR"
 
-  # Amankan aturan direktif agen AI & integritas kode
-  for r in AGENTS.md CLAUDE.md .cursorrules .windsurfrules; do
-    [ -f "$plug_dir/$r" ] && chmod 644 "$plug_dir/$r" 2>/dev/null || true
+  # Berkas instruksi agen AI (AGENTS.md, CLAUDE.md, .cursorrules, ...) tidak lagi dikirim di paket (06 Nov 2026): sisa dari versi lama dibuang
+  for r in AGENTS.md CLAUDE.md GEMINI.md .cursorrules .windsurfrules .github/copilot-instructions.md; do
+    rm -f "$plug_dir/$r" "$plug_dir/payload/$r" 2>/dev/null || true
   done
-  [ -d "$plug_dir/.github" ] && chmod -R 755 "$plug_dir/.github" 2>/dev/null || true
-  [ -f "$plug_dir/.github/copilot-instructions.md" ] && chmod 644 "$plug_dir/.github/copilot-instructions.md" 2>/dev/null || true
+  rmdir "$plug_dir/.github" "$plug_dir/payload/.github" 2>/dev/null || true
 
   # 1. Pastikan seluruh kepemilikan di bawah sentinel & plugin adalah root:root
   chown -R root:root "$BASE" 2>/dev/null || true
@@ -1340,6 +1582,8 @@ kunci_keamanan_benteng() {
 }
 
 pasang_icon() {
+  # Di server tanpa aaPanel jangan membuat /www/server/panel/... (membuat adapter salah mengira ini aaPanel).
+  [ -d /www/server/panel/class ] || return 0
   local plug_dir="/www/server/panel/plugin/sentinel"
   local icon_src="$plug_dir/icon.png"
   [ -f "$icon_src" ] || icon_src="$PLUG_DIR/icon.png"
@@ -1349,6 +1593,18 @@ pasang_icon() {
     cp -p "$icon_src" /www/server/panel/BTPanel/static/vite/images/soft-ico/ico-sentinel.png 2>/dev/null || true
     say "ikon CyberMatrix resmi disinkronkan ke aset panel aaPanel"
   fi
+}
+
+pasang_panel_ui() {
+  # Sinkronkan teks loading 'Getting ZySensGuard..' ke pustaka statis aaPanel
+  local f
+  for f in /www/server/panel/BTPanel/static/js/public_backup.js /www/server/panel/BTPanel/static/vite/oldjs/public_backup.js; do
+    [ -f "$f" ] || continue
+    if grep -q "Getting ZySensGuard" "$f" 2>/dev/null; then
+      continue
+    fi
+    sed -i "s/var loadT = bt\.load(lan\.soft\.menu_temp);/var loadMsg = (name === 'sentinel' || name === 'zysentinel' || (title \&\& String(title).toLowerCase().indexOf('sentinel') !== -1)) ? 'Getting ZySensGuard..' : lan.soft.menu_temp; var loadT = bt.load(loadMsg);/" "$f" 2>/dev/null || true
+  done
 }
 
 butuh_root
@@ -1375,7 +1631,150 @@ bersihkan_komponen_pro() {
   say "edisi Free: komponen berbayar versi lama dibersihkan (tersedia di ZySentinel Pro)"
 }
 
+# ---------------------------------------------------------------------------
+# Deteksi panel dan UI standalone (T-181).
+# ---------------------------------------------------------------------------
+UI_PORT=18491
+UI_ROOT="$BASE/ui"                    # sentinel_main + adapters + payload (hanya root; dipakai sentinel-uid)
+UI_STATIC=/usr/share/zysentinel-ui    # sentinel-ui.py, shell, index.html, aset (terbaca akun zysui)
+UI_ETC=/etc/zysentinel-ui             # tls.crt/tls.key/allow.txt/enabled (di luar $BASE: etc/ dikunci 0700 root)
+PANEL_JENIS=none
+
+# Deteksi lingkungan terpusat (adapters/env.py): OS, tipe panel (aaPanel/cPanel/DirectAdmin/CyberPanel/Plesk/standalone), web server
+# (nginx/Apache/OpenLiteSpeed/LiteSpeed/Caddy: terpasang? aktif? versi?) dan lokasi bawaan distro. Hasil: env.json + env.sh (dipakai
+# semua komponen) dan platform.json (kompatibilitas adapter lama). Tidak ada komponen yang menebak lewat /www/wwwroot.
+env_jalankan() {   # env_jalankan <argumen env.py>...  (return 127 bila env.py/python tidak tersedia)
+  local py=python3 c envpy=""
+  [ -x "$PYENV" ] && py="$PYENV"
+  for c in "${PAY:-/nonexistent}/adapters/env.py" "$BIN/adapters/env.py" "${PLUG_DIR:-/nonexistent}/adapters/env.py"; do
+    [ -f "$c" ] && { envpy="$c"; break; }
+  done
+  [ -n "$envpy" ] && ada "$py" || return 127
+  "$py" "$envpy" "$@"
+}
+
+deteksi_panel() {
+  PANEL_JENIS=none
+  mkdir -p "$ETC" 2>/dev/null || true
+  local ringkas tipe
+  if ringkas="$(env_jalankan detect 2>/dev/null)" && tipe="$(env_jalankan panel 2>/dev/null)" && [ -n "$tipe" ]; then
+    PANEL_JENIS="$tipe"
+    say "lingkungan terdeteksi: $ringkas"
+  else
+    # cadangan tanpa python: penanda panel langsung
+    if [ -d /www/server/panel/class ]; then PANEL_JENIS=aapanel
+    elif [ -f /usr/local/cpanel/version ]; then PANEL_JENIS=cpanel
+    elif [ -x /usr/local/directadmin/directadmin ]; then PANEL_JENIS=directadmin
+    elif [ -d /usr/local/CyberCP ]; then PANEL_JENIS=cyberpanel
+    elif [ -d /usr/local/psa ]; then PANEL_JENIS=plesk
+    fi
+    say "panel terdeteksi: $PANEL_JENIS (deteksi lengkap tidak tersedia: python3/env.py)"
+  fi
+  printf '{"panel": "%s", "detected_at": "%s"}\n' "$PANEL_JENIS" "$(date -u +%FT%TZ)" >"$ETC/platform.json" 2>/dev/null || true
+}
+
+aapanel_sungguhan() { [ "$PANEL_JENIS" = aapanel ]; }
+
+pasang_ui_standalone() { :; }
+cabut_ui_standalone() { :; }
+
+# Interpreter ZySentinel. Versi Python minimum klien: 3.7 (diukur dengan vermin: subprocess.run(text=, capture_output=),
+# re.Pattern, ThreadingHTTPServer, ssl.minimum_version, datetime.fromisoformat; socket.send_fds 3.9 punya cadangan sendmsg).
+# Urutan pilihan: pyenv aaPanel -> python3 atau python3.X yang sudah ada (>= 3.7) -> EL8: python39 dari AppStream resmi (python3 bawaan
+# EL8 adalah 3.6) -> tolak SEBELUM mengubah apa pun. Interpreter terpilih ditulis ke etc/python dan bin/py/python3 (symlink); skrip
+# runtime menaruh bin/py di depan PATH sehingga `python3` mereka = interpreter ini. Python milik host TIDAK PERNAH diganti atau dialihkan
+# (tanpa alternatives, tanpa symlink global di /usr/bin atau /usr/local/bin): setup tiap server berbeda dan versi lama bisa dipakai host.
+ZYS_PY=""
+ZYS_EL8_PY="${ZYS_EL8_PY:-/usr/bin/python3.9}"
+
+py_versi_ok() {   # $1 = interpreter; 0 bila >= 3.7
+  local v mj mn
+  v="$("$1" -c 'import sys; print("%d %d" % sys.version_info[:2])' 2>/dev/null)" || return 1
+  read -r mj mn <<<"$v"
+  [ -n "$mn" ] && { [ "$mj" -gt 3 ] || { [ "$mj" -eq 3 ] && [ "$mn" -ge 7 ]; }; }
+}
+
+os_id_versi() { ( . "${OS_RELEASE_FILE:-/etc/os-release}" 2>/dev/null; echo "${ID:-} ${VERSION_ID:-}" ); }
+
+# interpreter yang sudah dipilih (pemanggil yang tidak melewati siapkan_python, mis. repair/ui): etc/python, lalu python3
+py_terpilih() {
+  local p
+  [ -n "$ZYS_PY" ] && [ -x "$ZYS_PY" ] && { echo "$ZYS_PY"; return 0; }
+  p="$(head -n1 "$ETC/python" 2>/dev/null)"
+  [ -n "$p" ] && [ -x "$p" ] && { echo "$p"; return 0; }
+  command -v python3 2>/dev/null
+}
+
+siapkan_python() {
+  local c id vid mayor v
+  if [ -n "${ZYS_PYTHON:-}" ]; then
+    # pilihan eksplisit admin (mis. Python yang dibangun sendiri di /opt): dipakai apa adanya bila >= 3.7
+    if [ -x "$ZYS_PYTHON" ] && py_versi_ok "$ZYS_PYTHON"; then ZYS_PY="$ZYS_PYTHON"
+    else err "ZYS_PYTHON=$ZYS_PYTHON bukan interpreter Python 3.7+ yang dapat dijalankan. Tidak ada yang diubah."; return 1; fi
+  elif [ -x "$PYENV" ]; then
+    ZYS_PY="$PYENV"
+  else
+    # Python yang SUDAH ada di host dipakai apa adanya dan tidak pernah diganti: python3 di PATH, lalu python3.X di PATH, lalu
+    # pemasangan privat yang lazim (mis. Python dibangun sendiri ke /usr/local/python39). Plugin hanya membuat symlink di foldernya.
+    for c in python3 python3.13 python3.12 python3.11 python3.10 python3.9 python3.8 python3.7; do
+      c="$(command -v "$c" 2>/dev/null)" || continue
+      if py_versi_ok "$c"; then ZYS_PY="$c"; break; fi
+    done
+    if [ -z "$ZYS_PY" ]; then
+      for c in /usr/local/python3*/bin/python3 /usr/local/python3*/bin/python3.[0-9]* /opt/python3*/bin/python3 /opt/python3*/bin/python3.[0-9]* \
+               /usr/local/bin/python3.[0-9]* /opt/*/bin/python3.[0-9]*; do   # "make altinstall" hanya membuat python3.X
+        [ -x "$c" ] || continue
+        case "$c" in *-config) continue ;; esac
+        if py_versi_ok "$c"; then ZYS_PY="$c"; break; fi
+      done
+    fi
+  fi
+  read -r id vid <<<"$(os_id_versi)"
+  mayor="${vid%%.*}"
+  if [ -z "$ZYS_PY" ] && [ "${ZYS_SKIP_PLATFORM_CHECK:-0}" != 1 ]; then
+    case "$id" in
+      centos|rhel|rocky|almalinux|ol)
+        if [ "$mayor" = 8 ]; then
+          say "EL8: python3 bawaan 3.6 tidak cukup; memasang python39 dari AppStream resmi (python3 sistem untuk dnf tidak diubah)"
+          [ -n "$OS_FAM" ] || deteksi_os
+          if pm_pasang python39 && [ -x "$ZYS_EL8_PY" ] && py_versi_ok "$ZYS_EL8_PY"; then ZYS_PY="$ZYS_EL8_PY"; fi
+        elif [ -n "$mayor" ] && [ "$mayor" -ge 9 ] 2>/dev/null && ! command -v python3 >/dev/null 2>&1; then
+          [ -n "$OS_FAM" ] || deteksi_os                 # EL9+ minimal tanpa python3: bawaan repo sudah 3.9
+          pm_pasang python3 && c="$(command -v python3)" && py_versi_ok "$c" && ZYS_PY="$c"
+        fi ;;
+      *)
+        # Debian/Ubuntu/Fedora tanpa python3 sama sekali: bawaan repo yang masih didukung sudah >= 3.7. Bila python3 ADA tetapi
+        # terlalu tua (Ubuntu 18.04, Debian 10), tidak dipasang apa-apa dan ditolak di bawah.
+        if ! command -v python3 >/dev/null 2>&1; then
+          [ -n "$OS_FAM" ] || deteksi_os
+          pm_pasang python3 && c="$(command -v python3)" && py_versi_ok "$c" && ZYS_PY="$c"
+        fi ;;
+    esac
+  fi
+  if [ -z "$ZYS_PY" ] && [ "${ZYS_SKIP_PLATFORM_CHECK:-0}" = 1 ]; then
+    ZYS_PY="$(command -v python3 2>/dev/null)"        # ahli: terima apa adanya
+  fi
+  if [ -z "$ZYS_PY" ]; then
+    c="$(command -v python3 2>/dev/null)"
+    if [ -n "$c" ]; then
+      v="$("$c" -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null)"
+      err "Python ${v:-?} ($c) tidak didukung: ZySentinel butuh Python 3.7 atau lebih baru."
+    else
+      err "python3 tidak ada${id:+ di $id $vid}: ZySentinel butuh Python 3.7 atau lebih baru (bawaan EL7/EL8 adalah 3.6)."
+    fi
+    err "Pasang Python 3.7+ (mis. python39 dari AppStream di EL8, atau build dari sumber), lalu jalankan ulang. Tidak ada yang diubah."
+    return 1
+  fi
+  mkdir -p "$BIN/py" "$ETC" 2>/dev/null || true
+  ln -sfn "$ZYS_PY" "$BIN/py/python3"
+  printf '%s\n' "$ZYS_PY" > "$ETC/python"
+  export PATH="$BIN/py:$PATH"
+  return 0
+}
+
 pasang_lengkap() {
+  deteksi_panel
+  siapkan_python || exit 3
   rm -f "$PLUG_DIR/.uninstalled" 2>/dev/null || true
   pulihkan_izin_staging
   cek_prasyarat || true
@@ -1390,6 +1789,8 @@ pasang_lengkap() {
   pasang_defender_elit || true
   kunci_keamanan_benteng || true
   pasang_icon || true
+  pasang_panel_ui || true
+  pasang_ui_standalone || true
 }
 
 case "$AKSI" in
@@ -1401,7 +1802,7 @@ case "$AKSI" in
     ;;
   fresh|fresh-install)
     pulihkan_izin_staging
-    pasang_fresh && pasang_icon
+    pasang_fresh && pasang_icon && pasang_panel_ui
     verifikasi_akhir; exit $?
     ;;
   update|upgrade)
@@ -1420,10 +1821,16 @@ case "$AKSI" in
   uninstall|cabut)
     uninstall_clean "$ARG2"
     ;;
+  ui|ui-pasang)
+    # hanya UI standalone (tanpa daemon/firewall): untuk uji dan untuk menambah UI pada pemasangan yang sudah ada
+    cari_payload
+    deteksi_panel
+    pasang_ui_standalone; exit $?
+    ;;
   lock|kunci)
     kunci_keamanan_benteng
     ;;
   *)
-    echo "Usage: $0 {install|fresh|update|repair|deps|uninstall|lock}"; exit 1
+    echo "Usage: $0 {install|fresh|update|repair|deps|ui|uninstall|lock}"; exit 1
     ;;
 esac

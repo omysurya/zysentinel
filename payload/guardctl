@@ -1,5 +1,9 @@
 #!/bin/bash
-# ZySens-Security-Shield: ​‌​‌‌​‌​​‌​‌‌​​‌​‌​​​‌‌‌​‌​‌​‌​‌​‌​​​​​‌​‌​‌​​‌​​‌​​​‌​​​​‌​‌‌​‌​‌​​​​​‌​‌​​‌​​‌​​‌​‌‌​‌​‌​‌​​‌‌​‌​​​‌​‌​‌​​​​‌‌​‌​‌​‌​‌​‌​‌​​‌​​‌​​‌​​‌​‌​‌​‌​​​‌​‌‌​​‌​​‌​‌‌​‌​‌​‌​​​​​‌​​‌‌‌‌​‌​​‌‌​​​‌​​‌​​‌​‌​​​​‌‌​‌​‌‌​​‌​​‌‌‌​‌​​​‌​​​​​​‌​‌​​‌‌​‌‌‌​‌​​​‌‌‌​​‌​​‌‌​‌​​‌​‌‌​​​‌‌​‌‌‌​‌​​​​‌​​​​​​‌​​​​​‌​‌​​‌​​‌​​‌​​​​​​‌​​​‌​​​‌‌​‌​​‌​‌‌‌​​‌​​‌‌​​‌​‌​‌‌​​​‌‌​‌‌‌​‌​​​‌‌​‌​​‌​‌‌‌​‌‌​​‌‌​​‌​‌​​‌​‌‌‌​​​​​‌​‌​​‌​‌​‌​‌​‌‌​‌‌‌​​‌‌​​​​‌​‌‌‌​‌​‌​‌‌‌​‌​​​‌‌​‌​​​​‌‌​‌‌‌‌​‌‌‌​​‌​​‌‌​‌​​‌​‌‌‌‌​‌​​‌‌​​‌​‌​‌‌​​‌​​​​‌​​​​​​‌​​​​​‌​‌​​‌​​‌​​‌​​​​​​‌‌​​​​‌​‌‌​​‌‌‌​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌‌​‌​​​‌‌‌​​‌‌​​‌​​​​​​​‌​‌​​​​‌​​​​‌‌​‌‌‌​‌​‌​‌‌‌​​‌​​‌‌‌​​‌‌​‌‌​‌‌‌‌​‌‌‌​​‌​​​‌​‌‌​​​​‌​​​​​​‌​​​​‌‌​‌‌​‌‌‌‌​‌‌‌​​​​​‌‌​‌​​‌​‌‌​‌‌​​​‌‌​‌‌‌‌​‌‌‌​‌​​​​‌​‌‌​​​​‌​​​​​​‌​‌​‌‌‌​‌‌​‌​​‌​‌‌​‌‌‌​​‌‌​​‌​​​‌‌‌​​‌‌​‌‌‌​‌​‌​‌‌‌​​‌​​‌‌​​‌‌​​​‌​‌‌​​​​‌​​​​​​‌​​​​‌‌​‌‌​‌‌​​​‌‌​​​​‌​‌‌‌​‌​‌​‌‌​​‌​​​‌‌​​‌​‌​​‌​‌‌​​​​‌​​​​​​‌​​​‌‌‌​‌​‌​​​​​‌​‌​‌​​​​‌​‌‌​​​​‌​​​​​​‌​​​‌​​​‌‌​​‌​‌​‌‌‌​‌‌​​‌‌​‌​​‌​‌‌​‌‌‌​​​‌​‌‌​​​​‌​​​​​​‌​​​​​‌​‌‌​‌​​‌​‌‌​​‌​​​‌‌​​‌​‌​‌‌‌​​‌​​​‌​‌​​‌​​‌​​​​​​‌‌​​​​‌​‌‌‌​​‌​​‌‌​​‌​‌​​‌​​​​​​‌‌‌​​​​​‌‌‌​​‌​​‌‌​‌‌‌‌​‌‌​‌​​​​‌‌​‌​​‌​‌‌​​​‌​​‌‌​‌​​‌​‌‌‌​‌​​​‌‌​​‌​‌​‌‌​​‌​​​​‌​​​​​​‌‌​​‌‌​​‌‌‌​​‌​​‌‌​‌‌‌‌​‌‌​‌‌​‌​​‌​​​​​​‌‌​​‌​‌​‌‌‌‌​​​​‌‌‌​​​​​‌‌​‌‌​​​‌‌​​​​‌​‌‌​‌​​‌​‌‌​‌‌‌​​‌‌​‌​​‌​‌‌​‌‌‌​​‌‌​​‌‌‌​​‌​‌‌​​​​‌​​​​​​‌‌‌​​‌​​‌‌​​‌​‌​‌‌‌​‌‌​​‌‌​​‌​‌​‌‌‌​​‌​​‌‌‌​​‌‌​‌‌​​‌​‌​​‌​‌‌​‌​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌​​‌‌‌​‌‌​‌​​‌​‌‌​‌‌‌​​‌‌​​‌​‌​‌‌​​‌​‌​‌‌‌​​‌​​‌‌​‌​​‌​‌‌​‌‌‌​​‌‌​​‌‌‌​​‌​‌‌​​​​‌​​​​​​‌‌‌​​‌​​‌‌​​‌​‌​‌‌​​‌‌​​‌‌​​​​‌​‌‌​​​‌‌​‌‌‌​‌​​​‌‌​‌‌‌‌​‌‌‌​​‌​​‌‌​‌​​‌​‌‌​‌‌‌​​‌‌​​‌‌‌​​‌​‌‌​​​​‌​​​​​​‌‌​‌‌‌‌​‌‌‌​​‌​​​‌​​​​​​‌‌​‌‌​‌​‌‌​‌‌‌‌​‌‌​​‌​​​‌‌​‌​​‌​‌‌​​‌‌​​‌‌‌‌​​‌​‌‌​‌​​‌​‌‌​‌‌‌​​‌‌​​‌‌‌​​‌​​​​​​‌‌‌​‌​​​‌‌​‌​​​​‌‌​‌​​‌​‌‌‌​​‌‌​​‌​​​​​​‌‌​​​‌‌​‌‌​‌‌‌‌​‌‌​​‌​​​‌‌​​‌​‌​‌‌​​​‌​​‌‌​​​​‌​‌‌‌​​‌‌​‌‌​​‌​‌​​‌​‌‌‌​​​​​‌​‌​​‌​​​‌​​​‌‌​​‌​‌​‌‌‌​‌‌​​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​‌‌‌‌​‌‌‌​​​​​‌‌​​‌​‌​‌‌‌​​‌​​​‌​​​​​​‌‌​​​​‌​‌‌‌​‌​‌​‌‌‌​‌​​​‌‌​‌​​​​‌‌​‌‌‌‌​‌‌‌​​‌​​‌‌​‌​​‌​‌‌‌‌​‌​​‌‌​​​​‌​‌‌‌​‌​​​‌‌​‌​​‌​‌‌​‌‌‌‌​‌‌​‌‌‌​​​‌​​​​​​‌‌‌​​‌​​‌‌​​‌​‌​‌‌‌​​​‌​‌‌‌​‌​‌​‌‌​‌​​‌​‌‌‌​​‌​​‌‌​​‌​‌​‌‌‌​​‌‌​​‌​​​​​​‌‌​‌‌​‌​‌‌​​​​‌​‌‌‌​‌​​​‌‌​​​‌‌​‌‌​‌​​​​‌‌​‌​​‌​‌‌​‌‌‌​​‌‌​​‌‌‌​​‌​​​​​​‌‌​​‌‌‌​‌‌​‌​​‌​‌‌‌​‌​​​​‌​​​​​​‌‌​‌‌‌‌​‌‌‌​‌‌‌​‌‌​‌‌‌​​‌‌​​‌​‌​‌‌‌​​‌​​​‌​​​​​​​‌​‌​​​​‌‌​‌‌‌‌​‌‌​‌‌​‌​‌‌‌‌​​‌​‌‌‌​​‌‌​‌‌‌​‌​‌​‌‌‌​​‌​​‌‌‌‌​​‌​‌‌​​​​‌​​‌​‌‌‌‌​‌‌​‌‌​‌​‌‌​‌‌‌‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌‌‌​​‌​‌‌​‌​​​​‌‌​​​​‌​‌‌​‌‌‌​​‌‌​​​​‌​‌​​​​​​​‌‌​​‌‌‌​‌‌​‌‌​‌​‌‌​​​​‌​‌‌​‌​​‌​‌‌​‌‌​​​​‌​‌‌‌​​‌‌​​​‌‌​‌‌​‌‌‌‌​‌‌​‌‌​‌​​‌​‌​​‌​​‌​​​​​​‌‌​​​​‌​‌‌​‌‌‌​​‌‌​​‌​​​​‌​​​​​​‌‌​​​​‌​‌‌‌​‌​‌​‌‌‌​‌​​​‌‌​‌​​​​‌‌​‌‌‌‌​‌‌‌​​‌​​‌‌​‌​​‌​‌‌‌‌​‌​​‌‌​​‌​‌​‌‌​​‌​​​​‌​​​​​​‌‌​​‌​​​‌‌​​‌​‌​‌‌‌​‌‌​​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​‌‌‌‌​‌‌‌​​​​​‌‌​​‌​‌​‌‌‌​​‌​​​‌​​​​​​‌​‌​​‌‌​‌​‌​​‌‌​‌​​‌​​​​​‌​​​​​​‌‌‌​​​​​‌‌‌​‌​‌​‌‌​​​‌​​‌‌​‌‌​​​‌‌​‌​​‌​‌‌​​​‌‌​​‌​​​​​​‌‌​‌​‌‌​‌‌​​‌​‌​‌‌‌‌​​‌​​‌​​​​​​​‌​‌​​​​‌​‌​‌​​​‌‌​‌​​​​‌‌​‌​​‌​‌‌​‌‌‌​​‌‌​‌​‌‌​‌​​​​‌​​‌‌​‌‌‌‌​‌‌​‌‌‌‌​‌‌​‌​‌‌​​‌​‌‌​‌​‌​​‌​​‌​‌​‌​‌​​​‌​​‌‌​​​‌​​​‌‌‌​​‌‌​​‌​​​‌​​​​​​​‌​‌‌‌‌​​‌​​​​​​‌​​​​​‌​‌​​​​​‌​‌​​​​​‌​‌​​​​​‌​‌​​​​‌‌​​‌‌​​‌‌​‌​​‌‌‌​​‌‌‌‌​‌​​‌‌​​​​‌​‌​​​​‌‌​​‌‌​​​‌​‌‌​‌‌​​​‌​‌‌​‌​​‌​​​‌​​​‌​​‌​​‌​​‌‌​​​‌​‌​​‌‌‌​​‌​‌​‌​​​‌​​​‌​‌​​‌‌​‌​‌​‌​​​​​‌​‌​​​​​‌​‌​​​​​‌​‌​​​​​‌​‌​​‌​​‌​‌​​‌‌‌​​‌‌‌​‌‌‌​​‌​‌​‌‌​​‌‌​‌​‌​‌‌​​‌‌​​‌‌‌‌​​‌​‌‌‌​‌‌​​‌‌​‌‌​​​​‌‌​​‌​​‌​​​​‌‌​‌‌‌​‌​​​​‌‌​​‌‌​‌‌​​​‌‌​‌‌‌​‌​​​‌​‌​​​‌​‌​‌​‌‌‌​‌​​‌‌​‌​‌​‌​‌‌‌​‌​​​‌​​​‌‌​​​‌‌​‌​‌‌​‌​​‌‌‌‌​​​​​‌​‌‌‌‌​‌​​‌‌​​​‌‌​‌​‌​​‌​‌​​​​​​‌‌​​‌‌​‌‌‌​‌​‌​‌‌​​‌‌​​​‌​‌‌‌‌​​‌‌​​‌​​​‌‌​​‌‌​‌​‌‌​‌​​​‌‌​‌‌‌​​‌‌‌​​‌​‌‌‌‌​​‌​‌‌​‌​​​​‌‌‌‌​‌​​‌‌‌​​‌‌​‌​​‌‌​​​​‌​‌​‌‌​‌​​‌​‌​​‌‌​​​‌‌​​‌​‌​​‌​​‌​‌‌‌​​​​​‌​‌​​‌​​‌​​‌​‌‌​​‌‌​​​‌​​​​​​‌‌‌​‌​‌​‌‌​‌‌‌​​‌‌​​​​‌​‌‌‌​‌​‌​‌‌‌​‌​​​‌‌​‌​​​​‌‌​‌‌‌‌​‌‌‌​​‌​​‌‌​‌​​‌​‌‌‌‌​‌​​‌‌​​‌​‌​‌‌​​‌​​​​‌​‌‌​​​​‌​​​​​​‌‌‌‌​​‌​‌‌​‌‌‌‌​‌‌‌​‌​‌​​‌​​​​​​‌‌​‌‌​‌​‌‌‌​‌​‌​‌‌‌​​‌‌​‌‌‌​‌​​​​‌​​​​​​‌‌‌​​‌​​‌‌​​‌​‌​‌‌​​‌‌​​‌‌‌​‌​‌​‌‌‌​​‌‌​‌‌​​‌​‌​​‌​​​​​​‌‌​​​​‌​‌‌​‌‌‌​​‌‌​​‌​​​​‌​​​​​​‌‌​‌​​‌​‌‌​‌‌‌​​‌‌‌​​‌‌​‌‌‌​‌​​​‌‌‌​​‌​​‌‌‌​‌​‌​‌‌​​​‌‌​‌‌‌​‌​​​​‌​​​​​​‌‌‌​‌​​​‌‌​‌​​​​‌‌​​‌​‌​​‌​​​​​​‌‌‌​‌​‌​‌‌‌​​‌‌​‌‌​​‌​‌​‌‌‌​​‌​​​‌‌‌​‌​​​‌​​​​​​​‌​​​‌​​‌​‌​​‌‌​‌‌​‌​​‌​‌‌​‌‌​​​‌‌​​​​‌​‌‌​‌​‌‌​‌‌​​​​‌​‌‌​‌‌‌​​​‌​​​​​​‌‌‌​​‌‌​‌‌​​​​‌​‌‌​‌‌​‌​‌‌‌​​​​​‌‌​​​​‌​‌‌​‌​​‌​‌‌​‌​‌‌​‌‌​​​​‌​‌‌​‌‌‌​​​‌​​​​​​‌‌​​‌‌​​‌‌​​‌​‌​‌‌​​‌​‌​‌‌​​‌​​​‌‌​​​‌​​‌‌​​​​‌​‌‌​​​‌‌​‌‌​‌​‌‌​​‌​​​​​​‌‌​​‌​​​‌‌​​​​‌​‌‌​‌‌‌​​​‌​​​​​​‌‌​‌‌​​​‌‌​​​​‌​‌‌‌​​​​​‌‌​‌‌‌‌​‌‌‌​​‌​​‌‌​​​​‌​‌‌​‌‌‌​​​‌​​​​​​‌‌​​​‌​​‌‌‌​‌​‌​‌‌​​‌‌‌​​‌​​​​​​‌‌​‌‌​​​‌‌​​​​‌​‌‌​‌‌‌​​‌‌​​‌‌‌​‌‌‌​​‌‌​‌‌‌​‌​‌​‌‌​‌‌‌​​‌‌​​‌‌‌​​‌​​​​​​‌‌​‌‌​‌​‌‌​​‌​‌​‌‌​‌‌​​​‌‌​​​​‌​‌‌​‌‌​​​‌‌‌​‌​‌​‌‌​‌​​‌​​‌​​​​​​‌‌‌​​​​​‌‌​​​​‌​‌‌​‌‌‌​​‌‌​​‌​‌​‌‌​‌‌​​​​‌​​​​​​‌‌‌​​​​​‌‌​‌‌​​​‌‌‌​‌​‌​‌‌​​‌‌‌​‌‌​‌​​‌​‌‌​‌‌‌​​​‌​​​​​​‌​‌‌​‌​​‌‌‌‌​​‌​‌​‌​​‌‌​‌‌​​‌​‌​‌‌​‌‌‌​​‌‌‌​‌​​​‌‌​‌​​‌​‌‌​‌‌‌​​‌‌​​‌​‌​‌‌​‌‌​​​​‌​​​​​​​‌​‌​​​‌‌‌‌​​​​‌​​‌‌‌‌‌‌​​‌​​‌​‌​‌​‌‌​​​​‌​​​​​​‌​​​‌‌​​‌‌​​‌​‌​‌‌​​‌​‌​‌‌​​‌​​​‌‌​​​‌​​‌‌​​​​‌​‌‌​​​‌‌​‌‌​‌​‌‌​​‌​​​​​​​‌​​‌‌​​​‌​​​​​​‌​‌​​‌​​‌‌​​‌​‌​‌‌‌​​​​​‌‌​‌‌‌‌​‌‌‌​​‌​​‌‌‌​‌​​​​‌​​​​​​‌​​​​‌​​‌‌‌​‌​‌​‌‌​​‌‌‌​‌‌‌​​‌‌​​‌​‌​​‌​​‌​​​‌​​​‌​‌‌‌​
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 PT. StudioNet Indonesia Jaya (ZySens).
+# Interpreter ZySentinel (dipilih installer, lihat etc/python): bin/py hanya berisi symlink python3, mis. ke python3.9 di EL8.
+# Tanpa bin/py (instalasi lama) perilaku tidak berubah: python3 dari PATH sistem.
+PATH="/www/server/sentinel/bin/py:$PATH"
 # ============================================================
 # guardctl -- kendali baris perintah untuk guardd
 #
@@ -105,6 +109,92 @@ ctl() {
   fi
   say "$reply"
   case "$reply" in *'"ok":true'*) return 0 ;; *) return 1 ;; esac
+}
+
+# --- UI standalone (Pro/Max): kendali layanan sentinel-ui + sentinel-uid ---
+UI_ETC=/etc/zysentinel-ui
+UI_STATIC=/usr/share/zysentinel-ui
+UI_PORT=18491
+ui_pesan() { if [ "$(get_lang)" = "id" ]; then say "$1"; else say "$2"; fi; }
+# port UI mengikuti penanda enabled lewat aturan auto-panel firewall: terapkan ulang setelah penanda berubah
+ui_firewall() {
+  # firewall host (firewalld/ufw/CSF) lebih dulu: tanpa itu UI tidak terjangkau dari jaringan walau ZySentinel mengizinkannya
+  local hf=/www/server/sentinel/bin/adapters/hostfw.py
+  [ -f "$hf" ] && command -v python3 >/dev/null 2>&1 && python3 -B "$hf" sync "$UI_PORT" || true
+  local py=python3; [ -x /www/server/panel/pyenv/bin/python3 ] && py=/www/server/panel/pyenv/bin/python3
+  [ -f /www/server/sentinel/bin/sentinel-ports.py ] && "$py" /www/server/sentinel/bin/sentinel-ports.py apply >/dev/null 2>&1
+  return 0
+}
+
+ui_cmd() {
+  local sub="${1:-status}" user="${2:-}" ipx fp
+  case "$sub" in
+    status)
+      if [ ! -f "$UI_STATIC/sentinel-ui.py" ]; then ui_pesan "UI standalone belum terpasang (hanya paket Pro/Max)." "Standalone UI is not installed (Pro/Max only)."; return 1; fi
+      if [ -f "$UI_ETC/enabled" ]; then ui_pesan "mode        : aktif" "mode        : enabled"; else ui_pesan "mode        : nonaktif" "mode        : disabled"; fi
+      if is_systemd; then
+        say "sentinel-uid : $(systemctl is-active sentinel-uid.service 2>/dev/null)"
+        say "sentinel-ui  : $(systemctl is-active sentinel-ui.service 2>/dev/null)"
+      fi
+      if command -v curl >/dev/null 2>&1 && curl -sk --max-time 4 "https://127.0.0.1:$UI_PORT/healthz" 2>/dev/null | grep -q '^ok'; then say "healthz     : ok"; else say "healthz     : tidak menjawab"; fi
+      ;;
+    url)
+      ipx="$(hostname -I 2>/dev/null | awk '{print $1}')"
+      say "https://${ipx:-<ip-server>}:$UI_PORT"
+      fp="$(openssl x509 -in "$UI_ETC/tls.crt" -noout -fingerprint -sha256 2>/dev/null | cut -d= -f2)"
+      [ -n "$fp" ] && say "SHA-256: $fp"
+      ;;
+    enable)
+      if [ ! -f "$UI_STATIC/sentinel-ui.py" ]; then err "UI standalone belum terpasang; jalankan install.sh update dari paket Pro/Max"; return 1; fi
+      mkdir -p /www/server/sentinel/etc/ui; echo on >/www/server/sentinel/etc/ui/mode; chmod 600 /www/server/sentinel/etc/ui/mode
+      touch "$UI_ETC/enabled"
+      is_systemd && systemctl enable --now sentinel-uid.service sentinel-ui.service
+      ui_firewall
+      ui_pesan "UI standalone diaktifkan. Alamat:" "Standalone UI enabled. Address:"
+      ui_cmd url
+      ;;
+    disable)
+      mkdir -p /www/server/sentinel/etc/ui; echo off >/www/server/sentinel/etc/ui/mode; chmod 600 /www/server/sentinel/etc/ui/mode
+      rm -f "$UI_ETC/enabled"
+      is_systemd && systemctl disable --now sentinel-ui.service sentinel-uid.service
+      ui_firewall
+      ui_pesan "UI standalone dinonaktifkan." "Standalone UI disabled."
+      ;;
+    cert-renew)
+      if [ ! -f "$UI_ETC/.dibuat-installer" ] && [ -s "$UI_ETC/tls.crt" ]; then
+        err "sertifikat UI milik Anda (bukan buatan installer); perbarui sendiri tls.crt/tls.key di $UI_ETC"; return 1
+      fi
+      command -v openssl >/dev/null 2>&1 || { err "openssl tidak ada"; return 1; }
+      local san="DNS:localhost,IP:127.0.0.1" h ip
+      h="$(hostname -f 2>/dev/null || hostname)"; [ -n "$h" ] && san="$san,DNS:$h"
+      for ip in $(hostname -I 2>/dev/null); do san="$san,IP:$ip"; done
+      ( umask 077; openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 825 -subj "/CN=${h:-zysentinel}" \
+          -addext "subjectAltName=$san" -keyout "$UI_ETC/tls.key.baru" -out "$UI_ETC/tls.crt.baru" >/dev/null 2>&1 ) || { err "pembuatan sertifikat gagal"; return 1; }
+      mv -f "$UI_ETC/tls.key.baru" "$UI_ETC/tls.key"; mv -f "$UI_ETC/tls.crt.baru" "$UI_ETC/tls.crt"
+      touch "$UI_ETC/.dibuat-installer"
+      chown root:zysui "$UI_ETC/tls.key" "$UI_ETC/tls.crt"; chmod 640 "$UI_ETC/tls.key"; chmod 644 "$UI_ETC/tls.crt"
+      is_systemd && systemctl restart sentinel-ui.service
+      ui_pesan "sertifikat baru dibuat." "new certificate created."
+      ui_cmd url
+      ;;
+    2fa|2fa-off)
+      if ! printf '%s' "$user" | grep -Eq '^[A-Za-z0-9_][A-Za-z0-9_.-]{0,31}$' || ! id "$user" >/dev/null 2>&1; then
+        err "pakai: guardctl ui $sub <akun-linux>"; return 1
+      fi
+      local f="/www/server/sentinel/etc/ui/totp/$user.key"
+      if [ "$sub" = "2fa-off" ]; then rm -f "$f"; ui_pesan "2FA untuk $user dimatikan." "2FA disabled for $user."; return 0; fi
+      command -v base32 >/dev/null 2>&1 || { err "perintah base32 (coreutils) tidak ada"; return 1; }
+      mkdir -p /www/server/sentinel/etc/ui/totp; chmod 700 /www/server/sentinel/etc/ui/totp
+      local sec; sec="$(head -c 20 /dev/urandom | base32 | tr -d '=\n')"
+      ( umask 077; printf '%s\n' "$sec" >"$f" )
+      ui_pesan "2FA aktif untuk $user. Pindai/masukkan ke aplikasi autentikator (rahasia ini hanya ditampilkan sekali):" "2FA enabled for $user. Add it to your authenticator app (shown once):"
+      say "  secret : $sec"
+      say "  uri    : otpauth://totp/ZySentinel:$user?secret=$sec&issuer=ZySentinel&digits=6&period=30"
+      ;;
+    *)
+      say "pakai: guardctl ui {status|url|enable|disable|cert-renew|2fa <akun>|2fa-off <akun>}"; return 1
+      ;;
+  esac
 }
 
 case "${1:-}" in
@@ -313,6 +403,8 @@ case "${1:-}" in
     case "$val" in *$'\n'*|*$'\r'*) err "nilai tidak boleh memuat baris baru"; exit 1 ;; esac
     before="$CONF.$(date +%Y%m%d%H%M%S).bak"
     cp -p "$CONF" "$before"
+    # salinan tetap guardd.conf.bak: guardd memakainya bila guardd.conf ditemukan kosong/terpotong saat start
+    [ -s "$CONF" ] && cp -p "$CONF" "$CONF.bak"
     # simpan paling banyak 5 cadangan terbaru (hanya milik berkas ini)
     ls -1t "$CONF".*.bak 2>/dev/null | tail -n +6 | while IFS= read -r old; do rm -f -- "$old"; done
     esc=$(printf '%s' "$val" | sed -e 's/[\\|&]/\\&/g')
@@ -376,6 +468,22 @@ case "${1:-}" in
     fi
     ;;
 
+  env)
+    # lingkungan terdeteksi: OS, panel, web server (versi/aktif), keadaan. --json untuk rincian lengkap.
+    shift
+    _py=python3; [ -x /www/server/panel/pyenv/bin/python3 ] && _py=/www/server/panel/pyenv/bin/python3
+    _envpy="$(dirname "$(readlink -f "$0")")/adapters/env.py"
+    [ -f "$_envpy" ] || { err "adapters/env.py tidak ditemukan"; exit 1; }
+    "$_py" "$_envpy" detect "$@"
+    exit $?
+    ;;
+
+  ui)
+    shift
+    ui_cmd "$@"
+    exit $?
+    ;;
+
   ""|help|-h|--help)
     if [ "$(get_lang)" = "id" ]; then
       cat <<'EOF'
@@ -400,6 +508,8 @@ pakai: guardctl <perintah>
   logs [n]          tampilkan n baris log terakhir
   check-auth        periksa otentikasi pengembang resmi & integritas kode
   scan-ai [path]    pindai prompt injection, toxic skills & aturan AI berbahaya
+  env [--json]      lingkungan terdeteksi: OS, panel, web server (versi, aktif), keadaan
+  ui <sub>          UI standalone: status|url|enable|disable|cert-renew|2fa <akun>|2fa-off <akun>
 EOF
     else
       cat <<'EOF'
@@ -424,6 +534,8 @@ Usage: guardctl <command>
   logs [n]          display last n log lines
   check-auth        verify developer authority & code integrity
   scan-ai [path]    scan for prompt injection, toxic skills & dangerous AI rules
+  env [--json]      detected environment: OS, panel, web server (version, active), state
+  ui <sub>          standalone UI: status|url|enable|disable|cert-renew|2fa <user>|2fa-off <user>
 EOF
     fi
     ;;

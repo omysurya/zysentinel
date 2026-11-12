@@ -1,4 +1,9 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 PT. StudioNet Indonesia Jaya (ZySens).
+# Interpreter ZySentinel (dipilih installer, lihat etc/python): bin/py hanya berisi symlink python3, mis. ke python3.9 di EL8.
+# Tanpa bin/py (instalasi lama) perilaku tidak berubah: python3 dari PATH sistem.
+PATH="/www/server/sentinel/bin/py:$PATH"
 # ============================================================
 # sentinel-waf.sh -- pengelola WAF ZySentinel
 #
@@ -35,9 +40,43 @@ ZYGEN="${SENTINEL_ZYGEN:-/www/server/sentinel/bin/sentinel-zyrules.py}"
 LISTS_DIR="${SENTINEL_WAF_LISTS:-/www/server/sentinel/etc/waf-lists}"
 NGINX_BIN="${SENTINEL_NGINX:-/www/server/nginx/sbin/nginx}"
 NGINX_CONF="${SENTINEL_NGINX_CONF:-/www/server/nginx/conf/nginx.conf}"
+# Biner/konfigurasi nginx dari deteksi lingkungan (env.sh dari adapters/env.py: nginx aaPanel, distro Debian/RHEL, panel lain). Tanpa
+# env.sh dipakai lokasi standar. Override uji (SENTINEL_NGINX*) selalu menang; di aaPanel nilainya sama dengan bawaan di atas.
+if [ -z "${SENTINEL_NGINX:-}${SENTINEL_NGINX_CONF:-}" ]; then
+  if [ -r /www/server/sentinel/etc/env.sh ]; then
+    . /www/server/sentinel/etc/env.sh
+    [ -n "${ZYS_NGINX_BIN:-}" ] && NGINX_BIN="$ZYS_NGINX_BIN"
+    [ -n "${ZYS_NGINX_CONF:-}" ] && NGINX_CONF="$ZYS_NGINX_CONF"
+  elif [ ! -x /www/server/nginx/sbin/nginx ]; then
+    for _n in /usr/sbin/nginx /usr/local/sbin/nginx /usr/bin/nginx; do
+      if [ -x "$_n" ]; then NGINX_BIN="$_n"; break; fi
+    done
+    [ -f /etc/nginx/nginx.conf ] && NGINX_CONF=/etc/nginx/nginx.conf
+  fi
+fi
+# Salinan access log per vhost milik root untuk guardd (audit 29 Okt 2026): log aaPanel di /www/wwwlogs milik akun web, sehingga proses web
+# yang disusupi bisa menghapus isinya (deteksi buta) atau menyisipkan baris palsu (IP pihak lain di-ban). Berkas di folder ini dibuka master
+# nginx (root); folder 0700 root tidak bisa dijangkau akun web.
+AKSES_DIR="${SENTINEL_AKSES_DIR:-/www/server/sentinel/log/akses}"
+akses_dir_siap() { install -d -m 700 -o root -g root "$AKSES_DIR" 2>/dev/null || mkdir -p "$AKSES_DIR"; chmod 700 "$AKSES_DIR" 2>/dev/null; return 0; }
 NGINX_VHOST=/www/server/panel/vhost/nginx
 APACHE_VHOST=/www/server/panel/vhost/apache
 OLS_VHOST=/www/server/panel/vhost/openlitespeed
+# Mode standalone WAF: lingkungan terdeteksi BUKAN aaPanel (ZYS_PANEL dari env.sh) dan tidak ada override uji. Di sini panel tidak memuat
+# extension/<situs>/ otomatis, jadi folder snippet milik kita sendiri ($WAF_BASE/vhost-<ws>/extension/<situs>/, struktur sama dengan aaPanel
+# supaya semua pemeriksaan "WAF dipakai?" tetap berlaku) dan SATU baris include (glob, aman bila kosong) disuntikkan ke blok server situs.
+WAF_STANDALONE=0
+if [ -z "${SENTINEL_NGINX:-}${SENTINEL_NGINX_CONF:-}${SENTINEL_WAF_VHOST_TEST:-}" ] && [ -n "${ZYS_PANEL:-}" ] && [ "$ZYS_PANEL" != aapanel ] && [ ! -d /www/server/panel/vhost ]; then
+  WAF_STANDALONE=1
+  NGINX_VHOST="$WAF_BASE/vhost-nginx"; APACHE_VHOST="$WAF_BASE/vhost-apache"; OLS_VHOST="$WAF_BASE/vhost-ols"
+fi
+_WAF_HERE="$(dirname "$(readlink -f "$0")")"
+_PYBIN=python3; [ -x /www/server/panel/pyenv/bin/python3 ] && _PYBIN=/www/server/panel/pyenv/bin/python3
+WAFINJECT="$_WAF_HERE/adapters/wafinject.py"
+ENVPY="$_WAF_HERE/adapters/env.py"
+sa_sites() { "$_PYBIN" "$ENVPY" sites --full 2>/dev/null; }          # domain<TAB>webserver<TAB>berkas
+sa_conf_of() { sa_sites | awk -F'\t' -v w="$1" -v s="$2" '$2==w && $1==s {print $3; exit}'; }
+sa_include_line_path() { printf '%s/extension/%s/*.conf' "$(vhost_dir "$1")" "$2"; }
 
 say() { printf '[sentinel-waf] %s\n' "$*"; }
 err() { printf '[sentinel-waf] GALAT: %s\n' "$*" >&2; }
@@ -76,9 +115,23 @@ waf_unset() {
   [ -f "$WAF_CONF" ] && sed -i -E "/^[[:space:]]*$1[[:space:]]*=/d" "$WAF_CONF"
 }
 
+# User web server: direktif `user` di nginx.conf; bila tidak ada, yang ada di sistem (aaPanel: www; Debian: www-data; RHEL: nginx/apache).
+# Worker uji harus berjalan sebagai user yang SAMA dengan produksi, sebab berkas (log audit, aturan) dimiliki user itu.
+waf_web_user() {
+  local u=""
+  [ -r "$NGINX_CONF" ] && u="$(sed -n 's/^[[:space:]]*user[[:space:]]\+\([A-Za-z0-9_.-]\+\)[[:space:];].*/\1/p' "$NGINX_CONF" | head -1)"
+  if [ -z "$u" ] || ! id -u "$u" >/dev/null 2>&1; then
+    u=""
+    for c in www www-data nginx apache; do id -u "$c" >/dev/null 2>&1 && { u="$c"; break; }; done
+  fi
+  printf '%s' "$u"
+}
+
 payload_dir() {
   if [ -n "${SENTINEL_PAYLOAD:-}" ] && [ -d "$SENTINEL_PAYLOAD" ]; then
     printf '%s' "$SENTINEL_PAYLOAD"
+  elif [ ! -d /www/server/panel/plugin/sentinel/payload ] && [ -d /www/server/sentinel/ui/payload ]; then
+    printf '%s' "/www/server/sentinel/ui/payload"            # tanpa aaPanel: payload ada di folder UI standalone
   else
     printf '%s' "/www/server/panel/plugin/sentinel/payload"
   fi
@@ -113,6 +166,7 @@ do_zyrules_install() {
   if [ -d /etc/logrotate.d ] && [ ! -f /etc/logrotate.d/zysentinel-waf ]; then
     cat > /etc/logrotate.d/zysentinel-waf <<'LR'
 /www/wwwlogs/zysentinel_waf_audit.jsonl {
+    su www www
     weekly
     rotate 8
     compress
@@ -137,10 +191,112 @@ LR
   fi
 }
 
+# Salinan access log milik root untuk SEMUA vhost nginx/Apache (bukan hanya yang ber-WAF): extension/<site>/sentinel-akses.conf.
+# Berkas dibuka proses induk web server (root) sebelum menurunkan hak; folder AKSES_DIR root 0700 tidak terjangkau akun web. guardd
+# mengutamakan salinan ini atas /www/wwwlogs (milik www). Hanya vhost yang conf-nya memang meng-include extension/<site>/. Konfigurasi diuji
+# (nginx -t / apachectl -t) dan dikembalikan bila gagal; reload tetap tugas pemanggil. OpenLiteSpeed belum (format vhconf berbeda).
+akses_body() {
+  case "$1" in
+    nginx)  printf '# dikelola sentinel-waf.sh, jangan edit manual\n# salinan access log milik root untuk guardd (log aaPanel tetap ditulis)\naccess_log %s/%s.log;\n' "$AKSES_DIR" "$2" ;;
+    apache) printf '# dikelola sentinel-waf.sh, jangan edit manual\n# salinan access log milik root untuk guardd (log aaPanel tetap ditulis)\nCustomLog "%s/%s.log" combined\n' "$AKSES_DIR" "$2" ;;
+  esac
+}
+do_akses_sync() {
+  local ws site keadaan d f diubah baru uji_ok
+  [ "$WAF_STANDALONE" = 1 ] && return 0      # standalone: guardd membaca log distro langsung (tidak ada salinan lewat extension/)
+  akses_dir_siap
+  for ws in nginx apache; do
+    d="$(vhost_dir "$ws")" || continue
+    [ -d "$d" ] || continue
+    diubah=""
+    while IFS='|' read -r w site keadaan; do
+      [ "$w" = "$ws" ] || continue
+      case "$site" in ''|*/*|.*|*[!A-Za-z0-9._-]*) continue ;; esac
+      grep -q "extension/$site/" "$d/$site.conf" 2>/dev/null || continue
+      f="$d/extension/$site/sentinel-akses.conf"
+      baru="$(akses_body "$ws" "$site")"
+      [ -f "$f" ] && [ "$(cat "$f")" = "$baru" ] && continue
+      mkdir -p "$d/extension/$site" 2>/dev/null || continue
+      printf '%s\n' "$baru" > "$f.baru" && mv -f "$f.baru" "$f" && diubah="$diubah $f"
+    done < <(do_vhosts)
+    [ -n "$diubah" ] || continue
+    uji_ok=1
+    if [ "$ws" = nginx ] && [ -x "$NGINX_BIN" ]; then
+      "$NGINX_BIN" -t 2>&1 | grep -q 'test is successful' || uji_ok=0
+    elif [ "$ws" = apache ] && apache_bin >/dev/null; then
+      apache_cmd -t >/dev/null 2>&1 || uji_ok=0
+    fi
+    if [ "$uji_ok" = 0 ]; then
+      err "$ws: konfigurasi gagal diuji setelah salinan log root ditambahkan; dikembalikan"
+      for f in $diubah; do rm -f "$f"; done
+    else
+      say "$ws: salinan access log root diperbarui untuk $(echo "$diubah" | wc -w | tr -d ' ') vhost"
+      [ "${AKSES_RELOAD:-0}" = 1 ] && do_reload "$ws"
+    fi
+  done
+  return 0
+}
+
 do_zyrules_build() {
   [ -f "$ZYGEN" ] || ZYGEN="$(payload_dir)/sentinel-zyrules.py"
   [ -f "$ZYGEN" ] || { err "sentinel-zyrules.py tidak ditemukan"; return 1; }
-  "$(zy_py)" "$ZYGEN" build
+  "$(zy_py)" "$ZYGEN" build || return $?
+  snippet_segarkan
+  do_akses_sync
+  ols_native_sync
+}
+
+# Snippet vhost lama (dipasang versi plugin sebelumnya) disamakan dengan snippet_body terbaru, supaya perubahan seperti aturan
+# bawaan berkas/folder sensitif ikut berlaku setelah update tanpa menyalakan ulang WAF per vhost. nginx diuji (nginx -t) dan
+# semua snippet nginx yang diubah dikembalikan bila gagal; reload tetap tugas pemanggil (panel/apply).
+snippet_segarkan() {
+  local ws snip baru diubah f
+  for ws in nginx apache; do
+    diubah=""
+    for snip in "$(vhost_dir "$ws")"/extension/*/sentinel-waf.conf; do
+      [ -f "$snip" ] || continue
+      baru="$(snippet_body "$ws")"
+      [ "$(cat "$snip")" = "$baru" ] && continue
+      cp -p "$snip" "$snip.lama" && printf '%s\n' "$baru" > "$snip.baru" && mv -f "$snip.baru" "$snip" \
+        || { rm -f "$snip.baru" "$snip.lama"; continue; }
+      diubah="$diubah $snip"
+    done
+    [ -n "$diubah" ] || continue
+    local uji_ok=1
+    if [ "$ws" = nginx ] && [ -x "$NGINX_BIN" ]; then
+      "$NGINX_BIN" -t 2>&1 | grep -q 'test is successful' || uji_ok=0
+    elif [ "$ws" = apache ] && apache_bin >/dev/null; then
+      apache_cmd -t >/dev/null 2>&1 || uji_ok=0
+    fi
+    if [ "$uji_ok" = 0 ]; then
+      err "snippet WAF $ws terbaru gagal diuji; dikembalikan ke versi sebelumnya"
+      for f in $diubah; do [ -f "$f.lama" ] && mv -f "$f.lama" "$f"; done
+      continue
+    fi
+    for f in $diubah; do rm -f "$f.lama"; done
+    say "snippet WAF $ws diperbarui:$(printf '%s' "$diubah" | wc -w) vhost"
+  done
+  return 0
+}
+
+# Aturan bawaan berkas/folder sensitif untuk OpenLiteSpeed: salinan gen/native/ols.conf di redirect/<situs>/ (di-include blok
+# rewrite vhost aaPanel), hanya untuk situs yang WAF-nya menyala. nginx dan Apache memuat gen/native/*.conf langsung dari snippet.
+ols_native_path() { printf '%s/redirect/%s/zysentinel-files.conf' "$OLS_VHOST" "$1"; }
+ols_native_sync() {
+  local src="$ZY_DIR/gen/native/ols.conf" f site dst
+  [ -d "$OLS_VHOST" ] || return 0
+  for f in "$OLS_VHOST"/*.conf; do
+    [ -f "$f" ] || continue
+    site="$(basename "$f" .conf)"
+    case "$site" in ''|0.*|*.bak.*|*[!A-Za-z0-9._-]*) continue ;; esac
+    dst="$(ols_native_path "$site")"
+    if [ "$(waf_conf_get "vhost.openlitespeed.$site")" = "on" ] && [ -f "$src" ]; then
+      mkdir -p "$(dirname "$dst")" && cp -f "$src" "$dst.baru" && chmod 644 "$dst.baru" && mv -f "$dst.baru" "$dst"
+    else
+      rm -f "$dst"
+    fi
+  done
+  return 0
 }
 
 do_zyrules_status() {
@@ -151,10 +307,29 @@ do_zyrules_status() {
 zy_ready() { [ -f "$ZY_MAIN" ]; }
 
 # ------------------------------------------------------------- deteksi --
+# Modul Coraza yang dimuat nginx.conf masih bisa dimuat nginx AKTIF? (nginx di-upgrade aaPanel = modul lama ditolak: "version X instead of Y").
+# Hasil lulus disimpan per (ukuran+mtime biner nginx, sha256 modul) agar status panel tidak menjalankan nginx -t setiap kali.
+cz_terpasang_cocok() {
+  local mod lib stempel kunci
+  mod="$(sed -n -E 's/^[[:space:]]*load_module[[:space:]]+([^;[:space:]]*ngx_http_coraza_module[^;[:space:]]*)[[:space:]]*;.*/\1/p' "$NGINX_CONF" 2>/dev/null | head -1)"
+  [ -n "$mod" ] || mod="$NGINX_MODDIR/ngx_http_coraza_module.so"
+  case "$mod" in /*) : ;; *) mod="$(dirname "$NGINX_BIN")/../$mod" ;; esac
+  lib="$(dirname "$mod")/libcoraza.so"
+  [ -f "$mod" ] && [ -f "$lib" ] || return 1
+  stempel=/www/server/sentinel/run/cz-muat.ok
+  kunci="$(stat -c '%s.%Y' "$NGINX_BIN" 2>/dev/null)|$(cz_sha "$mod")|$(cz_sha "$lib")"
+  [ -f "$stempel" ] && [ "$(cat "$stempel" 2>/dev/null)" = "$kunci" ] && return 0
+  cz_nginx_info >/dev/null 2>&1 || return 1
+  cz_uji_muat "$mod" "$lib" || return 1
+  mkdir -p "$(dirname "$stempel")" 2>/dev/null && printf '%s' "$kunci" > "$stempel" 2>/dev/null
+  return 0
+}
+
 cz_modul_state() {
-  # dimuat | tersimpan (ada di cache, cocok dengan nginx aktif) | tidak-ada
+  # dimuat | usang (dimuat, tetapi tidak lagi cocok dengan nginx aktif: compile ulang + muat ulang) | tersimpan (ada di cache, cocok
+  # dengan nginx aktif) | tidak-ada
   if grep -qE '^[[:space:]]*load_module[[:space:]]+[^;]*ngx_http_coraza_module' "$NGINX_CONF" 2>/dev/null; then
-    printf 'dimuat'
+    if cz_terpasang_cocok; then printf 'dimuat'; else printf 'usang'; fi
   elif cz_nginx_info 2>/dev/null && cz_cache_ok "$(cz_key)"; then
     printf 'tersimpan'
   else
@@ -188,7 +363,7 @@ do_engine() {
   n="none"
   if [ -x "$NGINX_BIN" ]; then
     if grep -qE '^[[:space:]]*load_module[[:space:]]+[^;]*ngx_http_coraza_module' "$NGINX_CONF" 2>/dev/null \
-       && [ -f "${SENTINEL_NGINX_MODDIR:-/www/server/nginx/modules}/ngx_http_coraza_module.so" ]; then
+       && [ -f "${SENTINEL_NGINX_MODDIR:-${ZYS_NGINX_MODDIR:-/www/server/nginx/modules}}/ngx_http_coraza_module.so" ]; then
       n="coraza"
     fi
   else
@@ -241,7 +416,7 @@ do_rule_set() {
   say "rule $nama -> $aksi (berlaku setelah web server di-reload)"
 }
 
-KUNCI_MODUL="sensitive_files webshell spam scanner bot lfi_args probe_cms probe_tools probe_cve probe_archive probe_secrets"
+KUNCI_MODUL="sensitive_files webshell spam scanner bot lfi_args probe_cms probe_tools probe_cve probe_archive probe_secrets app_laravel app_wordpress app_codeigniter app_cms app_nodejs app_golang app_python"
 
 do_modul_set() {
   # $1 = nama modul ZySentinel, $2 = on|off
@@ -288,7 +463,18 @@ BUKAN_SITUS="free_waf sentinel_waf phpfpm_status waf2monitor_data"
 
 do_vhosts() {
   # Keluaran: ws|site|keadaan. keadaan dibaca dari snippet sentinel.
-  local ws d site snip keadaan skip f b
+  local ws d site snip keadaan skip f b dom cfg
+  if [ "$WAF_STANDALONE" = 1 ]; then
+    # situs dari deteksi lingkungan (konfigurasi web server yang aktif), bukan dari folder vhost panel
+    while IFS=$'\t' read -r dom ws cfg; do
+      case "$ws" in nginx|apache) ;; *) continue ;; esac
+      case "$dom" in ''|*[!A-Za-z0-9._-]*) continue ;; esac
+      snip="$(snippet_path "$ws" "$dom")"
+      if [ -f "$snip" ]; then keadaan="on"; else keadaan="off"; fi
+      printf '%s|%s|%s\n' "$ws" "$dom" "$keadaan"
+    done < <(sa_sites)
+    return 0
+  fi
   for ws in nginx apache openlitespeed; do
     d="$(vhost_dir "$ws")" || continue
     [ -d "$d" ] || continue
@@ -327,6 +513,8 @@ snippet_body() {
 # dikelola sentinel-waf.sh, jangan edit manual
 coraza on;
 coraza_rules_file $ZY_MAIN;
+# aturan bawaan berkas/folder sensitif (mode Block; /.well-known tidak pernah ditolak). Glob: tidak gagal bila belum disusun.
+include $ZY_DIR/gen/native/nginx*.conf;
 error_page 403 /__zysentinel_403.html;
 location = /__zysentinel_403.html {
     internal;
@@ -342,14 +530,16 @@ EOF
     apache)
       cat <<EOF
 # dikelola sentinel-waf.sh, jangan edit manual
+# aturan bawaan berkas/folder sensitif (mode Block; /.well-known tidak pernah ditolak), berlaku walau ModSecurity tidak dimuat
+IncludeOptional $ZY_DIR/gen/native/apache.conf
 <IfModule security2_module>
     SecRuleEngine On
-    Include $ZY_MAIN
+    Include ${ZY_MAIN%main.conf}main-v2.conf
     Alias /__zysentinel_403.html $ZY_DIR/gen/html/apache/__zysentinel_403.html
     <Directory $ZY_DIR/gen/html/apache>
         Require all granted
         <IfModule include_module>
-            Options +Includes
+            Options +IncludesNOEXEC
             AddOutputFilter INCLUDES .html
         </IfModule>
     </Directory>
@@ -369,7 +559,8 @@ EOF
 #        modsecurity_rules_file $ZY_MAIN
 #        ls_enabled 1
 #      }
-# 2) Tambahkan blok yang sama di vhconf.conf vhost yang dilindungi:
+# 2) Tambahkan blok yang sama di vhconf.conf vhost yang dilindungi.
+#    Aturan bawaan berkas/folder sensitif (RewriteRule) dipasang OTOMATIS di redirect/<situs>/zysentinel-files.conf.
 module mod_security {
   modsecurity on
   modsecurity_rules_file $ZY_MAIN
@@ -382,6 +573,49 @@ EOF
   esac
 }
 
+# Apache ModSecurity v2 dari repo OS (tanpa compile): Debian/Ubuntu libapache2-mod-security2, RHEL mod_security (EPEL bila perlu).
+# Modul dimuat, konfigurasi diuji (apachectl -t), Apache di-reload. Ruleset (CRS + ZyRules) tetap dimuat per vhost lewat snippet.
+do_modsec_install() {
+  local fam="${ZYS_OS_FAMILY:-}"
+  command -v apt-get >/dev/null 2>&1 && fam=deb
+  [ -z "$fam" ] && { command -v dnf >/dev/null 2>&1 || command -v yum >/dev/null 2>&1; } && fam=rpm
+  apache_bin >/dev/null || { err "Apache tidak terpasang; ModSecurity tidak dipasang"; return 1; }
+  if apache_cmd -M 2>/dev/null | grep -qiE 'security2_module'; then say "modul ModSecurity sudah dimuat"; return 0; fi
+  case "$fam" in
+    deb)
+      say "memasang libapache2-mod-security2 dari repo OS"
+      DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends libapache2-mod-security2 >/dev/null 2>&1 || { err "pemasangan libapache2-mod-security2 gagal"; return 1; }
+      command -v a2enmod >/dev/null 2>&1 && a2enmod -q security2 unique_id headers >/dev/null 2>&1 ;;
+    rpm)
+      say "memasang mod_security dari repo OS"
+      if ! { dnf install -y mod_security || yum install -y mod_security; } >/dev/null 2>&1; then
+        { dnf install -y epel-release || yum install -y epel-release; } >/dev/null 2>&1
+        { dnf install -y mod_security || yum install -y mod_security; } >/dev/null 2>&1 || { err "pemasangan mod_security gagal (repo OS/EPEL)"; return 1; }
+      fi ;;
+    *) err "keluarga OS tidak dikenal untuk memasang ModSecurity"; return 1 ;;
+  esac
+  if ! apache_cmd -t >/dev/null 2>&1; then err "uji konfigurasi apache GAGAL setelah memasang ModSecurity; modul tidak dimuat"; return 1; fi
+  apache_cmd -M 2>/dev/null | grep -qiE 'security2_module' || { err "modul security2 belum termuat setelah pemasangan"; return 1; }
+  do_reload apache >/dev/null 2>&1 || true
+  say "ModSecurity (security2_module) termuat di Apache"
+}
+
+# Cabut semua include WAF yang disuntik ke vhost web server non-panel (standalone). Aman dijalankan kapan saja (idempoten); dipanggil uninstall.
+do_strip_includes() {
+  [ "$WAF_STANDALONE" = 1 ] || { say "bukan mode standalone: tidak ada include yang disuntik"; return 0; }
+  local dom ws cfg n=0
+  while IFS=$'\t' read -r dom ws cfg; do
+    case "$ws" in nginx|apache) ;; *) continue ;; esac
+    case "$dom" in ''|*[!A-Za-z0-9._-]*) continue ;; esac
+    if "$_PYBIN" "$WAFINJECT" has "$ws" "$cfg" "$dom" "$(sa_include_line_path "$ws" "$dom")"; then
+      "$_PYBIN" "$WAFINJECT" del "$ws" "$cfg" "$dom" "$(sa_include_line_path "$ws" "$dom")" && n=$((n + 1))
+    fi
+  done < <(sa_sites)
+  say "$n include WAF dicabut dari konfigurasi vhost"
+  [ "$n" -gt 0 ] && do_reload all >/dev/null 2>&1
+  return 0
+}
+
 do_vhost_set() {
   # $1 = ws, $2 = site, $3 = on|off
   local ws="$1" site="$2" aksi="$3" snip dirn eng
@@ -390,14 +624,23 @@ do_vhost_set() {
   esac
   [ "$ws" = "ols" ] && ws="openlitespeed"
   case "$site" in ''|*/*|.*|*[!A-Za-z0-9._-]*) err "nama situs tidak valid: $site"; return 1 ;; esac
-  if [ ! -f "$(vhost_dir "$ws")/$site.conf" ]; then
+  local sa_cfg=""
+  if [ "$WAF_STANDALONE" = 1 ]; then
+    sa_cfg="$(sa_conf_of "$ws" "$site")"
+    [ -n "$sa_cfg" ] || { err "situs tidak ditemukan di konfigurasi $ws yang terdeteksi: $site"; return 1; }
+  elif [ ! -f "$(vhost_dir "$ws")/$site.conf" ]; then
     err "vhost tidak ada: $ws/$site"; return 1
   fi
   snip="$(snippet_path "$ws" "$site")"
 
   if [ "$aksi" = "off" ]; then
     rm -f "$snip"
+    # standalone: include berglob dibiarkan bila masih ada snippet lain di folder itu (mis. akses); dicabut bila folder kosong
+    if [ "$WAF_STANDALONE" = 1 ] && [ -z "$(ls -A "$(dirname "$snip")" 2>/dev/null)" ]; then
+      "$_PYBIN" "$WAFINJECT" del "$ws" "$sa_cfg" "$site" "$(sa_include_line_path "$ws" "$site")" 2>/dev/null
+    fi
     waf_set "vhost.$ws.$site" "off"
+    [ "$ws" = "openlitespeed" ] && rm -f "$(ols_native_path "$site")"
     [ "$ws" = "nginx" ] && "$NGINX_BIN" -t 2>&1 | tail -1
     say "$ws/$site -> off"
     return 0
@@ -432,10 +675,35 @@ do_vhost_set() {
   dirn="$(dirname "$snip")"
   mkdir -p "$dirn" 2>/dev/null || { err "tidak bisa membuat $dirn"; return 1; }
   snippet_body "$ws" > "$snip" || { err "gagal menyusun snippet"; return 1; }
+  chmod 0644 "$snip" 2>/dev/null
+  if [ "$WAF_STANDALONE" = 1 ]; then
+    if ! "$_PYBIN" "$WAFINJECT" add "$ws" "$sa_cfg" "$site" "$(sa_include_line_path "$ws" "$site")"; then
+      err "blok server/VirtualHost untuk $site tidak ditemukan di $sa_cfg; tidak diubah"
+      rm -f "$snip"; return 1
+    fi
+    # ModSecurity v2 distro bisa lebih tua dari sintaks CRS 4 (mis. 2.9.5: MULTIPART_PART_HEADERS tidak dikenal). Berkas CRS yang membuat
+    # uji gagal dicatat di gen/modsec2-skip.list dan dilewati di varian v2 (perlindungan berkurang, dilaporkan), lalu diuji ulang.
+    local _n=0 _bad _skip="$ZY_DIR/gen/modsec2-skip.list"
+    while [ "$ws" = apache ] && apache_bin >/dev/null && ! apache_cmd -t >/dev/null 2>&1 && [ "$_n" -lt 20 ]; do
+      _bad="$(apache_cmd -t 2>&1 | sed -n 's|.*of \(.*/rules/rules/[A-Za-z0-9._-]*\.conf\):.*|\1|p' | head -1)"
+      [ -n "$_bad" ] || break
+      printf '%s\n' "$(basename "$_bad")" >> "$_skip"
+      say "PERINGATAN: ModSecurity v2 terpasang tidak mengenal sintaks $(basename "$_bad"); berkas itu dilewati di varian v2"
+      "$_PYBIN" "$ZYGEN" build >/dev/null 2>&1 || break
+      _n=$((_n + 1))
+    done
+    if [ "$ws" = apache ] && apache_bin >/dev/null && ! apache_cmd -t >/dev/null 2>&1; then
+      err "uji konfigurasi apache GAGAL setelah include disuntik. Rollback."
+      apache_cmd -t 2>&1 | grep -v AH00558 | head -4 >&2
+      "$_PYBIN" "$WAFINJECT" del "$ws" "$sa_cfg" "$site" "$(sa_include_line_path "$ws" "$site")"; rm -f "$snip"
+      return 1
+    fi
+  fi
 
   if [ "$ws" = "nginx" ]; then
     if ! "$NGINX_BIN" -t 2>&1 | grep -q 'test is successful'; then
       err "nginx -t GAGAL setelah snippet ditulis. Rollback."
+      [ "$WAF_STANDALONE" = 1 ] && "$_PYBIN" "$WAFINJECT" del "$ws" "$sa_cfg" "$site" "$(sa_include_line_path "$ws" "$site")"
       rm -f "$snip"
       "$NGINX_BIN" -t 2>&1 | tail -3 >&2
       return 1
@@ -443,14 +711,83 @@ do_vhost_set() {
     say "nginx -t OK"
   fi
   waf_set "vhost.$ws.$site" "on"
+  [ "$ws" = "openlitespeed" ] && ols_native_sync
   say "$ws/$site -> on (snippet: $snip)"
 }
 
+# Real IP pengunjung di balik proxy/CDN tepercaya (Cloudflare dkk.) per vhost nginx/Apache; berkas disusun dan diuji
+# sentinel-proxy.py, di sini hanya reload web server yang berubah. OpenLiteSpeed: real IP hanya tingkat server (dilaporkan panel).
+do_realip() {
+  local py bin out ws
+  bin=/www/server/sentinel/bin/sentinel-proxy.py
+  [ -f "$bin" ] || bin="$(payload_dir)/sentinel-proxy.py"
+  [ -f "$bin" ] || { err "sentinel-proxy.py tidak ditemukan"; return 1; }
+  py="$(zy_py)"
+  # vhost baru sejak pemeriksaan terakhir mendapat salinan access log root (job ini berjalan tiap jam dari sentinel-fw)
+  AKSES_RELOAD=1 do_akses_sync >&2
+  out="$("$py" "$bin" realip 2>/dev/null)" || { err "sentinel-proxy.py realip gagal"; return 1; }
+  printf '%s\n' "$out"
+  for ws in nginx apache; do
+    printf '%s' "$out" | "$py" -c 'import json,sys; sys.exit(0 if sys.argv[1] in (json.load(sys.stdin).get("diubah") or {}) else 1)' "$ws" \
+      && do_reload "$ws"
+  done
+  return 0
+}
+
+# Direktori kerja master nginx (T-174, 30 Okt 2026). Coraza (Go) memanggil getwd saat membangun WAF di worker, dan worker mewarisi
+# direktori kerja master. Bila master pernah dijalankan dari folder yang kemudian dihapus (folder sementara, folder plugin yang diganti
+# saat update), SETIAP reload membuat worker gagal fatal ("getwd: no such file or directory", "cannot be respawned") dan semua situs
+# berhenti merespons. Reload dalam keadaan itu diganti restart penuh dari "/", dan setiap start/restart dari ZySentinel berjalan dari "/".
+nginx_cwd_hilang() {
+  local m p
+  m="$(cz_master_pid)"
+  [ -n "$m" ] || return 1
+  p="$(readlink "/proc/$m/cwd" 2>/dev/null)" || return 1
+  case "$p" in *' (deleted)') return 0 ;; esac
+  [ -d "$p" ] && return 1
+  return 0
+}
+# Dijalankan DI DALAM unit systemd (INVOCATION_ID; mis. guard dari sentinel-fw.service yang diurutkan Before=nginx.service): start/restart
+# nginx yang menunggu (init.d dialihkan ke systemctl) baru jalan setelah unit ini selesai, sedangkan unit ini menunggu perintah itu =
+# deadlock sampai TimeoutStartSec (VM aaPanel 7 Nov 2026: nginx 1.31.8 mati 2+ menit lebih lama, sentinel-fw.service gagal timeout).
+# Jadwalkan job tanpa menunggu: berjalan begitu unit ini selesai. 0 = dijadwalkan; 1 = pemanggil menjalankan sendiri (panel/terminal).
+nginx_jadwalkan() {  # $1 = start|restart
+  [ -n "${INVOCATION_ID:-}" ] && command -v systemctl >/dev/null 2>&1 && systemctl cat nginx.service >/dev/null 2>&1 || return 1
+  systemctl reset-failed nginx.service >/dev/null 2>&1
+  systemctl --no-block "$1" nginx.service >/dev/null 2>&1 || return 1
+  say "nginx $1 dijadwalkan lewat systemd (berjalan begitu layanan ini selesai)"
+  NGINX_DIJADWALKAN=1
+  return 0
+}
+
+# Reload yang aman di dalam unit systemd: sinyal langsung ke master (job reload systemd juga tunduk pada urutan Before=/After=).
+nginx_reload_langsung() {
+  if [ -n "${INVOCATION_ID:-}" ] || [ ! -x "$NGINX_INIT" ]; then (cd / && "$NGINX_BIN" -s reload) >/dev/null 2>&1
+  else (cd / && "$NGINX_INIT" reload) >/dev/null 2>&1; fi
+}
+
+nginx_restart_bersih() {
+  nginx_jadwalkan restart && return 0
+  say "direktori kerja master nginx sudah dihapus: restart penuh dari / (reload akan mematikan worker Coraza)"
+  if [ -x "${NGINX_INIT:-/etc/init.d/nginx}" ]; then
+    (cd / && "${NGINX_INIT:-/etc/init.d/nginx}" restart) >/dev/null 2>&1
+  else
+    "$NGINX_BIN" -s stop 2>/dev/null; sleep 2; (cd / && "$NGINX_BIN")
+  fi
+  sleep 3
+  # skrip init yang start terlalu cepat setelah stop (master lama belum keluar, port masih dipakai): tunggu lalu start dari /
+  if [ "$(cz_workers_hidup)" -lt 1 ]; then
+    local i
+    for i in 1 2 3 4 5 6 7 8 9 10; do [ -z "$(cz_master_pid)" ] && break; sleep 1; done
+    [ -z "$(cz_master_pid)" ] && (cd / && "$NGINX_BIN") >/dev/null 2>&1
+    sleep 3
+  fi
+}
 nginx_reload_ok() {
   # Reload dengan verifikasi PID worker, bukan percaya output "done".
   local sebelum sesudah
   sebelum="$(ps -o pid= -C nginx 2>/dev/null | sort | tr -d ' ' | tr '\n' ',')"
-  /etc/init.d/nginx reload >/dev/null 2>&1
+  if nginx_cwd_hilang; then nginx_restart_bersih; else (cd / && /etc/init.d/nginx reload) >/dev/null 2>&1; fi
   sleep 5
   sesudah="$(ps -o pid= -C nginx 2>/dev/null | sort | tr -d ' ' | tr '\n' ',')"
   if [ "$sebelum" = "$sesudah" ]; then
@@ -812,10 +1149,12 @@ except Exception:
 #   $CZ_CACHE/libcoraza/<versi>/      libcoraza.so + include/coraza/coraza.h
 #   $CZ_CACHE/modules/<kunci>/        ngx_http_coraza_module.so + MANIFEST
 PLUGIN_DIR="${SENTINEL_PLUGIN_DIR:-/www/server/panel/plugin/sentinel}"
+[ "$WAF_STANDALONE" = 1 ] && [ -z "${SENTINEL_PLUGIN_DIR:-}" ] && PLUGIN_DIR=/www/server/sentinel      # tanpa aaPanel: cache modul di bawah $BASE, tidak membuat /www/server/panel
 CZ_CACHE="${SENTINEL_CORAZA_CACHE:-$PLUGIN_DIR/coraza-cache}"
 CZ_BUILD="${SENTINEL_CORAZA_BUILD:-$CORAZA_DIR/build}"
-NGINX_MODDIR="${SENTINEL_NGINX_MODDIR:-/www/server/nginx/modules}"
+NGINX_MODDIR="${SENTINEL_NGINX_MODDIR:-${ZYS_NGINX_MODDIR:-/www/server/nginx/modules}}"
 GO_SDK_DIR="${SENTINEL_GO_SDK_DIR:-/usr/local/btgojdk}"
+[ "$WAF_STANDALONE" = 1 ] && [ -z "${SENTINEL_GO_SDK_DIR:-}" ] && GO_SDK_DIR="$WAF_BASE/gosdk"   # tanpa aaPanel: SDK milik kita sendiri
 CZ_LIB_REPO="https://github.com/corazawaf/libcoraza.git"
 CZ_CONN_REPO="https://github.com/corazawaf/coraza-nginx.git"
 CZ_STEPS=8
@@ -831,6 +1170,30 @@ cz_vnorm() { case "$1" in *.*.*) printf '%s' "$1" ;; *) printf '%s.0' "$1" ;; es
 cz_ver_ge() {  # $1 >= $2 ?
   local a b; a="$(cz_vnorm "$1")"; b="$(cz_vnorm "$2")"
   [ "$(printf '%s\n%s\n' "$a" "$b" | sort -V | head -1)" = "$b" ]
+}
+
+# Opsi `-e <berkas>` (log galat awal) baru ada di nginx 1.19.5; nginx lama (1.18 distro) menolaknya ("invalid option: e").
+cz_elog_args() {
+  if "$NGINX_BIN" -h 2>&1 | grep -qE '^[[:space:]]*-e[[:space:]]'; then printf '%s' "-e $1/logs/startup.log"; fi
+}
+
+# Uji muat modul dengan nginx AKTIF tanpa menjalankan server (nginx -t pada konfigurasi sementara): satu-satunya cara memastikan modul
+# dibangun untuk VERSI nginx ini. Signature modul (cz_sig_of) tidak memuat nomor versi: modul nginx 1.31.7 lolos cek signature di nginx
+# 1.31.8 tetapi ditolak saat dimuat ("version 1031007 instead of 1031008"). Mengisi CZ_UJI_GALAT dengan baris galat pertama.
+cz_uji_muat() {  # $1 = modul .so, $2 = libcoraza.so
+  local t rc
+  CZ_UJI_GALAT=""
+  [ -f "$1" ] && [ -f "$2" ] || { CZ_UJI_GALAT="modul atau libcoraza tidak ada"; return 1; }
+  t="$(mktemp -d /tmp/sentinel-coraza-muat.XXXXXX)" || return 1
+  mkdir -p "$t/lib" "$t/logs"
+  cp "$1" "$t/ngx_http_coraza_module.so" && cp "$2" "$t/lib/libcoraza.so" || { rm -rf "$t"; CZ_UJI_GALAT="gagal menyalin modul"; return 1; }
+  chmod -R a+rX "$t"
+  printf 'load_module %s/ngx_http_coraza_module.so;\npid %s/nginx.pid;\nerror_log %s/logs/error.log;\nevents { worker_connections 16; }\nhttp {\n  %s\n}\n' \
+    "$t" "$t" "$t" "$(cz_lua_line)" > "$t/nginx.conf"
+  LD_LIBRARY_PATH="$t/lib" "$NGINX_BIN" -p "$t" -c "$t/nginx.conf" $(cz_elog_args "$t") -t >"$t/logs/t.out" 2>&1; rc=$?
+  [ "$rc" = 0 ] || CZ_UJI_GALAT="$(grep -m1 -E 'emerg|error|failed' "$t/logs/t.out" | sed "s|$t/||g" | cut -c1-200)"
+  rm -rf "$t"
+  return "$rc"
 }
 
 cz_nginx_info() {
@@ -851,15 +1214,16 @@ cz_nginx_info() {
 # di-build dari source (openssl/pcre/zlib), sebab semuanya tidak
 # mengubah signature dan source-nya sudah dihapus dari server.
 cz_sig_args() {
-  local a
-  for a in $CZ_NGX_ARGS; do
-    case "$a" in
-      --prefix=*|--user=*|--group=*|--add-module=*|--add-dynamic-module=*) ;;
-      --with-openssl=*|--with-pcre=*|--with-pcre|--with-zlib=*|--with-libatomic=*) ;;
-      --with-ld-opt=*|--with-cc-opt=*) ;;
-      *) printf '%s\n' "$a" ;;
-    esac
-  done
+  # Argumen configure nginx dipecah dengan aturan kutip shell (shlex): nginx distro memuat --with-cc-opt='-g -O2 ...' yang berspasi;
+  # pemecahan per kata mengirim potongan '-O2', '-flto=auto', dst. ke configure sebagai argumen liar (configure gagal).
+  printf '%s' "$CZ_NGX_ARGS" | "$_PYBIN" -c '
+import shlex, sys
+SKIP = ("--prefix=", "--user=", "--group=", "--add-module=", "--add-dynamic-module=", "--with-openssl=", "--with-pcre=", "--with-zlib=",
+        "--with-libatomic=", "--with-ld-opt=", "--with-cc-opt=")
+for a in shlex.split(sys.stdin.read()):
+    if a.startswith(SKIP) or a == "--with-pcre":
+        continue
+    print(a)'
 }
 
 # Kunci cache = versi nginx + hash argumen + arsitektur.
@@ -870,7 +1234,33 @@ cz_key() {
 
 cz_sig_of() { grep -aoE '[0-9]+,[0-9]+,[0-9]+,[01]{20,}' "$1" 2>/dev/null | sort -u | head -1; }
 
+# Server tanpa aaPanel: pasang prasyarat compile dari repo OS (Debian: apt, RHEL: dnf/yum), satu paket per panggilan agar satu nama yang
+# tidak ada tidak menggagalkan yang lain. Hanya dipanggil bila ada yang kurang.
+cz_prereq_pasang() {
+  local fam="${ZYS_OS_FAMILY:-}" p pkgs=()
+  command -v apt-get >/dev/null 2>&1 && fam=deb
+  [ -z "$fam" ] && { command -v dnf >/dev/null 2>&1 || command -v yum >/dev/null 2>&1; } && fam=rpm
+  case "$fam" in
+    deb) pkgs=(build-essential git curl ca-certificates tar libssl-dev zlib1g-dev libpcre2-dev libpcre3-dev libgd-dev libxslt1-dev libgeoip-dev) ;;
+    rpm) pkgs=(gcc gcc-c++ make git curl ca-certificates tar openssl-devel zlib-devel pcre2-devel pcre-devel gd-devel libxslt-devel GeoIP-devel) ;;
+    *) return 1 ;;
+  esac
+  say "memasang prasyarat compile dari repo OS (${fam}): ${pkgs[*]}"
+  [ "$fam" = deb ] && DEBIAN_FRONTEND=noninteractive apt-get update -q >/dev/null 2>&1
+  for p in "${pkgs[@]}"; do
+    if [ "$fam" = deb ]; then DEBIAN_FRONTEND=noninteractive apt-get install -y -q --no-install-recommends "$p" >/dev/null 2>&1
+    else { dnf install -y "$p" || yum install -y "$p"; } >/dev/null 2>&1; fi
+  done
+  return 0
+}
+
 cz_prereq() {
+  if [ "$WAF_STANDALONE" = 1 ] && ! { command -v gcc >/dev/null 2>&1 && command -v make >/dev/null 2>&1 && command -v git >/dev/null 2>&1 \
+        && cz_have_hdr openssl/ssl.h && cz_have_hdr zlib.h && { cz_have_hdr pcre2.h || cz_have_hdr pcre.h; }; }; then
+    cz_prereq_pasang
+  elif [ "$WAF_STANDALONE" = 1 ]; then
+    case "$CZ_NGX_ARGS" in *http_image_filter_module*|*http_xslt_module*|*http_geoip_module*) cz_prereq_pasang ;; esac
+  fi
   local falta=() c
   for c in gcc make git curl tar sha256sum; do
     command -v "$c" >/dev/null 2>&1 || falta+=("$c")
@@ -943,8 +1333,39 @@ cz_go_stable_list() {
 # Manager. pygvm install selalu menjalankan "use" (mengganti symlink global
 # /usr/local/btgo); bila sebelumnya sudah ada Go aktif, dikembalikan supaya
 # proyek Go lain di server ini tidak berubah.
+# Go SDK tanpa aaPanel: unduh rilis stabil dari go.dev, diverifikasi sha256 dari daftar resmi go.dev/dl, dipasang ke $GO_SDK_DIR/go<versi>
+# (tidak menyentuh Go milik sistem). Versi mengikuti aturan cz_go_pick: baris minor yang sama dengan minimum bila ada.
+cz_go_install_dl() {
+  local min="$1" arch info ver file sha tmp
+  case "$(uname -m)" in x86_64|amd64) arch=amd64 ;; aarch64|arm64) arch=arm64 ;; *) err "arsitektur $(uname -m) tidak didukung untuk Go SDK"; return 1 ;; esac
+  info="$(curl -fsSL --max-time 60 'https://go.dev/dl/?mode=json' 2>/dev/null)" || { err "daftar rilis Go (go.dev) tidak bisa diunduh"; return 1; }
+  ver="$(printf '%s' "$info" | "$_PYBIN" -c '
+import json, sys
+mn = [int(x) for x in sys.argv[1].split(".")] + [0, 0]
+mn = tuple(mn[:3])
+v = lambda s: tuple(int(x) for x in (s[2:].split(".") + ["0", "0"])[:3])
+ok = [r for r in json.load(sys.stdin) if r.get("stable") and v(r["version"]) >= mn]
+same = [r for r in ok if v(r["version"])[:2] == mn[:2]]
+pick = max(same, key=lambda r: v(r["version"])) if same else (min(ok, key=lambda r: v(r["version"])) if ok else None)
+if pick:
+    f = [x for x in pick["files"] if x["os"] == "linux" and x["arch"] == sys.argv[2] and x["kind"] == "archive"]
+    if f:
+        print(pick["version"][2:], f[0]["filename"], f[0]["sha256"])' "$min" "$arch")"
+  [ -n "$ver" ] || { err "tidak ada Go stabil >= $min untuk linux/$arch di go.dev"; return 1; }
+  set -- $ver; ver="$1"; file="$2"; sha="$3"
+  say "memasang Go $ver dari go.dev ($file)"
+  tmp="$(mktemp -d /tmp/sentinel-go.XXXXXX)" || return 1
+  if ! curl -fsSL --max-time 600 -o "$tmp/$file" "https://go.dev/dl/$file"; then err "unduhan $file gagal"; rm -rf "$tmp"; return 1; fi
+  if [ "$(sha256sum "$tmp/$file" | awk '{print $1}')" != "$sha" ]; then err "sha256 $file TIDAK cocok dengan daftar go.dev; dibatalkan"; rm -rf "$tmp"; return 1; fi
+  mkdir -p "$GO_SDK_DIR" && tar -C "$tmp" -xzf "$tmp/$file" && rm -rf "$GO_SDK_DIR/go$ver" && mv "$tmp/go" "$GO_SDK_DIR/go$ver" || { err "ekstrak Go gagal"; rm -rf "$tmp"; return 1; }
+  rm -rf "$tmp"
+  [ -x "$GO_SDK_DIR/go$ver/bin/go" ] || { err "pemasangan Go $ver gagal"; return 1; }
+  say "Go $ver terpasang di $GO_SDK_DIR/go$ver"
+}
+
 cz_go_install() {
   local min="$1" pilih="" v prev
+  if [ "$WAF_STANDALONE" = 1 ] && ! cz_pygvm ls >/dev/null 2>&1; then cz_go_install_dl "$min"; return $?; fi
   cz_pygvm ls >/dev/null 2>&1 || { err "aaPanel Go SDK Manager (pygvm) tidak tersedia. Pasang Go >= $min lewat panel (Website > Go > SDK)."; return 1; }
   pilih="$(cz_go_stable_list | cz_go_pick "$min")"
   if [ -z "$pilih" ]; then
@@ -1007,7 +1428,9 @@ cz_src_nginx() {  # menulis CZ_NGX_TGZ (source nginx versi aktif)
   fi
   # mirror aaPanel dulu (source yang sama dengan yang dipakai nginx.sh), lalu nginx.org
   local u
-  for u in "https://node.aapanel.com/src/nginx-$v.tar.gz" "https://nginx.org/download/nginx-$v.tar.gz"; do
+  local urls=("https://node.aapanel.com/src/nginx-$v.tar.gz" "https://nginx.org/download/nginx-$v.tar.gz")
+  [ "$WAF_STANDALONE" = 1 ] && urls=("https://nginx.org/download/nginx-$v.tar.gz" "https://node.aapanel.com/src/nginx-$v.tar.gz")   # tanpa aaPanel: sumber resmi dulu
+  for u in "${urls[@]}"; do
     say "mengunduh source nginx $v dari ${u%%/nginx-*}"
     if curl -fsSL --max-time 180 -o "$t.tmp" "$u" 2>/dev/null \
        && tar -tzf "$t.tmp" 2>/dev/null | head -1 | grep -q "^nginx-$v/"; then
@@ -1038,6 +1461,10 @@ cz_cache_ok() {  # $1 = kunci
   want="$(cz_mf_get "$mf" sha256)"
   [ -n "$want" ] && [ "$(cz_sha "$d/ngx_http_coraza_module.so")" = "$want" ] || return 1
   [ -f "$CZ_CACHE/libcoraza/$(cz_mf_get "$mf" libcoraza)/lib/libcoraza.so" ] || return 1
+  # Cache hasil ADOPSI modul terpasang tanpa uji muat (sebelum 6 Nov 2026) bisa berisi modul untuk versi nginx lama (nginx di-upgrade
+  # aaPanel, modul lama tertinggal di modules/): tidak sah, sehingga compile ulang dilakukan. Cache hasil compile dari source nginx versi
+  # aktif tetap sah.
+  if [ "$(cz_mf_get "$mf" diadopsi)" = ya ] && [ "$(cz_mf_get "$mf" uji_muat)" != lulus ]; then return 1; fi
 }
 
 # Menyiapkan semua bahan (tarball) dan mengekstraknya ke $CZ_BUILD.
@@ -1101,7 +1528,17 @@ cz_libcoraza_compile() {
   rm -rf "$CZ_BUILD/gopath" "$CZ_BUILD/gocache"
 }
 
+# Pembangunan modul Coraza butuh nginx resmi yang terdeteksi (nginx aaPanel atau nginx distro Debian/RHEL: argumen configure dibaca dari
+# `nginx -V`). Tanpa nginx: pesan jelas. Override uji (SENTINEL_NGINX*, SENTINEL_CORAZA_DIR) melewati gerbang ini.
+coraza_butuh_aapanel() {
+  [ -x "$NGINX_BIN" ] && return 0
+  [ -n "${SENTINEL_NGINX:-}${SENTINEL_NGINX_CONF:-}${SENTINEL_CORAZA_DIR:-}" ] && return 0
+  err "nginx tidak ditemukan di server ini (dicari: $NGINX_BIN); modul Coraza untuk nginx tidak dapat dibangun. Untuk Apache gunakan ModSecurity (sentinel-waf.sh modsec-install)."
+  return 1
+}
+
 do_coraza_build() {
+  coraza_butuh_aapanel || return 1
   # coraza-build [--force] [--refresh]
   #   --force   : compile ulang modul dan libcoraza dari bahan di cache
   #   --refresh : seperti --force, tapi bahan diunduh ulang dari GitHub
@@ -1114,6 +1551,9 @@ do_coraza_build() {
   cz_step 1 "memeriksa nginx aktif dan prasyarat compile"
   cz_nginx_info || return 1
   say "nginx aktif: $CZ_NGX_VER"
+  if grep -qE "$CZ_LOAD_RE" "$NGINX_CONF" 2>/dev/null && ! cz_terpasang_cocok; then
+    say "modul Coraza yang dimuat nginx TIDAK cocok dengan nginx $CZ_NGX_VER (${CZ_UJI_GALAT:-uji muat gagal}): dibangun ulang untuk versi ini"
+  fi
   cz_prereq || return 1
   key="$(cz_key)"
   d="$CZ_CACHE/modules/$key"
@@ -1145,11 +1585,15 @@ do_coraza_build() {
 
   nsrc="$CZ_BUILD/nginx-$CZ_NGX_VER"
   cz_step 6 "configure modul dinamis dengan argumen yang sama seperti nginx aktif"
-  local inc="$CZ_CACHE/libcoraza/$CZ_LIBVER/include" args=()
+  local inc="$CZ_CACHE/libcoraza/$CZ_LIBVER/include" args=() ccx=""
   while IFS= read -r a; do args+=("$a"); done < <(cz_sig_args)
+  # nginx < 1.21.1 (mis. 1.18.0 bawaan Debian 11 / Ubuntu 22.04) belum punya NGX_HTTP_CONNECT yang dirujuk connector Coraza. Konstanta itu
+  # tidak pernah diset nginx lama, jadi cukup didefinisikan sebagai bit yang tak terpakai; hanya bila header sumbernya memang belum punya.
+  grep -qE 'define[[:space:]]+NGX_HTTP_CONNECT([[:space:]]|$)' "$nsrc/src/http/ngx_http_request.h" 2>/dev/null || ccx=" -DNGX_HTTP_CONNECT=0x00010000"
+  [ -n "$ccx" ] && say "nginx $CZ_NGX_VER belum punya NGX_HTTP_CONNECT: didefinisikan untuk kompilasi connector"
   if ! ( cd "$nsrc" && cz_lowprio ./configure "${args[@]}" \
           --add-dynamic-module="$CZ_BUILD/coraza-nginx" \
-          --with-cc-opt="-I$inc -Wno-error -Wno-unused-function" ) >"$CZ_BUILD/configure.log" 2>&1; then
+          --with-cc-opt="-I$inc -Wno-error -Wno-unused-function$ccx" ) >"$CZ_BUILD/configure.log" 2>&1; then
     err "configure gagal; ekor log ($CZ_BUILD/configure.log):"
     tail -n 15 "$CZ_BUILD/configure.log" >&2
     return 1
@@ -1174,6 +1618,11 @@ do_coraza_build() {
     err "signature modul TIDAK cocok dengan nginx aktif; modul tidak disimpan"
     return 1
   fi
+  if ! cz_uji_muat "$mod" "$CZ_CACHE/libcoraza/$CZ_LIBVER/lib/libcoraza.so"; then
+    err "modul hasil compile tidak bisa dimuat nginx $CZ_NGX_VER (${CZ_UJI_GALAT:-nginx -t gagal}); modul tidak disimpan"
+    return 1
+  fi
+  say "uji muat modul dengan nginx $CZ_NGX_VER: lulus"
   mkdir -p "$d"
   install -m 0755 "$mod" "$d/ngx_http_coraza_module.so"
   {
@@ -1185,11 +1634,48 @@ do_coraza_build() {
     printf 'go=%s\n' "$(cz_mf_get "$CZ_CACHE/libcoraza/$CZ_LIBVER/MANIFEST" go)"
     printf 'dibangun=%s\n' "$(date '+%Y-%m-%d %H:%M:%S')"
     printf 'sha256=%s\n' "$(cz_sha "$d/ngx_http_coraza_module.so")"
+    printf 'uji_muat=lulus\n'
   } > "$d/MANIFEST"
   printf '%s\n' "$CZ_NGX_ARGS" > "$d/nginx-configure-args.txt"
   rm -rf "$nsrc" "$CZ_BUILD/coraza-nginx" "$CZ_BUILD/libcoraza"
   say "selesai: modul Coraza untuk nginx $CZ_NGX_VER tersimpan di $d"
   say "tidak ada yang dimuat ke nginx; jalankan coraza-selftest lalu coraza-install"
+}
+
+cz_cache_adopt() {
+  # Cache modul hilang (mis. folder plugin diganti saat deploy/instal ulang) padahal modul Coraza sudah terpasang di nginx: isi ulang cache
+  # dari modul dan libcoraza TERPASANG itu bila signature modul sama dengan nginx aktif. Tanpa compile, tidak memuat atau mengubah nginx.
+  # Tanpa cache, do_rules_check menolak SETIAP perubahan vhost WAF ("modul untuk nginx X tidak ada di cache").
+  cz_nginx_info >/dev/null 2>&1 || return 1
+  local key d mod lib sig_bin sig_mod
+  key="$(cz_key)"
+  cz_cache_ok "$key" && return 0
+  mod="$NGINX_MODDIR/ngx_http_coraza_module.so"; lib="$NGINX_MODDIR/libcoraza.so"
+  [ -f "$mod" ] && [ -f "$lib" ] || return 1
+  [ "$(stat -c %u "$mod")" = 0 ] && [ "$(stat -c %u "$lib")" = 0 ] || { err "modul terpasang bukan milik root; cache tidak diisi dari berkas itu"; return 1; }
+  sig_bin="$(cz_sig_of "$NGINX_BIN")"; sig_mod="$(cz_sig_of "$mod")"
+  if [ -z "$sig_bin" ] || [ "$sig_bin" != "$sig_mod" ]; then
+    err "modul terpasang tidak cocok dengan nginx $CZ_NGX_VER (signature beda); jalankan coraza-build"; return 1
+  fi
+  if ! cz_uji_muat "$mod" "$lib"; then
+    err "modul terpasang tidak bisa dimuat nginx $CZ_NGX_VER (${CZ_UJI_GALAT:-nginx -t gagal}); kemungkinan dibangun untuk versi nginx lain, cache TIDAK diisi; jalankan coraza-build"
+    return 1
+  fi
+  d="$CZ_CACHE/modules/$key"
+  mkdir -p "$d" "$CZ_CACHE/libcoraza/adopsi/lib" || return 1
+  install -m 0755 "$mod" "$d/ngx_http_coraza_module.so" || return 1
+  install -m 0755 "$lib" "$CZ_CACHE/libcoraza/adopsi/lib/libcoraza.so" || return 1
+  {
+    printf 'nginx=%s\nkunci=%s\n' "$CZ_NGX_VER" "$key"
+    printf 'argumen_sha=%s\n' "$(cz_sig_args | sha256sum | cut -c1-16)"
+    printf 'signature=%s\n' "$sig_mod"
+    printf 'libcoraza=adopsi\nkonektor=terpasang\ngo=-\n'
+    printf 'dibangun=%s\n' "$(date '+%Y-%m-%d %H:%M:%S')"
+    printf 'sha256=%s\n' "$(cz_sha "$d/ngx_http_coraza_module.so")"
+    printf 'diadopsi=ya\nuji_muat=lulus\n'
+  } > "$d/MANIFEST"
+  say "cache modul diisi ulang dari modul terpasang di $NGINX_MODDIR (nginx $CZ_NGX_VER)"
+  cz_cache_ok "$key"
 }
 
 do_coraza_cache() {
@@ -1226,6 +1712,71 @@ cz_lua_line() {
   printf '%s' "$l"
 }
 
+# ---- penyesuaian otomatis setelah upgrade nginx (8 Nov 2026) ----
+# Dulu: upgrade nginx di aaPanel (mis. 1.31.7 -> 1.31.8) dengan Coraza termuat = nginx GAGAL start dan semua situs mati sampai guard
+# (timer 5 menit) mencabut WAF; konektor untuk versi baru harus dibangun manual lewat Set Up Coraza.
+
+# Drop-in nginx.service (ExecStartPre nginx-prestart) dari payload; dipastikan saat Coraza dimuat (nginx bisa dipasang setelah plugin).
+cz_dropin_pastikan() {
+  local src d
+  src="$(payload_dir)/systemd/dropin/nginx.service.conf"
+  [ -f "$src" ] && [ -d /run/systemd/system ] && command -v systemctl >/dev/null 2>&1 || return 0
+  systemctl cat nginx.service >/dev/null 2>&1 || return 0
+  d=/etc/systemd/system/nginx.service.d
+  cmp -s "$src" "$d/zysentinel-restart.conf" 2>/dev/null && return 0
+  mkdir -p "$d" && install -m 0644 "$src" "$d/zysentinel-restart.conf" && systemctl daemon-reload >/dev/null 2>&1 \
+    && say "pemeriksaan modul Coraza sebelum nginx start dipasang ($d/zysentinel-restart.conf)"
+  return 0
+}
+
+coraza_sesuai_jadwalkan() {
+  if command -v systemctl >/dev/null 2>&1 && systemctl cat sentinel-coraza-sesuai.service >/dev/null 2>&1 \
+     && systemctl --no-block start sentinel-coraza-sesuai.service >/dev/null 2>&1; then
+    say "penyesuaian konektor Coraza dijadwalkan (sentinel-coraza-sesuai.service)"
+  else
+    setsid -f "$(readlink -f "$0")" coraza-sesuaikan >/dev/null 2>&1 < /dev/null
+    say "penyesuaian konektor Coraza dijalankan di latar"
+  fi
+}
+
+do_nginx_prestart() {
+  # ExecStartPre nginx.service: hanya berpengaruh bila modul Coraza dimuat DAN tidak cocok dengan biner nginx yang akan start.
+  grep -qE "$CZ_LOAD_RE" "$NGINX_CONF" 2>/dev/null || return 0
+  cz_terpasang_cocok && return 0
+  err "modul Coraza tidak cocok dengan nginx yang akan start (${CZ_UJI_GALAT:-uji muat gagal}); WAF dilepas sementara agar nginx tetap start"
+  waf_cabut_semua "nginx di-upgrade: modul Coraza untuk versi lain" tanpa-restart || return 0
+  waf_set coraza_sesuai 1
+  coraza_sesuai_jadwalkan
+  return 0
+}
+
+do_coraza_sesuaikan() {
+  # Compile konektor untuk nginx aktif, uji, muat, lalu pulihkan vhost terlindungi (vhost.*=on di waf.conf). Gagal = WAF tetap dilepas,
+  # situs tetap berjalan; Set Up Coraza di panel dapat mengulang.
+  mkdir -p /www/server/sentinel/run 2>/dev/null
+  exec 8>/www/server/sentinel/run/.coraza-sesuai.lock
+  flock -n 8 || { say "penyesuaian konektor Coraza lain sedang berjalan"; return 0; }
+  [ "$(waf_conf_get coraza_sesuai 0)" = 1 ] || { say "tidak ada penyesuaian konektor Coraza yang tertunda"; return 0; }
+  local i
+  for i in $(seq 1 60); do [ -n "$(cz_master_pid)" ] && break; sleep 1; done
+  [ -n "$(cz_master_pid)" ] || { err "nginx tidak berjalan; penyesuaian ditunda"; return 1; }
+  cz_nginx_info || return 1
+  say "menyesuaikan konektor Coraza dengan nginx $CZ_NGX_VER (setelah upgrade nginx)"
+  if ! do_coraza_build; then
+    err "konektor untuk nginx $CZ_NGX_VER gagal dibangun; WAF tetap dilepas dan situs tetap berjalan (ulangi lewat Set Up Coraza)"
+    return 1
+  fi
+  if ! do_coraza_install; then
+    err "konektor untuk nginx $CZ_NGX_VER gagal dimuat; nginx aktif tidak diubah (ulangi lewat Set Up Coraza)"
+    return 1
+  fi
+  do_apply || true
+  # vhost-on/do_apply hanya menulis snippet; proteksi baru berlaku setelah reload (diuji: nginx -t + uji ruleset sebelum reload)
+  do_reload nginx || err "reload setelah memulihkan vhost terlindungi gagal; worker lama tetap melayani (ulangi reload dari panel)"
+  waf_set coraza_sesuai 0
+  say "selesai: Coraza aktif kembali di nginx $CZ_NGX_VER dan vhost terlindungi dipulihkan"
+}
+
 do_coraza_selftest() {
   # Menjalankan biner nginx ASLI di direktori sementara dan port
   # 127.0.0.1 acak, memuat modul dari cache. nginx produksi tidak
@@ -1259,6 +1810,7 @@ EOF
   cat > "$t/nginx.conf" <<EOF
 load_module $t/ngx_http_coraza_module.so;
 worker_processes 1;
+working_directory /;
 pid $t/nginx.pid;
 error_log $t/logs/error.log notice;
 events { worker_connections 64; }
@@ -1280,12 +1832,12 @@ http {
 }
 EOF
   say "uji terisolasi: nginx $CZ_NGX_VER, modul dari cache, 127.0.0.1:$port"
-  if ! LD_LIBRARY_PATH="$t/lib" "$NGINX_BIN" -p "$t" -c "$t/nginx.conf" -e "$t/logs/startup.log" -t >"$t/logs/t.out" 2>&1; then
+  if ! LD_LIBRARY_PATH="$t/lib" "$NGINX_BIN" -p "$t" -c "$t/nginx.conf" $(cz_elog_args "$t") -t >"$t/logs/t.out" 2>&1; then
     err "nginx -t menolak konfigurasi uji:"; sed 's/^/    /' "$t/logs/t.out" >&2
     rm -rf "$t"; return 1
   fi
   say "nginx -t pada konfigurasi uji: sukses (modul dimuat, signature cocok)"
-  LD_LIBRARY_PATH="$t/lib" "$NGINX_BIN" -p "$t" -c "$t/nginx.conf" -e "$t/logs/startup.log" >"$t/logs/run.out" 2>&1
+  LD_LIBRARY_PATH="$t/lib" "$NGINX_BIN" -p "$t" -c "$t/nginx.conf" $(cz_elog_args "$t") >"$t/logs/run.out" 2>&1
   # tunggu siap; bila master mati (mis. aturan ditolak) tidak perlu menunggu timeout
   local i pid0; pid0="$(cat "$t/nginx.pid" 2>/dev/null)"
   for i in 1 2 3 4 5 6 7 8 9 10; do
@@ -1351,7 +1903,22 @@ cz_port_libre() {
   done
   printf '%s' "$p"
 }
-cz_master_pid() { ps -C nginx -o pid=,args= 2>/dev/null | awk '/master process/ {print $1; exit}'; }
+# Master nginx yang SAH: milik root dan exe = biner nginx terpasang (pidfile lebih dulu, lalu daftar proses). Dulu proses pertama bernama
+# "nginx" dengan argumen "master process" dianggap master: proses tiruan milik akun web bisa memicu restart berulang atau pencabutan WAF
+# ("tanpa worker hidup") di semua situs (evaluasi 30 Okt 2026).
+cz_master_pid() {
+  local p exe nb
+  nb="$(readlink -f "${NGINX_BIN:-/www/server/nginx/sbin/nginx}" 2>/dev/null)"
+  for p in $(cat /www/server/nginx/logs/nginx.pid /run/nginx.pid /var/run/nginx.pid 2>/dev/null; ps -C nginx -o pid=,args= 2>/dev/null | awk '/master process/ {print $1}'); do
+    case "$p" in ''|*[!0-9]*) continue ;; esac
+    [ "$(stat -c %u "/proc/$p" 2>/dev/null)" = 0 ] || continue
+    exe="$(readlink "/proc/$p/exe" 2>/dev/null)"; exe="${exe% (deleted)}"
+    [ -n "$exe" ] || continue
+    [ -z "$nb" ] || [ "$exe" = "$nb" ] || [ "$(readlink -f "$exe" 2>/dev/null)" = "$nb" ] || continue
+    tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null | grep -q 'master process' || continue
+    echo "$p"; return 0
+  done
+}
 cz_workers_hidup() {
   local m; m="$(cz_master_pid)"; [ -n "$m" ] || { echo 0; return; }
   ps -o stat=,args= --ppid "$m" 2>/dev/null | awk '$1 !~ /^Z/ && /nginx: worker/ {n++} END {print n+0}'
@@ -1362,7 +1929,8 @@ cz_nginx_reload_verified() {
   local b a
   "$NGINX_BIN" -t >/dev/null 2>&1 || return 2
   b="$(cz_worker_pids)"
-  if [ -x "$NGINX_INIT" ]; then "$NGINX_INIT" reload >/dev/null 2>&1; else "$NGINX_BIN" -s reload; fi
+  if nginx_cwd_hilang; then nginx_restart_bersih
+  elif [ -x "$NGINX_INIT" ]; then "$NGINX_INIT" reload >/dev/null 2>&1; else "$NGINX_BIN" -s reload; fi
   sleep 5
   a="$(cz_worker_pids)"
   [ "$b" != "$a" ] || return 3
@@ -1371,6 +1939,7 @@ cz_nginx_reload_verified() {
 }
 
 do_coraza_install() {
+  coraza_butuh_aapanel || return 1
   # Memuat modul Coraza ke nginx AKTIF: salin modul + libcoraza, tambahkan
   # load_module di nginx.conf, nginx -t, reload, bukti worker memuat libcoraza.
   # Gagal di langkah mana pun mengembalikan nginx.conf dari backup.
@@ -1396,9 +1965,10 @@ do_coraza_install() {
   for dd in "$(dirname "$WAF_BASE")" "$WAF_BASE" "$CORAZA_DIR"; do
     [ -d "$dd" ] && [ "$(stat -c %A "$dd" | cut -c10)" != "x" ] && chmod o+x "$dd"
   done
-  if id www >/dev/null 2>&1 && command -v runuser >/dev/null 2>&1; then
-    runuser -u www -- test -r "$NGINX_MODDIR/libcoraza.so" \
-      || { err "user www tidak bisa membaca $NGINX_MODDIR/libcoraza.so"; return 1; }
+  local wuser; wuser="$(waf_web_user)"
+  if [ -n "$wuser" ] && command -v runuser >/dev/null 2>&1; then
+    runuser -u "$wuser" -- test -r "$NGINX_MODDIR/libcoraza.so" \
+      || { err "user $wuser tidak bisa membaca $NGINX_MODDIR/libcoraza.so"; return 1; }
   fi
 
   say "[3/5] menambahkan load_module di $conf (backup .bak.<waktu>)"
@@ -1447,6 +2017,8 @@ do_coraza_install() {
     fi
   fi
   zy_ready || do_zyrules_install >/dev/null 2>&1 || true
+  cz_terpasang_cocok >/dev/null 2>&1 || true          # stempel uji muat: pemeriksaan sebelum nginx start menjadi instan
+  cz_dropin_pastikan
   say "modul Coraza aktif di nginx $CZ_NGX_VER. Backup konfigurasi: ${bak:-tidak-ada}"
 }
 
@@ -1479,7 +2051,7 @@ do_rules_check() {
   [ -f "$ZY_MAIN" ] || { err "ruleset belum disusun ($ZY_MAIN)"; return 1; }
   local key mod libver lib t port pid0 i ok blk wu
   key="$(cz_key)"
-  cz_cache_ok "$key" || { err "modul untuk nginx $CZ_NGX_VER tidak ada di cache"; return 1; }
+  cz_cache_ok "$key" || cz_cache_adopt || { err "modul untuk nginx $CZ_NGX_VER tidak ada di cache"; return 1; }
   mod="$CZ_CACHE/modules/$key/ngx_http_coraza_module.so"
   libver="$(cz_mf_get "$CZ_CACHE/modules/$key/MANIFEST" libcoraza)"
   lib="$CZ_CACHE/libcoraza/$libver/lib/libcoraza.so"
@@ -1495,11 +2067,12 @@ do_rules_check() {
     ss -ltnH 2>/dev/null | awk '{print $4}' | grep -q ":$port$" || break
     [ "$tries" -ge 20 ] && break
   done
-  wu=""; id -u www >/dev/null 2>&1 && wu="user www;"
+  wu=""; local wuser; wuser="$(waf_web_user)"; [ -n "$wuser" ] && wu="user $wuser;"
   cat > "$t/nginx.conf" <<EOF
 load_module $t/ngx_http_coraza_module.so;
 $wu
 worker_processes 1;
+working_directory /;
 pid $t/nginx.pid;
 error_log $t/logs/error.log notice;
 events { worker_connections 64; }
@@ -1517,11 +2090,11 @@ http {
   }
 }
 EOF
-  if ! LD_LIBRARY_PATH="$t/lib" "$NGINX_BIN" -p "$t" -c "$t/nginx.conf" -e "$t/logs/startup.log" -t >"$t/logs/t.out" 2>&1; then
+  if ! LD_LIBRARY_PATH="$t/lib" "$NGINX_BIN" -p "$t" -c "$t/nginx.conf" $(cz_elog_args "$t") -t >"$t/logs/t.out" 2>&1; then
     err "ruleset ditolak (nginx -t terisolasi):"; sed 's/^/    /' "$t/logs/t.out" | tail -5 >&2
     rm -rf "$t"; return 1
   fi
-  LD_LIBRARY_PATH="$t/lib" "$NGINX_BIN" -p "$t" -c "$t/nginx.conf" -e "$t/logs/startup.log" >"$t/logs/run.out" 2>&1
+  LD_LIBRARY_PATH="$t/lib" "$NGINX_BIN" -p "$t" -c "$t/nginx.conf" $(cz_elog_args "$t") >"$t/logs/run.out" 2>&1
   pid0="$(cat "$t/nginx.pid" 2>/dev/null)"
   for i in 1 2 3 4 5 6 7 8 9 10; do
     [ "$(cz_http "http://127.0.0.1:$port/")" != "000" ] && break
@@ -1559,7 +2132,7 @@ waf_nginx_dipakai() {
 # Cabut WAF dari nginx dengan aman: snippet vhost milik plugin, lalu load_module dan
 # working_directory yang ditambahkan plugin; uji; reload atau mulai ulang; bila nginx -t
 # tetap gagal (penyebabnya bukan WAF) semuanya dikembalikan. $1 = alasan (untuk log).
-waf_cabut_semua() {
+waf_cabut_semua() {  # $1 = alasan, $2 = tanpa-restart (dari ExecStartPre nginx: nginx sedang akan start)
   local alasan="$1" ts bdir f n=0
   ts="$(date +%Y%m%d%H%M%S)"
   bdir="$(dirname "$ZY_DIR")/backup/guard-$ts"
@@ -1575,21 +2148,33 @@ waf_cabut_semua() {
   if "$NGINX_BIN" -t 2>&1 | grep -q 'test is successful'; then
     waf_set guard_dicabut "$ts"
     say "load_module coraza dicabut dari nginx.conf ($alasan; backup: $NGINX_CONF.bak.$ts)"
+    if [ "${2:-}" = tanpa-restart ]; then
+      say "nginx akan start dengan konfigurasi tanpa WAF (proteksi dipulihkan setelah konektor disesuaikan)"
+      return 0
+    fi
     if [ -n "$(cz_master_pid)" ]; then
       # master hidup tetapi tanpa worker: reload cukup, master membuat worker baru dari config baru
-      if [ -x "$NGINX_INIT" ]; then "$NGINX_INIT" reload >/dev/null 2>&1; else "$NGINX_BIN" -s reload; fi
+      nginx_reload_langsung
       sleep 4
       if [ "$(cz_workers_hidup)" -lt 1 ]; then
         say "worker belum hidup setelah reload, restart nginx"
-        if [ -x "$NGINX_INIT" ]; then "$NGINX_INIT" restart >/dev/null 2>&1; else "$NGINX_BIN" -s stop; sleep 2; (cd / && "$NGINX_BIN"); fi
-        sleep 3
+        if ! nginx_jadwalkan restart; then
+          if [ -x "$NGINX_INIT" ]; then (cd / && "$NGINX_INIT" restart) >/dev/null 2>&1; else "$NGINX_BIN" -s stop; sleep 2; (cd / && "$NGINX_BIN"); fi
+          sleep 3
+        fi
       fi
     else
       say "nginx tidak berjalan, memulai ulang"
-      if [ -x "$NGINX_INIT" ]; then "$NGINX_INIT" start >/dev/null 2>&1; else (cd / && "$NGINX_BIN"); fi
-      sleep 3
+      if ! nginx_jadwalkan start; then
+        if [ -x "$NGINX_INIT" ]; then (cd / && "$NGINX_INIT" start) >/dev/null 2>&1; else (cd / && "$NGINX_BIN"); fi
+        sleep 3
+      fi
     fi
-    [ "$(cz_workers_hidup)" -ge 1 ] && say "nginx melayani kembali ($(cz_workers_hidup) worker hidup)" || err "nginx TIDAK punya worker hidup; periksa manual"
+    if [ "${NGINX_DIJADWALKAN:-0}" = 1 ]; then
+      say "nginx akan melayani kembali setelah layanan ini selesai (job systemd dijadwalkan)"
+    else
+      [ "$(cz_workers_hidup)" -ge 1 ] && say "nginx melayani kembali ($(cz_workers_hidup) worker hidup)" || err "nginx TIDAK punya worker hidup; periksa manual"
+    fi
     return 0
   fi
   # penyebabnya ternyata bukan modul: kembalikan semuanya
@@ -1608,14 +2193,42 @@ waf_cabut_semua() {
 do_guard() {
   grep -qE "$CZ_LOAD_RE" "$NGINX_CONF" 2>/dev/null || return 0
   [ -x "$NGINX_BIN" ] || return 0
-  local out
-  out="$("$NGINX_BIN" -t 2>&1)"
+  local out stempel=/www/server/sentinel/run/nginx-t.ok
+  # nginx -t (memuat Coraza + seluruh ruleset) hanya bila biner, modul, atau konfigurasi nginx berubah sejak tes terakhir yang
+  # lulus: dulu dijalankan tiap 5 menit (288 kali sehari, lonjakan CPU/RAM). Pemeriksaan worker hidup (b) tetap tiap kali.
+  if [ -f "$stempel" ] && [ ! "$NGINX_BIN" -nt "$stempel" ] \
+     && [ -z "$(find "$(dirname "$NGINX_CONF")" "$NGINX_VHOST" /www/server/nginx/modules /www/server/sentinel/waf -newer "$stempel" \( -name '*.conf' -o -name '*.so' \) -print -quit 2>/dev/null)" ]; then
+    out="test is successful (tanpa perubahan sejak tes terakhir)"
+  else
+    out="$("$NGINX_BIN" -t 2>&1)"
+    printf '%s' "$out" | grep -q 'test is successful' && touch "$stempel" 2>/dev/null
+  fi
   if ! printf '%s' "$out" | grep -q 'test is successful'; then
     err "nginx -t GAGAL dengan modul Coraza dimuat ($(printf '%s' "$out" | tail -1 | cut -c1-120)). Mencoba mencabut WAF supaya nginx tetap bisa start/reload."
+    if printf '%s' "$out" | grep -q 'instead of'; then
+      # modul dibangun untuk versi nginx lain (nginx di-upgrade): cabut lalu sesuaikan konektor otomatis
+      waf_cabut_semua "nginx di-upgrade: modul Coraza untuk versi lain" || return $?
+      waf_set coraza_sesuai 1; coraza_sesuai_jadwalkan; return 0
+    fi
     waf_cabut_semua "nginx -t gagal"; return $?
   fi
   if [ -n "$(cz_master_pid)" ] && [ "$(cz_workers_hidup)" -lt 1 ]; then
-    sleep 3
+    # Worker Coraza butuh beberapa detik memuat runtime Go + ruleset saat nginx baru start (boot: BT-Panel menyalakan nginx bersamaan dengan
+    # sentinel-fw.service; restart). Dulu menunggu 3 detik lalu mencabut WAF: WAF tercabut diam-diam setelah reboot (VM aaPanel 10 Nov 2026).
+    local umur up i
+    umur="$(ps -o etimes= -p "$(cz_master_pid)" 2>/dev/null | tr -d ' ')"; up="$(cut -d. -f1 /proc/uptime 2>/dev/null)"
+    if [ "${umur:-0}" -lt 60 ] || [ "${up:-0}" -lt 300 ]; then
+      say "nginx baru start (master ${umur:-?} dtk, uptime ${up:-?} dtk): pemeriksaan worker ditunda ke giliran berikutnya"
+      return 0
+    fi
+    for i in $(seq 1 15); do [ "$(cz_workers_hidup)" -ge 1 ] && break; sleep 1; done
+    # penyebab yang bisa dipulihkan tanpa mencabut WAF: direktori kerja master hilang (worker Coraza gagal getwd)
+    if [ "$(cz_workers_hidup)" -lt 1 ] && nginx_cwd_hilang; then
+      nginx_restart_bersih
+      # restart dijadwalkan lewat systemd (guard di dalam sentinel-fw.service): belum bisa diperiksa sekarang; giliran guard berikutnya memeriksa
+      [ "${NGINX_DIJADWALKAN:-0}" = 1 ] && return 0
+      [ "$(cz_workers_hidup)" -ge 1 ] && { say "worker nginx pulih setelah restart dari / (WAF tetap aktif)"; return 0; }
+    fi
     if [ "$(cz_workers_hidup)" -lt 1 ]; then
       err "master nginx hidup tetapi tidak ada worker hidup: semua situs menggantung. Mencabut WAF."
       waf_cabut_semua "tanpa worker hidup"; return $?
@@ -1634,17 +2247,22 @@ case "${1:-help}" in
   modul-set)   do_modul_set "${2:?modul}" "${3:?on|off}" ;;
   setting-set) do_setting_set "${2:?kunci}" "${3:?nilai}" ;;
   reload)      do_reload "${2:-all}" ;;
+  realip)      do_realip ;;
   coraza-status)   do_coraza_status ;;
   coraza-download) do_coraza_download ;;
   coraza-build)    shift; do_coraza_build "$@" ;;
   coraza-cache)    do_coraza_cache ;;
+  coraza-adopt)    cz_cache_adopt ;;
   coraza-selftest) do_coraza_selftest ;;
   coraza-install)  do_coraza_install ;;
   coraza-uninstall) do_coraza_uninstall ;;
+  modsec-install) do_modsec_install ;;
+  strip-includes) do_strip_includes ;;
   rules)  do_rules ;;
   rule-on)  do_rule_set on "${2:?nama rule}" ;;
   rule-off) do_rule_set off "${2:?nama rule}" ;;
   vhosts) do_vhosts ;;
+  akses-sync) do_akses_sync ;;
   vhost-on)  do_vhost_set "${2:?ws}" "${3:?site}" on ;;
   vhost-off) do_vhost_set "${2:?ws}" "${3:?site}" off ;;
   apply)  do_apply ;;
@@ -1652,6 +2270,8 @@ case "${1:-help}" in
   legacy-remove) do_legacy_remove ;;
   rules-check) do_rules_check ;;
   guard)  do_guard ;;
+  nginx-prestart)   do_nginx_prestart ;;
+  coraza-sesuaikan) do_coraza_sesuaikan ;;
   help|*) cat <<'EOF'
 Usage: sentinel-waf.sh <command>
   engine                 deteksi engine WAF per webserver, CRS, ruleset, modul Coraza
@@ -1668,11 +2288,14 @@ Usage: sentinel-waf.sh <command>
   vhost-off <ws> <site>  lepas perlindungan satu vhost
   apply                  pasang semua keinginan yang tertunda
   reload [ws]            reload web server dengan verifikasi (nginx|apache|openlitespeed|all)
+  realip                 real IP pengunjung di balik proxy/CDN (sentinel-realip.conf per vhost nginx/Apache)
   mode-get               tampilkan mode WAF
   mode-set <m>           setel mode: disable | monitor | block
   legacy-status          adakah peninggalan engine Lua (lua_waf/free_waf)
   rules-check            uji ruleset produksi di nginx terisolasi (sah=200, serangan=403)
   guard                  cabut WAF bila nginx -t gagal karena modul Coraza (dipanggil timer)
+  nginx-prestart         ExecStartPre nginx.service: modul Coraza tidak cocok nginx baru = WAF dilepas sementara, penyesuaian dijadwalkan
+  coraza-sesuaikan       compile + muat konektor untuk nginx aktif lalu pulihkan vhost terlindungi (setelah upgrade nginx)
   legacy-remove          pindahkan daftar, cabut hook Lua (terverifikasi), arsipkan lalu hapus berkas Lua
   coraza-status          status aset Coraza (aset, versi, konektor)
   coraza-download        unduh OWASP CRS + source konektor Coraza
@@ -1680,7 +2303,9 @@ Usage: sentinel-waf.sh <command>
                          compile modul dinamis Coraza sesuai nginx aktif (cache dipakai
                          ulang bila versi dan argumen nginx sama)
   coraza-cache           status cache modul terhadap nginx aktif
+  coraza-adopt           isi ulang cache dari modul Coraza yang sudah terpasang (bila cache hilang)
   coraza-selftest        uji modul di nginx sementara (nginx produksi tidak disentuh)
+  modsec-install         pasang ModSecurity v2 untuk Apache dari repo OS (Debian: libapache2-mod-security2, RHEL: mod_security)
   coraza-install         muat modul ke nginx aktif (uji, load_module, nginx -t, reload)
   coraza-uninstall       cabut load_module coraza dari nginx aktif
 EOF
