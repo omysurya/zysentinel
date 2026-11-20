@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 PT. StudioNet Indonesia Jaya (ZySens).
 # ==============================================================================
 # release_notes.py: release notes WAJIB per versi (fitur, perbaikan, fix bug, cara download, install, update).
 #

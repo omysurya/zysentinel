@@ -21,6 +21,35 @@ RestartMaxDelaySec=60
 LogRateLimitIntervalSec=30s
 LogRateLimitBurst=100
 KillMode=process
+# prioritas di bawah situs pelanggan dan batas memori (daemon Python + pindaian memscan anak)
+Nice=5
+MemoryHigh=192M
+MemoryMax=256M
+
+# Sandbox (14 Nov 2026): membatasi apa yang bisa dilakukan proses ini bila disusupi (tanpa memuat modul kernel, tanpa
+# namespace baru, tanpa mengubah jam/hostname, syscall berbahaya ditolak). Hak root yang dibutuhkan fitur tetap ada.
+NoNewPrivileges=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectClock=true
+ProtectHostname=true
+ProtectControlGroups=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+CapabilityBoundingSet=~CAP_SYS_MODULE CAP_SYS_BOOT CAP_SYS_TIME CAP_WAKE_ALARM CAP_MKNOD CAP_SYS_RAWIO CAP_SYS_PACCT CAP_SYS_TTY_CONFIG CAP_BLOCK_SUSPEND CAP_LEASE CAP_AUDIT_CONTROL CAP_MAC_ADMIN CAP_MAC_OVERRIDE CAP_SYSLOG
+SystemCallFilter=~@cpu-emulation @module @mount @obsolete @raw-io @reboot @swap
+SystemCallErrorNumber=EPERM
+# Membaca /proc semua proses dan /proc/PID/mem (memscan), membunuh proses, proc connector (netlink); hanya menulis
+# /www/server/sentinel. /tmp TIDAK privat: aturan memeriksa berkas di /tmp dan /dev/shm milik host.
+ProtectSystem=full
+ProtectHome=read-only
+ProtectKernelTunables=true
+ReadWritePaths=/www/server/sentinel
+
 StandardOutput=journal
 StandardError=journal
 

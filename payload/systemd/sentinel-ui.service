@@ -1,0 +1,49 @@
+[Unit]
+Description=ZySentinel UI - pintu HTTPS standalone (akun tanpa hak)
+After=network.target sentinel-uid.service
+Wants=sentinel-uid.service
+StartLimitIntervalSec=300
+StartLimitBurst=8
+
+[Service]
+Type=simple
+User=zysui
+Group=zysui
+# Hanya TLS, aset statis, batas laju, dan penerusan ke sentinel-uid. Tidak punya hak root maupun capability.
+ExecStart=/www/server/panel/pyenv/bin/python3 /usr/share/zysentinel-ui/sentinel-ui.py
+Environment=PYTHONDONTWRITEBYTECODE=1
+Environment=ZYS_UI_DIR=/usr/share/zysentinel-ui
+Environment=ZYS_UI_ETC=/etc/zysentinel-ui
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectKernelLogs=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+RemoveIPC=yes
+UMask=0077
+LockPersonality=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+MemoryMax=256M
+TasksMax=256
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

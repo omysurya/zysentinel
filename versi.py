@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 PT. StudioNet Indonesia Jaya (ZySens).
 # ==============================================================================
 # versi.py: SUMBER TUNGGAL versi plugin ZySentinel, diturunkan dari NAMA CABANG git.
 #
@@ -51,7 +53,7 @@ for _r in ("README.md", "payload/README.md"):
 BACKEND = ("../_backend/zyslic/__init__.py", r'^__version__ = "(?P<v>%s)"' % SEMVER)
 # Pemindaian literal liar: berkas teks di _client selain ini tidak boleh memuat versi saat ini secara harfiah.
 LEWATI_DIR = {".git", "tests", "edition", "__pycache__", "coraza-cache", "release-notes"}   # release notes per versi memang menyebut versinya
-LEWATI_AKHIRAN = (".orig", ".rej", ".png", ".jpg", ".ico", ".gz", ".zip", ".srchash", ".hex")
+LEWATI_AKHIRAN = (".orig", ".rej", ".png", ".jpg", ".ico", ".gz", ".zip", ".srchash", ".hex", ".txt", ".log")
 
 
 def gagal(pesan, kode=1):
