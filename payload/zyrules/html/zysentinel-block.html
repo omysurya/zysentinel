@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="id">
+<html lang="{{LANG}}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<title>403 Forbidden - Protected by ZySens</title>
+<title>403 Forbidden - {{TITLE}}</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
 html,body{
@@ -106,9 +106,9 @@ p{
     </svg>
   </div>
   <h1>403 Forbidden</h1>
-  <p>Permintaan Anda diblokir oleh sistem keamanan web server karena terdeteksi anomali atau ancaman.</p>
-  <div class="meta">IP: {{CLIENT_IP}} &bull; ID: {{REQ_ID}}</div>
-  <div class="footer">protected by <span>ZySens</span></div>
+  <p>{{PESAN}}</p>
+  <div class="meta">IP: {{CLIENT_IP}} &bull; ID: {{REQ_ID}} &bull; Ref: {{LIC_REF}}</div>
+  <div class="footer">{{DILINDUNGI}} <span>ZySens</span></div>
 </div>
 </body>
 </html>

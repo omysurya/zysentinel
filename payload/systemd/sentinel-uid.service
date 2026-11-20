@@ -1,0 +1,31 @@
+[Unit]
+Description=ZySentinel UI - penjaga hak (login PAM, sesi, CSRF, allowlist metode)
+After=network.target sentinel.service
+Wants=sentinel.service
+StartLimitIntervalSec=300
+StartLimitBurst=8
+
+[Service]
+Type=simple
+# Berjalan sebagai root karena memanggil metode plugin (firewall, WAF, antivirus). Hanya menerima permintaan lewat socket
+# unix 0660 root:zysui dari sentinel-ui; tidak mendengarkan jaringan.
+ExecStart=/www/server/panel/pyenv/bin/python3 /www/server/sentinel/ui/sentinel-uid.py
+Environment=PYTHONDONTWRITEBYTECODE=1
+RuntimeDirectory=sentinel
+RuntimeDirectoryMode=0755
+RuntimeDirectoryPreserve=yes
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=yes
+PrivateTmp=yes
+# TANPA ProtectHome (15 Nov 2026): UI ini dipakai di DirectAdmin/cPanel/CyberPanel yang docroot situsnya di /home/<akun>. Dulu daftar situs
+# upload-scan/sweeper/antivirus dari UI kosong dan restore karantina ke /home gagal (proses anak mewarisi /home yang disembunyikan).
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+MemoryMax=512M
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

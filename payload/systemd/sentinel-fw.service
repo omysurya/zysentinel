@@ -4,6 +4,11 @@ Documentation=https://github.com/omysurya/zysentinel
 # Aturan firewall harus ada lebih dulu sebelum
 # permintaan masuk supaya tidak ada celah tanpa perlindungan.
 After=network-online.target
+# Firewall host lain lebih dulu: CSF saat start mem-flush dan MENGHAPUS semua chain, termasuk SENTINEL. Dulu keduanya start bersamaan saat
+# boot (uji DirectAdmin nyata 14 Nov 2026): sentinel-fw gagal di tengah pemasangan dan server tanpa firewall ZySentinel sampai timer 5 menit.
+# Urutan ke unit yang tidak terpasang diabaikan systemd.
+After=csf.service lfd.service firewalld.service ufw.service netfilter-persistent.service
+Wants=network-online.target
 Before=nginx.service
 
 [Service]
@@ -25,6 +30,27 @@ ExecStart=/www/server/sentinel/bin/sentinel-fw.sh install
 # "sentinel-fw.sh remove" secara sadar.
 ExecStop=/bin/true
 TimeoutStartSec=120
+
+# Sandbox (14 Nov 2026): membatasi apa yang bisa dilakukan proses ini bila disusupi (tanpa memuat modul kernel, tanpa
+# namespace baru, tanpa mengubah jam/hostname, syscall berbahaya ditolak). Hak root yang dibutuhkan fitur tetap ada.
+NoNewPrivileges=true
+ProtectKernelLogs=true
+ProtectClock=true
+ProtectHostname=true
+ProtectControlGroups=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+LockPersonality=true
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+CapabilityBoundingSet=~CAP_SYS_BOOT CAP_SYS_TIME CAP_WAKE_ALARM CAP_MKNOD CAP_SYS_RAWIO CAP_SYS_PACCT CAP_SYS_TTY_CONFIG CAP_BLOCK_SUSPEND CAP_LEASE CAP_AUDIT_CONTROL CAP_MAC_ADMIN CAP_MAC_OVERRIDE CAP_SYSLOG
+SystemCallFilter=~@cpu-emulation @debug @mount @obsolete @raw-io @reboot @swap
+SystemCallErrorNumber=EPERM
+# Menulis /proc/sys/net/netfilter, konfigurasi web server (standalone: /etc/nginx) dan iptables/ipset bisa memanggil modprobe:
+# sistem berkas dan modul kernel tidak dibatasi. /home hanya dibaca (remote .git/config situs untuk Egress Git).
+ProtectHome=read-only
+PrivateTmp=true
 
 [Install]
 WantedBy=multi-user.target

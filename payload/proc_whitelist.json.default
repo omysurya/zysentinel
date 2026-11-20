@@ -38,9 +38,9 @@
   {
     "id": "wl-ssh-git",
     "name": "SSH Git Remote Client",
-    "type": "basename",
-    "pattern": "ssh",
-    "remark": "Izinkan klien SSH untuk koneksi git over SSH (port 22)",
+    "type": "exe_exact",
+    "pattern": "/usr/bin/ssh",
+    "remark": "Izinkan klien SSH sistem (/usr/bin/ssh) untuk koneksi git over SSH (port 22)",
     "created_at": 1792060000,
     "enabled": true
   },

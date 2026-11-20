@@ -1,0 +1,23 @@
+:root{color-scheme:light dark;--bg:#f8fafc;--fg:#0f172a;--card:#ffffff;--surf2:#f1f5f9;--line:#e2e8f0;--acc:#0284c7;--on-acc:#ffffff;--sub:#475569;--err:#b42318}
+@media (prefers-color-scheme:dark){:root{--bg:#0b0f19;--fg:#f8fafc;--card:#111827;--surf2:#162032;--line:#1f293d;--acc:#38bdf8;--on-acc:#04121f;--sub:#94a3b8;--err:#ff8a80}}
+html,body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.zys-login{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:16px}
+.zys-foot{margin-top:18px;font-size:12px;color:var(--sub);text-align:center}
+.zys-login[hidden],#zys-app[hidden],#zys-otp-row[hidden],.zys-err[hidden]{display:none}
+#zys-login-form{width:100%;max-width:360px;background:var(--card);border:1px solid var(--line);border-radius:10px;padding:24px;box-sizing:border-box}
+#zys-login-form h1{margin:0 0 4px;font-size:20px}
+.lg-head{text-align:center;margin-bottom:20px}
+.lg-logo{width:52px;height:52px;border-radius:12px;display:inline-flex;align-items:center;justify-content:center;background:var(--surf2);border:1px solid var(--line);margin-bottom:12px}
+.zys-sub{margin:4px 0 0;color:var(--sub)}
+#zys-login-form label{display:block;margin:12px 0 4px;font-weight:600}
+#zys-login-form input{width:100%;box-sizing:border-box;padding:9px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);font:inherit}
+#zys-login-form button{width:100%;margin-top:18px;padding:10px;border:0;border-radius:6px;background:var(--acc);color:var(--on-acc);font:inherit;font-weight:600;cursor:pointer}
+#zys-login-form button[disabled]{opacity:.6;cursor:wait}
+.zys-err{color:var(--err);margin:12px 0 0}
+/* Mode standalone: dasbor adalah halaman utama, bukan dialog di dalam panel. Tidak ada kontrol penutup (silang, latar belakang). */
+body[data-mode="app"] .sn-mclose{display:none !important}
+body[data-mode="app"] #snBack{pointer-events:none}
+.zys-logout{margin-left:6px;cursor:pointer;font-weight:600;display:inline-flex;align-items:center;gap:6px}
+.zys-logout .zys-ico{flex:0 0 auto}
+.zys-logout:hover{background:#ef4444 !important;border-color:#ef4444 !important;color:#fff !important}
+.zys-logout-float{position:fixed;top:10px;right:14px;z-index:9500;padding:6px 12px;border-radius:6px;border:1px solid var(--line);background:var(--card);color:var(--fg)}

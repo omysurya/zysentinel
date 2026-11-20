@@ -1,4 +1,6 @@
 #!/bin/bash
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2026 PT. StudioNet Indonesia Jaya (ZySens).
 # ==============================================================================
 # bump-version.sh: pembungkus kompatibilitas untuk versi.py (sumber tunggal versi, diturunkan dari nama cabang).
 #

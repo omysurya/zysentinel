@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>ZySentinel</title>
+<link rel="icon" href="/favicon.ico">
+<link rel="stylesheet" href="/assets/app.css">
+<link rel="stylesheet" href="/assets/layer/theme/default/layer.css">
+<link rel="stylesheet" href="/assets/layui/layui-icon.css">
+<script src="/assets/jquery.min.js"></script>
+<script src="/assets/layer/layer.js"></script>
+<script src="/assets/shim.js"></script>
+</head>
+<body data-mode="<!--ZYS:MODE-->" data-licensed="<!--ZYS:LICENSED-->">
+<input type="hidden" id="request_token_head" token="<!--ZYS:CSRF-->">
+<main id="zys-login" class="zys-login" hidden>
+  <form id="zys-login-form" autocomplete="on" novalidate>
+    <div class="lg-head">
+      <div class="lg-logo"><!-- logo ZySens yang sama dengan portal lisensi (inline SVG, tanpa permintaan jaringan) -->
+        <svg viewBox="0 0 32 32" width="30" height="30" fill="none" role="img" aria-label="ZySens"><rect width="32" height="32" rx="8" fill="#0f172a"/><path d="M16 4L6 8.5V15C6 21.5 10.3 27.5 16 29C21.7 27.5 26 21.5 26 15V8.5L16 4Z" fill="#1e293b" stroke="#38bdf8" stroke-width="1.8" stroke-linejoin="round"/><path d="M11 14H21L12.5 22H21" stroke="#38bdf8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      </div>
+      <h1>ZySentinel</h1>
+      <p class="zys-sub" data-en="Sign in with your Account" data-id="Masuk dengan akun Anda">Sign in with your Account</p>
+    </div>
+    <label for="zys-user" data-en="Username" data-id="Nama pengguna">Username</label>
+    <input id="zys-user" name="username" type="text" autocomplete="username" maxlength="64" required autofocus>
+    <label for="zys-pass" data-en="Password" data-id="Kata sandi">Password</label>
+    <input id="zys-pass" name="password" type="password" autocomplete="current-password" maxlength="512" required>
+    <div id="zys-otp-row" hidden>
+      <label for="zys-otp" data-en="Authenticator code" data-id="Kode autentikator">Authenticator code</label>
+      <input id="zys-otp" name="otp" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}">
+    </div>
+    <button type="submit" id="zys-submit" data-en="Sign in" data-id="Masuk">Sign in</button>
+    <p id="zys-err" class="zys-err" role="alert" hidden></p>
+  </form>
+  <footer class="zys-foot">Copyright &copy; 2026 ZySens Labs</footer>
+</main>
+<div id="zys-app" hidden><!--ZYS:APP--></div>
+<script src="/assets/login.js"></script>
+</body>
+</html>
