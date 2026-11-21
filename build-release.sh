@@ -85,6 +85,8 @@ rsync -rltD --exclude='.git' \
             --exclude='CONTRIBUTING.md' \
             --exclude='edition' \
             --exclude='/build' \
+            --exclude='/engine' \
+            --exclude='/api' \
             --exclude='tests' \
             "$SCRIPT_DIR/" "$STAGE_DIR/sentinel/"
 

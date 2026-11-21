@@ -21,6 +21,7 @@
 # Uji: tests/versi_test.sh.
 # ==============================================================================
 import datetime
+import hashlib
 import json
 import os
 import re
@@ -39,6 +40,9 @@ DAFTAR = [
     ("payload/sentinel_license.py", r'^VERSION = "(?P<v>%s)"' % SEMVER, 1),
     ("payload/guardd.c", r'^#define VERSION "v(?P<v>%s)"' % SEMVER, 1),
     (".github/workflows/release.yml", r"default: 'v(?P<v>%s)'" % SEMVER, 1),
+    # refactor core client (docs/refactor): versi workspace Cargo; Cargo.lock memuat versi crate sendiri (cargo --locked gagal bila basi)
+    ("engine/Cargo.toml", r'^version = "(?P<v>%s)"' % SEMVER, 1),
+    ("engine/Cargo.lock", r'^name = "zysens-[a-z-]+"\nversion = "(?P<v>%s)"' % SEMVER, 0),
 ]
 for _h in ("index.html", "payload/index.html"):
     DAFTAR += [
@@ -52,8 +56,8 @@ for _r in ("README.md", "payload/README.md"):
     DAFTAR.append((_r, r"(?<![\d.])(?P<v>%s)(?![\d])" % SEMVER, 0))  # README: SEMUA X.Y.Z = versi plugin
 BACKEND = ("../_backend/zyslic/__init__.py", r'^__version__ = "(?P<v>%s)"' % SEMVER)
 # Pemindaian literal liar: berkas teks di _client selain ini tidak boleh memuat versi saat ini secara harfiah.
-LEWATI_DIR = {".git", "tests", "edition", "__pycache__", "coraza-cache", "release-notes"}   # release notes per versi memang menyebut versinya
-LEWATI_AKHIRAN = (".orig", ".rej", ".png", ".jpg", ".ico", ".gz", ".zip", ".srchash", ".hex", ".txt", ".log")
+LEWATI_DIR = {".git", "tests", "edition", "__pycache__", "coraza-cache", "release-notes", "vendor", "target"}   # release notes per versi memang menyebut versinya
+LEWATI_AKHIRAN = (".orig", ".rej", ".png", ".jpg", ".ico", ".gz", ".zip", ".srchash", ".hex", ".txt", ".log", ".lock", ".sum")   # .lock/.sum: Cargo.lock dan go.sum memuat versi dependensi pihak ketiga
 
 
 def gagal(pesan, kode=1):
@@ -214,7 +218,12 @@ def terapkan(baru, dry, be, paksa):
         return
     periksa(diam=False)
     if "payload/guardd.c" in ubah:
-        print("  catatan: guardd.c berubah; build-release.sh menyusun ulang payload/guardd dan memperbarui guardd.srchash")
+        # guardd.srchash = sha256 sumber guardd.c (sama dengan build-release.sh); dulu terlewat sehingga uji audit_20261028/29 gagal setelah bump versi.
+        with open(os.path.join(HERE, "payload", "guardd.c"), "rb") as f:
+            digest = hashlib.sha256(f.read()).hexdigest()
+        with open(os.path.join(HERE, "payload", "guardd.srchash"), "w", encoding="utf-8") as f:
+            f.write(digest + "\n")
+        print("  payload/guardd.srchash diperbarui (guardd.c berubah); build-release.sh tetap menyusun ulang payload/guardd")
 
 
 def main(argv):

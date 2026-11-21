@@ -20,7 +20,7 @@ CHANNEL = "free"
 EDITION = "free"
 BASE = os.environ.get("ZYS_LICENSE_BASE", "/www/server/sentinel")
 SERVER = os.environ.get("ZYS_LICENSE_SERVER", "https://sec.zysens.com")
-VERSION = "2.0.2"
+VERSION = "2.0.3"
 PRO_RELEASES = "https://github.com/omysurya/zysentinel/releases"
 
 FEATURES = ["enforce", "learn", "geo_ban", "threat_sync", "waf_full", "waf_premium", "upload_scan", "upload_gate", "av_scheduled", "av_engines", "sweeper", "sweeper_auto", "proc_enforce", "egress", "integ_web", "notify", "notify_multi", "selfheal", "ports_unlimited", "fw_advanced", "thresholds", "fw_global", "threat_feed", "memscan", "recon_guard", "cve_feed", "cve_vpatch", "platform_standalone", "platform_panels", "event_feed", "edr_anomaly", "vhosts", "review_queue", "origin", "cve_advisor", "ports_ext", "av_crypto_judol", "fw_rules", "attack_dialogs"]

@@ -64,7 +64,7 @@
 #include <sqlite3.h>
 
 
-#define VERSION "v2.0.2"
+#define VERSION "v2.0.3"
 
 /* ------------------------------------------------------------------ *
  * Batas keras. Semua angka di sini adalah pagu memori/CPU, bukan saran.

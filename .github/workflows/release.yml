@@ -9,7 +9,7 @@ on:
       version:
         description: 'Release version (e.g. v1.2.3)'
         required: false
-        default: 'v2.0.2'
+        default: 'v2.0.3'
 
 permissions:
   contents: write
